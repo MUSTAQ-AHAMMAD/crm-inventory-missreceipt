@@ -12,9 +12,9 @@ import FileDropzone from '../components/common/FileDropzone'
 import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 
-// Required CSV columns for inventory uploads
+// Required CSV columns for inventory uploads (OrganizationName is a separate form field)
 const REQUIRED_COLUMNS = [
-  'OrganizationName', 'TransactionTypeName', 'ItemNumber',
+  'TransactionTypeName', 'ItemNumber',
   'SubinventoryCode', 'TransactionDate', 'TransactionQuantity',
   'TransactionReference', 'TransactionUnitOfMeasure',
 ]
@@ -22,6 +22,7 @@ const REQUIRED_COLUMNS = [
 export default function InventoryPage() {
   const queryClient = useQueryClient()
   const [file, setFile] = useState(null)
+  const [organizationName, setOrganizationName] = useState('')
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
@@ -34,6 +35,7 @@ export default function InventoryPage() {
   })
 
   const handleUpload = async () => {
+    if (!organizationName.trim()) { setError('Please enter an Organization Name.'); return }
     if (!file) { setError('Please select a CSV file.'); return }
     setError('')
     setResult(null)
@@ -42,6 +44,7 @@ export default function InventoryPage() {
 
     const formData = new FormData()
     formData.append('file', file)
+    formData.append('organizationName', organizationName.trim())
 
     try {
       const res = await api.post('/inventory/bulk-upload', formData, {
@@ -80,6 +83,20 @@ export default function InventoryPage() {
       <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
         <h2 className="font-semibold text-gray-700">Upload CSV File</h2>
 
+        <div>
+          <label htmlFor="organizationName" className="block text-sm font-medium text-gray-700 mb-1">
+            Organization Name
+          </label>
+          <input
+            id="organizationName"
+            type="text"
+            value={organizationName}
+            onChange={(e) => setOrganizationName(e.target.value)}
+            placeholder="e.g. Vision Operations"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+          />
+        </div>
+
         <FileDropzone onFile={setFile} label="inventory CSV" />
 
         {/* Column mapping reference */}
@@ -106,7 +123,7 @@ export default function InventoryPage() {
 
         <button
           onClick={handleUpload}
-          disabled={uploading || !file}
+          disabled={uploading || !file || !organizationName.trim()}
           className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center gap-2"
         >
           {uploading ? <Spinner size="sm" /> : '📤'}
