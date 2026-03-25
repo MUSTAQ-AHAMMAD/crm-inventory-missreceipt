@@ -7,6 +7,9 @@ const { parse } = require('csv-parse/sync');
 const axios = require('axios');
 const prisma = require('../services/prisma');
 
+// Prefix used to tag validation failure messages so retry logic can identify them
+const VALIDATION_ERROR_PREFIX = 'Validation: ';
+
 // Required CSV column names mapped to Oracle REST API fields
 // OrganizationName is now provided via a form field, not the CSV
 const REQUIRED_FIELDS = [
@@ -142,15 +145,20 @@ function mapRowToPayload(row, organizationName) {
   // Default TransactionUnitOfMeasure to "Each" when not provided
   const uom = row.TransactionUnitOfMeasure?.trim() || 'Each';
 
+  // TransactionQuantity is already validated (non-NaN, non-zero) in validateRow
+  const qty = parseFloat(row.TransactionQuantity);
+
   return {
     OrganizationName: organizationName,
     TransactionTypeName: row.TransactionTypeName?.trim(),
     ItemNumber: row.ItemNumber?.trim(),
     SubinventoryCode: subinventory,
     TransactionDate: txDate,
-    TransactionQuantity: String(row.TransactionQuantity).trim(),
+    TransactionQuantity: String(isNaN(qty) ? 0 : qty),
     TransactionReference: cleanReference(row.TransactionReference),
     TransactionUnitOfMeasure: uom,
+    // Fixed fields required by the Oracle inventoryStagedTransactions REST API.
+    // Values match the working Python reference script provided by the client.
     SourceHeaderId: '1',
     SourceLineId: '0',
     TransactionMode: '1',
@@ -223,7 +231,7 @@ async function bulkUpload(req, res, next) {
           uploadId: upload.id,
           rowNumber,
           rawData: JSON.stringify(row), // keep the raw row for validation failures (debugging)
-          errorMessage: `Validation: ${validationError}`,
+          errorMessage: `${VALIDATION_ERROR_PREFIX}${validationError}`,
         });
         continue;
       }
@@ -386,7 +394,7 @@ async function retryUpload(req, res, next) {
       const rawDataObj = (() => { try { return JSON.parse(failure.rawData); } catch { return failure.rawData; } })();
 
       // Skip validation failures (they don't have the Oracle payload fields)
-      if (failure.errorMessage.startsWith('Validation:')) {
+      if (failure.errorMessage.startsWith(VALIDATION_ERROR_PREFIX)) {
         retryFail++;
         stillFailing.push({ ...failure, errorMessage: failure.errorMessage });
         continue;
