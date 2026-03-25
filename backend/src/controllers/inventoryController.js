@@ -19,6 +19,49 @@ const REQUIRED_FIELDS = [
   'TransactionUnitOfMeasure',
 ];
 
+// Maps alternative CSV column headers (lowercase) to the canonical field names.
+// This allows users to upload CSVs exported from other systems (e.g. Odoo) that
+// use different column naming conventions.
+const COLUMN_ALIASES = {
+  'order lines/product/barcode': 'ItemNumber',
+  'barcode': 'ItemNumber',
+  'item number': 'ItemNumber',
+  'product barcode': 'ItemNumber',
+  'transaction type name': 'TransactionTypeName',
+  'transaction type': 'TransactionTypeName',
+  'subinventory code': 'SubinventoryCode',
+  'subinventory': 'SubinventoryCode',
+  'transaction date': 'TransactionDate',
+  'transaction quantity': 'TransactionQuantity',
+  'transaction reference': 'TransactionReference',
+  'transaction unit of measure': 'TransactionUnitOfMeasure',
+  'unit of measure': 'TransactionUnitOfMeasure',
+  'uom': 'TransactionUnitOfMeasure',
+};
+
+/**
+ * Normalizes a single parsed CSV row by mapping alternative column names
+ * to the canonical field names used by the rest of the pipeline.
+ * When a canonical field already exists (e.g. the CSV already has an
+ * "ItemNumber" column), it takes priority over any alias.
+ * The original row is not mutated; a new object is returned.
+ */
+function normalizeRow(row) {
+  const normalized = {};
+  for (const [key, value] of Object.entries(row)) {
+    const lowerKey = key.trim().toLowerCase();
+    const canonical = COLUMN_ALIASES[lowerKey];
+    if (canonical && !(canonical in normalized)) {
+      normalized[canonical] = value;
+    }
+    // Always keep the original key so no data is lost
+    if (!(key in normalized)) {
+      normalized[key] = value;
+    }
+  }
+  return normalized;
+}
+
 /**
  * Validates a parsed CSV row and returns an error message if invalid.
  * Returns null when the row is valid.
@@ -128,6 +171,11 @@ async function bulkUpload(req, res, next) {
     const oracleAuth = Buffer.from(
       `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
     ).toString('base64');
+
+    // Normalize column names so alternative headers are accepted
+    for (let i = 0; i < records.length; i++) {
+      records[i] = normalizeRow(records[i]);
+    }
 
     // Process each CSV row
     for (let i = 0; i < records.length; i++) {

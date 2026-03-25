@@ -107,6 +107,9 @@ export default function InventoryPage() {
               <span key={col} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-mono">{col}</span>
             ))}
           </div>
+          <p className="text-xs text-blue-600 mt-2">
+            Alternative column names are also accepted (e.g. <span className="font-mono">Order Lines/Product/Barcode</span> for <span className="font-mono">ItemNumber</span>).
+          </p>
         </div>
 
         <ErrorAlert message={error} onDismiss={() => setError('')} />
