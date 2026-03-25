@@ -341,11 +341,13 @@ async function bulkUpload(req, res, next) {
 
     // Process rows in the background (fire and forget)
     processUploadRows(upload, records, organizationName).catch((err) => {
-      console.error(`[Inventory] Upload #${upload.id} BACKGROUND ERROR: ${err.message}`);
+      console.error(`[Inventory] Upload #${upload.id} BACKGROUND ERROR:`, err);
       prisma.inventoryUpload.update({
         where: { id: upload.id },
         data: { status: 'FAILED' },
-      }).catch(() => {});
+      }).catch((dbErr) => {
+        console.error(`[Inventory] Upload #${upload.id} failed to update status after background error:`, dbErr);
+      });
     });
   } catch (err) {
     next(err);
