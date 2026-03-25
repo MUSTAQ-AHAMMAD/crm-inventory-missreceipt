@@ -20,6 +20,8 @@ const {
   retryUpload,
   downloadTemplate,
   getUploadProgress,
+  getUploadDetail,
+  getSuccessRecords,
 } = require('../controllers/inventoryController');
 
 const router = express.Router();
@@ -27,7 +29,7 @@ const router = express.Router();
 // Store uploaded files in memory (no temporary disk files)
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB max
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50 MB max (supports 100K+ row CSVs)
   fileFilter: (_req, file, cb) => {
     if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
       cb(null, true);
@@ -122,6 +124,63 @@ router.get('/uploads', listUploads);
  *         description: Upload progress with totalRecords, successCount, failureCount, status
  */
 router.get('/uploads/:id/progress', getUploadProgress);
+
+/**
+ * @swagger
+ * /inventory/uploads/{id}/detail:
+ *   get:
+ *     tags: [Inventory]
+ *     summary: Get full upload details with success and failure records
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [all, success, failure]
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Upload details with success and failure records
+ */
+router.get('/uploads/:id/detail', getUploadDetail);
+
+/**
+ * @swagger
+ * /inventory/uploads/{id}/successes:
+ *   get:
+ *     tags: [Inventory]
+ *     summary: Get success records for a specific upload
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Paginated success records
+ */
+router.get('/uploads/:id/successes', getSuccessRecords);
 
 /**
  * @swagger

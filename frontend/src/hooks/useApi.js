@@ -18,7 +18,8 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// Response interceptor – redirect to login on 401
+// Response interceptor – redirect to login on 401 (unauthorized).
+// 429 (rate limited) is NOT treated as an auth failure.
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -26,6 +27,7 @@ api.interceptors.response.use(
       localStorage.removeItem('crm_token')
       window.location.href = '/login'
     }
+    // Let 429 errors propagate to React Query for automatic retry
     return Promise.reject(error)
   }
 )

@@ -5,11 +5,12 @@
 
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import api from '../hooks/useApi'
 import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 
-const TABS = ['Dashboard', 'Failures', 'Activity', 'Export']
+const TABS = ['Dashboard', 'Upload History', 'Failures', 'Activity', 'Export']
 
 export default function ReportsPage() {
   const [tab, setTab] = useState('Dashboard')
@@ -80,6 +81,7 @@ export default function ReportsPage() {
 
       {/* Tab content */}
       {tab === 'Dashboard' && <DashboardTab />}
+      {tab === 'Upload History' && <UploadHistoryTab filters={filters} />}
       {tab === 'Failures' && <FailuresTab filters={filters} />}
       {tab === 'Activity' && <ActivityTab filters={filters} />}
       {tab === 'Export' && <ExportTab filters={filters} />}
@@ -113,6 +115,126 @@ function DashboardTab() {
         ))}
       </div>
     </div>
+  )
+}
+
+function UploadHistoryTab({ filters }) {
+  const [page, setPage] = useState(1)
+  const limit = 20
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['uploadHistory', filters, page],
+    queryFn: () => api.get('/inventory/uploads', { params: { page, limit } }).then((r) => r.data),
+  })
+
+  if (isLoading) return <Spinner className="py-12" />
+  if (error) return <ErrorAlert message="Failed to load upload history." />
+
+  const uploads = data?.uploads || []
+  const total = data?.total || 0
+  const totalPages = Math.ceil(total / limit) || 1
+
+  return (
+    <div className="bg-white rounded-xl shadow-sm p-6">
+      <h2 className="font-semibold text-gray-700 mb-4">Upload History ({total} uploads)</h2>
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-sm">
+          <thead>
+            <tr className="bg-gray-50 text-gray-500 text-xs uppercase">
+              <th className="px-4 py-2 text-left">ID</th>
+              <th className="px-4 py-2 text-left">CSV File</th>
+              <th className="px-4 py-2 text-left">Organization</th>
+              <th className="px-4 py-2 text-left">Uploaded By</th>
+              <th className="px-4 py-2 text-left">Total</th>
+              <th className="px-4 py-2 text-left">Success</th>
+              <th className="px-4 py-2 text-left">Failed</th>
+              <th className="px-4 py-2 text-left">Success Rate</th>
+              <th className="px-4 py-2 text-left">Status</th>
+              <th className="px-4 py-2 text-left">Date</th>
+              <th className="px-4 py-2 text-left">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {uploads.length === 0 && (
+              <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">No uploads found</td></tr>
+            )}
+            {uploads.map((u) => {
+              const rate = u.totalRecords > 0 ? Math.round((u.successCount / u.totalRecords) * 100) : 0
+              return (
+                <tr key={u.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-3 text-gray-500">#{u.id}</td>
+                  <td className="px-4 py-3 font-mono text-xs text-gray-700">{u.filename}</td>
+                  <td className="px-4 py-3 text-xs text-gray-600">{u.organizationName || '—'}</td>
+                  <td className="px-4 py-3 text-xs text-gray-600">{u.user?.email || '—'}</td>
+                  <td className="px-4 py-3">{u.totalRecords}</td>
+                  <td className="px-4 py-3 text-green-600 font-medium">{u.successCount}</td>
+                  <td className="px-4 py-3 text-red-600 font-medium">{u.failureCount}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-16 bg-gray-100 rounded-full h-1.5">
+                        <div
+                          className="h-1.5 rounded-full bg-green-500"
+                          style={{ width: `${rate}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-gray-500">{rate}%</span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <UploadStatusBadge status={u.status} />
+                  </td>
+                  <td className="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">
+                    {new Date(u.createdAt).toLocaleString()}
+                  </td>
+                  <td className="px-4 py-3">
+                    <Link to={`/uploads/${u.id}`} className="text-blue-600 hover:underline text-xs">
+                      View details
+                    </Link>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
+          <p className="text-xs text-gray-500">Page {page} of {totalPages}</p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page <= 1}
+              className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40"
+            >
+              ← Previous
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages}
+              className="px-3 py-1 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40"
+            >
+              Next →
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function UploadStatusBadge({ status }) {
+  const map = {
+    COMPLETED: 'bg-green-100 text-green-700',
+    FAILED: 'bg-red-100 text-red-700',
+    PARTIAL: 'bg-yellow-100 text-yellow-700',
+    PROCESSING: 'bg-blue-100 text-blue-700',
+    PENDING: 'bg-gray-100 text-gray-600',
+  }
+  return (
+    <span className={`px-2 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-gray-100 text-gray-600'}`}>
+      {status}
+    </span>
   )
 }
 
