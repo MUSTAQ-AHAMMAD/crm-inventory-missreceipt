@@ -34,6 +34,23 @@ const csvUpload = multer({
   },
 });
 
+// ── Public routes (no authentication required) ──────────────────────────
+
+/**
+ * @swagger
+ * /misc-receipt/template:
+ *   get:
+ *     tags: [MiscReceipt]
+ *     summary: Download the CSV template for misc receipt uploads
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: CSV file download
+ */
+router.get('/template', downloadTemplate);
+
+// ── Protected routes (JWT auth + activity logging) ──────────────────────
+
 router.use(authenticate, activityLogger);
 
 /**
@@ -109,18 +126,5 @@ router.get('/uploads', listUploads);
  *         description: Upload details with XML payload and failures
  */
 router.get('/uploads/:id', getUpload);
-
-/**
- * @swagger
- * /misc-receipt/template:
- *   get:
- *     tags: [MiscReceipt]
- *     summary: Download the CSV template for misc receipt uploads
- *     security: []
- *     responses:
- *       200:
- *         description: CSV file download
- */
-router.get('/template', downloadTemplate);
 
 module.exports = router;

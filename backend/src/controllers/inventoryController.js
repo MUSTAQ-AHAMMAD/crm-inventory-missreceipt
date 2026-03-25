@@ -192,6 +192,7 @@ async function bulkUpload(req, res, next) {
           rawData: JSON.stringify(row), // SQLite stores JSON as a string
           errorMessage: `Validation: ${validationError}`,
         });
+        console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (validation): ${validationError} | Item: ${row.ItemNumber || 'N/A'}`);
         continue;
       }
 
@@ -200,7 +201,7 @@ async function bulkUpload(req, res, next) {
 
       try {
         // Send to Oracle REST API
-        await axios.post(process.env.ORACLE_INVENTORY_API_URL, payload, {
+        const apiResponse = await axios.post(process.env.ORACLE_INVENTORY_API_URL, payload, {
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Basic ${oracleAuth}`,
@@ -208,6 +209,7 @@ async function bulkUpload(req, res, next) {
           timeout: 30000,
         });
         successCount++;
+        console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} SUCCESS | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status}`);
       } catch (apiErr) {
         failureCount++;
         const errMsg =
@@ -221,6 +223,7 @@ async function bulkUpload(req, res, next) {
           rawData: JSON.stringify(row), // SQLite stores JSON as a string
           errorMessage: errMsg,
         });
+        console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (API): ${errMsg} | Item: ${payload.ItemNumber} | HTTP ${apiErr.response?.status || 'N/A'}`);
       }
     }
 
@@ -238,6 +241,8 @@ async function bulkUpload(req, res, next) {
         status: failureCount === 0 ? 'COMPLETED' : successCount === 0 ? 'FAILED' : 'PARTIAL',
       },
     });
+
+    console.log(`[Inventory] Upload #${upload.id} COMPLETE | Total: ${records.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${updatedUpload.status}`);
 
     return res.json({
       uploadId: updatedUpload.id,
@@ -350,7 +355,7 @@ async function retryUpload(req, res, next) {
       // rawData is stored as a JSON string in SQLite – parse it back to an object
       const rawDataObj = (() => { try { return JSON.parse(failure.rawData); } catch { return failure.rawData; } })();
       try {
-        await axios.post(process.env.ORACLE_INVENTORY_API_URL, rawDataObj, {
+        const apiResponse = await axios.post(process.env.ORACLE_INVENTORY_API_URL, rawDataObj, {
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Basic ${oracleAuth}`,
@@ -360,6 +365,7 @@ async function retryUpload(req, res, next) {
         // Remove the failure record on success
         await prisma.inventoryFailureRecord.delete({ where: { id: failure.id } });
         retrySuccess++;
+        console.log(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} SUCCESS | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiResponse.status}`);
       } catch (apiErr) {
         retryFail++;
         const errMsg =
@@ -368,6 +374,7 @@ async function retryUpload(req, res, next) {
           apiErr.message ||
           'Oracle API error';
         stillFailing.push({ ...failure, errorMessage: errMsg });
+        console.error(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED: ${errMsg} | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'}`);
       }
     }
 
@@ -380,6 +387,8 @@ async function retryUpload(req, res, next) {
         status: retryFail === 0 ? 'COMPLETED' : 'PARTIAL',
       },
     });
+
+    console.log(`[Inventory Retry] Upload #${uploadId} COMPLETE | Retried: ${failures.length} | Success: ${retrySuccess} | Still failing: ${retryFail}`);
 
     return res.json({ retrySuccess, retryFail, stillFailing });
   } catch (err) {
