@@ -8,8 +8,8 @@ const axios = require('axios');
 const prisma = require('../services/prisma');
 
 // Required CSV column names mapped to Oracle REST API fields
+// OrganizationName is now provided via a form field, not the CSV
 const REQUIRED_FIELDS = [
-  'OrganizationName',
   'TransactionTypeName',
   'ItemNumber',
   'SubinventoryCode',
@@ -55,8 +55,10 @@ function extractBranchFromRef(ref) {
 
 /**
  * Maps a CSV row to the Oracle REST API payload format.
+ * @param {object} row – parsed CSV row
+ * @param {string} organizationName – provided via the upload form field
  */
-function mapRowToPayload(row) {
+function mapRowToPayload(row, organizationName) {
   // If SubinventoryCode is empty, try to extract it from TransactionReference
   let subinventory = row.SubinventoryCode?.trim();
   if (!subinventory && row.TransactionReference) {
@@ -70,7 +72,7 @@ function mapRowToPayload(row) {
   }
 
   return {
-    OrganizationName: row.OrganizationName?.trim(),
+    OrganizationName: organizationName,
     TransactionTypeName: row.TransactionTypeName?.trim(),
     ItemNumber: row.ItemNumber?.trim(),
     SubinventoryCode: subinventory,
@@ -90,6 +92,11 @@ async function bulkUpload(req, res, next) {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'CSV file is required.' });
+    }
+
+    const organizationName = req.body.organizationName?.trim();
+    if (!organizationName) {
+      return res.status(400).json({ error: 'Organization name is required.' });
     }
 
     // Parse the CSV file buffer
@@ -140,8 +147,8 @@ async function bulkUpload(req, res, next) {
         continue;
       }
 
-      // Map CSV columns to Oracle API payload
-      const payload = mapRowToPayload(row);
+      // Map CSV columns to Oracle API payload (OrganizationName from form field)
+      const payload = mapRowToPayload(row, organizationName);
 
       try {
         // Send to Oracle REST API
@@ -338,7 +345,7 @@ async function retryUpload(req, res, next) {
  */
 function downloadTemplate(_req, res) {
   const header = REQUIRED_FIELDS.join(',');
-  const sample = 'Vision Operations,Vend RMA,AS54888,AZIZMALL,2024-01-15,10,REF001,Ea';
+  const sample = 'Vend RMA,AS54888,AZIZMALL,2024-01-15,10,REF001,Ea';
   const csv = `${header}\n${sample}\n`;
 
   res.setHeader('Content-Type', 'text/csv');

@@ -51,10 +51,16 @@ router.use(authenticate, activityLogger);
  *         multipart/form-data:
  *           schema:
  *             type: object
+ *             required:
+ *               - file
+ *               - organizationName
  *             properties:
  *               file:
  *                 type: string
  *                 format: binary
+ *               organizationName:
+ *                 type: string
+ *                 description: Organization name applied to all rows in the upload
  *     responses:
  *       200:
  *         description: Upload summary with success/failure counts
