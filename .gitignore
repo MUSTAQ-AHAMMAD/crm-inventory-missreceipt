@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# SQLite database file (auto-generated, contains user data)
+# Prisma resolves file:./crm.db relative to backend/prisma/ → backend/prisma/crm.db
+backend/prisma/crm.db
+backend/prisma/crm.db-shm
+backend/prisma/crm.db-wal
+
+# Build artifacts
+frontend/dist/
+
+# Environment files (contain secrets – copy from .env.example)
+backend/.env
+frontend/.env
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
