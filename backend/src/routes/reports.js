@@ -1,0 +1,114 @@
+/**
+ * Reports routes.
+ * Requires authentication; some sub-routes are admin/manager only.
+ *
+ * @swagger
+ * tags:
+ *   name: Reports
+ *   description: Dashboard metrics, failure reports, and exports
+ */
+
+const express = require('express');
+const { authenticate, requireRole } = require('../middleware/auth');
+const { dashboard, failures, activity, exportReport } = require('../controllers/reportsController');
+
+const router = express.Router();
+
+router.use(authenticate);
+
+/**
+ * @swagger
+ * /reports/dashboard:
+ *   get:
+ *     tags: [Reports]
+ *     summary: Get dashboard metrics
+ *     responses:
+ *       200:
+ *         description: Aggregated metrics and trends
+ */
+router.get('/dashboard', dashboard);
+
+/**
+ * @swagger
+ * /reports/failures:
+ *   get:
+ *     tags: [Reports]
+ *     summary: Get failure records with optional filters
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [inventory, misc]
+ *       - in: query
+ *         name: from
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: to
+ *         schema:
+ *           type: string
+ *           format: date
+ *     responses:
+ *       200:
+ *         description: Failure records
+ */
+router.get('/failures', failures);
+
+/**
+ * @swagger
+ * /reports/activity:
+ *   get:
+ *     tags: [Reports]
+ *     summary: Get user activity logs
+ *     parameters:
+ *       - in: query
+ *         name: userId
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: from
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: to
+ *         schema:
+ *           type: string
+ *           format: date
+ *     responses:
+ *       200:
+ *         description: Activity log entries
+ */
+router.get('/activity', requireRole('ADMIN', 'MANAGER'), activity);
+
+/**
+ * @swagger
+ * /reports/export:
+ *   get:
+ *     tags: [Reports]
+ *     summary: Export reports as CSV
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         schema:
+ *           type: string
+ *           enum: [failures, activity]
+ *       - in: query
+ *         name: from
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: to
+ *         schema:
+ *           type: string
+ *           format: date
+ *     responses:
+ *       200:
+ *         description: CSV file download
+ */
+router.get('/export', requireRole('ADMIN', 'MANAGER'), exportReport);
+
+module.exports = router;

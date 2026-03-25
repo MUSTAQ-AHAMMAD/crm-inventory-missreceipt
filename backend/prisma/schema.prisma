@@ -1,0 +1,95 @@
+// Prisma schema for CRM Inventory & Misc Receipt application
+// Defines the database models for PostgreSQL
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User roles enumeration
+enum Role {
+  ADMIN
+  MANAGER
+  USER
+}
+
+// User model – stores authentication credentials and role information
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(USER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  inventoryUploads   InventoryUpload[]
+  miscReceiptUploads MiscReceiptUpload[]
+  activityLogs       ActivityLog[]
+}
+
+// Tracks each bulk inventory CSV upload and its processing results
+model InventoryUpload {
+  id           Int      @id @default(autoincrement())
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id])
+  filename     String
+  totalRecords Int      @default(0)
+  successCount Int      @default(0)
+  failureCount Int      @default(0)
+  status       String   @default("PENDING")
+  createdAt    DateTime @default(now())
+
+  failures InventoryFailureRecord[]
+}
+
+// Stores individual rows that failed during an inventory upload
+model InventoryFailureRecord {
+  id           Int             @id @default(autoincrement())
+  uploadId     Int
+  upload       InventoryUpload @relation(fields: [uploadId], references: [id])
+  rowNumber    Int
+  rawData      Json
+  errorMessage String
+  createdAt    DateTime        @default(now())
+}
+
+// Tracks each miscellaneous receipt CSV upload and its SOAP response
+model MiscReceiptUpload {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  user            User     @relation(fields: [userId], references: [id])
+  filename        String
+  xmlPayload      String
+  responseStatus  String?
+  responseMessage String?
+  createdAt       DateTime @default(now())
+
+  failures MiscReceiptFailure[]
+}
+
+// Stores rows that failed during a misc receipt upload
+model MiscReceiptFailure {
+  id           Int               @id @default(autoincrement())
+  uploadId     Int
+  upload       MiscReceiptUpload @relation(fields: [uploadId], references: [id])
+  rowNumber    Int
+  rawData      Json
+  errorMessage String
+  createdAt    DateTime          @default(now())
+}
+
+// Audit log for all user actions within the system
+model ActivityLog {
+  id            Int      @id @default(autoincrement())
+  userId        Int
+  user          User     @relation(fields: [userId], references: [id])
+  actionType    String
+  actionDetails String
+  ipAddress     String?
+  createdAt     DateTime @default(now())
+}
