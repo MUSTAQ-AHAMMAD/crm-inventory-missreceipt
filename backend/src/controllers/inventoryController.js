@@ -192,7 +192,7 @@ async function bulkUpload(req, res, next) {
           rawData: JSON.stringify(row), // SQLite stores JSON as a string
           errorMessage: `Validation: ${validationError}`,
         });
-        console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (validation): ${validationError} | Item: ${row.ItemNumber || 'N/A'}`);
+        console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (validation): ${validationError} | Item: ${row.ItemNumber || 'N/A'}`);
         continue;
       }
 
@@ -223,7 +223,7 @@ async function bulkUpload(req, res, next) {
           rawData: JSON.stringify(row), // SQLite stores JSON as a string
           errorMessage: errMsg,
         });
-        console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (API): ${errMsg} | Item: ${payload.ItemNumber} | HTTP ${apiErr.response?.status || 'N/A'}`);
+        console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (API): ${errMsg} | Item: ${payload.ItemNumber} | HTTP ${apiErr.response?.status || 'N/A'}`);
       }
     }
 
@@ -374,7 +374,7 @@ async function retryUpload(req, res, next) {
           apiErr.message ||
           'Oracle API error';
         stillFailing.push({ ...failure, errorMessage: errMsg });
-        console.log(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED: ${errMsg} | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'}`);
+        console.error(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED: ${errMsg} | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'}`);
       }
     }
 

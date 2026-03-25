@@ -242,8 +242,10 @@ function ExportTab({ filters }) {
       link.click()
       link.remove()
       window.URL.revokeObjectURL(url)
-    } catch {
-      // 401 errors are handled by the axios response interceptor
+    } catch (err) {
+      if (err.response?.status !== 401) {
+        console.error('Export failed:', err)
+      }
     } finally {
       setExporting('')
     }

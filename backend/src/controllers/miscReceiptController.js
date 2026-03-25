@@ -172,7 +172,7 @@ async function upload(req, res, next) {
             errorMessage: faultMsg,
           });
           lastResponseStatus = 'PARTIAL';
-          console.log(`[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (SOAP fault): ${faultMsg} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status}`);
+          console.error(`[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (SOAP fault): ${faultMsg} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status}`);
         } else {
           successCount++;
           lastResponseMessage = response.data?.substring(0, 500) || 'Success';
@@ -189,7 +189,7 @@ async function upload(req, res, next) {
           errorMessage: typeof errMsg === 'string' ? errMsg.substring(0, 500) : JSON.stringify(errMsg).substring(0, 500),
         });
         lastResponseStatus = failureCount === records.length ? 'FAILED' : 'PARTIAL';
-        console.log(`[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (API): ${typeof errMsg === 'string' ? errMsg.substring(0, 200) : JSON.stringify(errMsg).substring(0, 200)} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'}`);
+        console.error(`[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (API): ${typeof errMsg === 'string' ? errMsg.substring(0, 200) : JSON.stringify(errMsg).substring(0, 200)} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'}`);
       }
     }
 
