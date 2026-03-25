@@ -181,9 +181,116 @@ function mapRowToPayload(row, organizationName) {
 }
 
 /**
+ * Processes upload rows in the background.
+ * Updates the database after each row so the frontend can poll for progress.
+ */
+async function processUploadRows(upload, records, organizationName) {
+  let successCount = 0;
+  let failureCount = 0;
+  const failures = [];
+
+  // Oracle API configuration from environment variables
+  const oracleAuth = Buffer.from(
+    `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
+  ).toString('base64');
+
+  // Process each CSV row
+  for (let i = 0; i < records.length; i++) {
+    const row = records[i];
+    const rowNumber = i + 2; // +2: 1-based + header row
+
+    // Validate the row
+    const validationError = validateRow(row);
+    if (validationError) {
+      failureCount++;
+      failures.push({
+        uploadId: upload.id,
+        rowNumber,
+        rawData: JSON.stringify(row), // keep the raw row for validation failures (debugging)
+        errorMessage: `${VALIDATION_ERROR_PREFIX}${validationError}`,
+      });
+      console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (validation): ${validationError} | Item: ${row.ItemNumber || 'N/A'}`);
+
+      // Update progress in database
+      await prisma.inventoryUpload.update({
+        where: { id: upload.id },
+        data: { successCount, failureCount },
+      });
+      continue;
+    }
+
+    // Map CSV columns to Oracle API payload (OrganizationName from form field)
+    const payload = mapRowToPayload(row, organizationName);
+
+    // Log the payload being sent (detailed logging matching Python reference)
+    console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} PAYLOAD: ${JSON.stringify(payload)}`);
+
+    try {
+      // Send to Oracle REST API
+      const apiResponse = await axios.post(process.env.ORACLE_INVENTORY_API_URL, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Basic ${oracleAuth}`,
+        },
+        timeout: 30000,
+      });
+      successCount++;
+      // Log full API response data
+      const responseData = typeof apiResponse.data === 'object'
+        ? JSON.stringify(apiResponse.data)
+        : String(apiResponse.data || '');
+      console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} SUCCESS | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status} | Response: ${responseData.substring(0, 500)}`);
+    } catch (apiErr) {
+      failureCount++;
+      const errMsg =
+        apiErr.response?.data?.detail ||
+        apiErr.response?.data?.message ||
+        apiErr.message ||
+        'Oracle API error';
+      failures.push({
+        uploadId: upload.id,
+        rowNumber,
+        rawData: JSON.stringify(payload), // store the mapped payload so retry can re-send it
+        errorMessage: errMsg,
+      });
+      // Log detailed error response
+      const errorBody = apiErr.response?.data
+        ? (typeof apiErr.response.data === 'object' ? JSON.stringify(apiErr.response.data) : String(apiErr.response.data))
+        : '';
+      console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (API): ${errMsg} | Item: ${payload.ItemNumber} | HTTP ${apiErr.response?.status || 'N/A'} | Response: ${errorBody.substring(0, 500)}`);
+    }
+
+    // Update progress in database after each row
+    await prisma.inventoryUpload.update({
+      where: { id: upload.id },
+      data: { successCount, failureCount },
+    });
+  }
+
+  // Persist failure records in bulk
+  if (failures.length > 0) {
+    await prisma.inventoryFailureRecord.createMany({ data: failures });
+  }
+
+  // Update final upload status
+  const finalStatus = failureCount === 0 ? 'COMPLETED' : successCount === 0 ? 'FAILED' : 'PARTIAL';
+  await prisma.inventoryUpload.update({
+    where: { id: upload.id },
+    data: {
+      successCount,
+      failureCount,
+      status: finalStatus,
+    },
+  });
+
+  console.log(`[Inventory] Upload #${upload.id} COMPLETE | Total: ${records.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus}`);
+}
+
+/**
  * POST /api/inventory/bulk-upload
  * Accepts a multipart CSV file, validates rows, sends each valid row to
  * the Oracle inventory staged transactions REST API, and stores results.
+ * Returns immediately with the upload ID so the frontend can poll for progress.
  */
 async function bulkUpload(req, res, next) {
   try {
@@ -207,7 +314,12 @@ async function bulkUpload(req, res, next) {
       return res.status(400).json({ error: 'CSV file is empty.' });
     }
 
-    // Create the upload record in PENDING state
+    // Normalize column names so alternative headers are accepted
+    for (let i = 0; i < records.length; i++) {
+      records[i] = normalizeRow(records[i]);
+    }
+
+    // Create the upload record in PROCESSING state
     const upload = await prisma.inventoryUpload.create({
       data: {
         userId: req.user.id,
@@ -217,104 +329,23 @@ async function bulkUpload(req, res, next) {
       },
     });
 
-    let successCount = 0;
-    let failureCount = 0;
-    const failures = [];
-
-    // Oracle API configuration from environment variables
-    const oracleAuth = Buffer.from(
-      `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
-    ).toString('base64');
-
-    // Normalize column names so alternative headers are accepted
-    for (let i = 0; i < records.length; i++) {
-      records[i] = normalizeRow(records[i]);
-    }
-
-    // Process each CSV row
-    for (let i = 0; i < records.length; i++) {
-      const row = records[i];
-      const rowNumber = i + 2; // +2: 1-based + header row
-
-      // Validate the row
-      const validationError = validateRow(row);
-      if (validationError) {
-        failureCount++;
-        failures.push({
-          uploadId: upload.id,
-          rowNumber,
-          rawData: JSON.stringify(row), // keep the raw row for validation failures (debugging)
-          errorMessage: `${VALIDATION_ERROR_PREFIX}${validationError}`,
-        });
-        console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (validation): ${validationError} | Item: ${row.ItemNumber || 'N/A'}`);
-        continue;
-      }
-
-      // Map CSV columns to Oracle API payload (OrganizationName from form field)
-      const payload = mapRowToPayload(row, organizationName);
-
-      // Log the payload being sent (detailed logging matching Python reference)
-      console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} PAYLOAD: ${JSON.stringify(payload)}`);
-
-      try {
-        // Send to Oracle REST API
-        const apiResponse = await axios.post(process.env.ORACLE_INVENTORY_API_URL, payload, {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Basic ${oracleAuth}`,
-          },
-          timeout: 30000,
-        });
-        successCount++;
-        // Log full API response data
-        const responseData = typeof apiResponse.data === 'object'
-          ? JSON.stringify(apiResponse.data)
-          : String(apiResponse.data || '');
-        console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} SUCCESS | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status} | Response: ${responseData.substring(0, 500)}`);
-      } catch (apiErr) {
-        failureCount++;
-        const errMsg =
-          apiErr.response?.data?.detail ||
-          apiErr.response?.data?.message ||
-          apiErr.message ||
-          'Oracle API error';
-        failures.push({
-          uploadId: upload.id,
-          rowNumber,
-          rawData: JSON.stringify(payload), // store the mapped payload so retry can re-send it
-          errorMessage: errMsg,
-        });
-        // Log detailed error response
-        const errorBody = apiErr.response?.data
-          ? (typeof apiErr.response.data === 'object' ? JSON.stringify(apiErr.response.data) : String(apiErr.response.data))
-          : '';
-        console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (API): ${errMsg} | Item: ${payload.ItemNumber} | HTTP ${apiErr.response?.status || 'N/A'} | Response: ${errorBody.substring(0, 500)}`);
-      }
-    }
-
-    // Persist failure records in bulk
-    if (failures.length > 0) {
-      await prisma.inventoryFailureRecord.createMany({ data: failures });
-    }
-
-    // Update upload summary
-    const updatedUpload = await prisma.inventoryUpload.update({
-      where: { id: upload.id },
-      data: {
-        successCount,
-        failureCount,
-        status: failureCount === 0 ? 'COMPLETED' : successCount === 0 ? 'FAILED' : 'PARTIAL',
-      },
+    // Respond immediately with upload ID and total records so the
+    // frontend can start polling for progress
+    res.json({
+      uploadId: upload.id,
+      totalRecords: records.length,
+      successCount: 0,
+      failureCount: 0,
+      status: 'PROCESSING',
     });
 
-    console.log(`[Inventory] Upload #${upload.id} COMPLETE | Total: ${records.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${updatedUpload.status}`);
-
-    return res.json({
-      uploadId: updatedUpload.id,
-      totalRecords: records.length,
-      successCount,
-      failureCount,
-      status: updatedUpload.status,
+    // Process rows in the background (fire and forget)
+    processUploadRows(upload, records, organizationName).catch((err) => {
+      console.error(`[Inventory] Upload #${upload.id} BACKGROUND ERROR: ${err.message}`);
+      prisma.inventoryUpload.update({
+        where: { id: upload.id },
+        data: { status: 'FAILED' },
+      }).catch(() => {});
     });
   } catch (err) {
     next(err);
@@ -485,4 +516,33 @@ function downloadTemplate(_req, res) {
   return res.send(csv);
 }
 
-module.exports = { bulkUpload, listUploads, getFailures, retryUpload, downloadTemplate };
+/**
+ * GET /api/inventory/uploads/:id/progress
+ * Returns current processing progress for a specific upload.
+ * Used by the frontend to poll during background processing.
+ */
+async function getUploadProgress(req, res, next) {
+  try {
+    const uploadId = parseInt(req.params.id);
+
+    const upload = await prisma.inventoryUpload.findUnique({ where: { id: uploadId } });
+    if (!upload) {
+      return res.status(404).json({ error: 'Upload not found.' });
+    }
+    if (req.user.role === 'USER' && upload.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    return res.json({
+      uploadId: upload.id,
+      totalRecords: upload.totalRecords,
+      successCount: upload.successCount,
+      failureCount: upload.failureCount,
+      status: upload.status,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { bulkUpload, listUploads, getFailures, retryUpload, downloadTemplate, getUploadProgress };
