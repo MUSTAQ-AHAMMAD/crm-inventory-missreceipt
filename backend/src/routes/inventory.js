@@ -19,6 +19,7 @@ const {
   getFailures,
   retryUpload,
   downloadTemplate,
+  getUploadProgress,
 } = require('../controllers/inventoryController');
 
 const router = express.Router();
@@ -103,6 +104,24 @@ router.post('/bulk-upload', upload.single('file'), bulkUpload);
  *         description: Paginated list of uploads
  */
 router.get('/uploads', listUploads);
+
+/**
+ * @swagger
+ * /inventory/uploads/{id}/progress:
+ *   get:
+ *     tags: [Inventory]
+ *     summary: Get processing progress for a specific upload
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Upload progress with totalRecords, successCount, failureCount, status
+ */
+router.get('/uploads/:id/progress', getUploadProgress);
 
 /**
  * @swagger

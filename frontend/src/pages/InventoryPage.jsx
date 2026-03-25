@@ -4,7 +4,7 @@
  * and a table of recent uploads with links to failure details.
  */
 
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import api from '../hooks/useApi'
@@ -26,7 +26,9 @@ export default function InventoryPage() {
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
-  const [progress, setProgress] = useState(0)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  // Tracks the active upload being processed in the background
+  const [activeUploadId, setActiveUploadId] = useState(null)
 
   // Fetch recent uploads
   const { data: uploadsData, isLoading } = useQuery({
@@ -34,13 +36,35 @@ export default function InventoryPage() {
     queryFn: () => api.get('/inventory/uploads').then((r) => r.data),
   })
 
-  const handleUpload = async () => {
+  // Poll for progress when there is an active upload
+  const { data: progressData } = useQuery({
+    queryKey: ['inventoryProgress', activeUploadId],
+    queryFn: () => api.get(`/inventory/uploads/${activeUploadId}/progress`).then((r) => r.data),
+    enabled: !!activeUploadId,
+    refetchInterval: 1500,
+  })
+
+  // When progress data indicates completion, finalize
+  useEffect(() => {
+    if (!progressData || !activeUploadId) return
+    const { status } = progressData
+    if (status === 'COMPLETED' || status === 'FAILED' || status === 'PARTIAL') {
+      setResult(progressData)
+      setActiveUploadId(null)
+      setUploading(false)
+      setUploadProgress(0)
+      queryClient.invalidateQueries({ queryKey: ['inventoryUploads'] })
+    }
+  }, [progressData, activeUploadId, queryClient])
+
+  const handleUpload = useCallback(async () => {
     if (!organizationName.trim()) { setError('Please enter an Organization Name.'); return }
     if (!file) { setError('Please select a CSV file.'); return }
     setError('')
     setResult(null)
     setUploading(true)
-    setProgress(10)
+    setUploadProgress(10)
+    setActiveUploadId(null)
 
     const formData = new FormData()
     formData.append('file', file)
@@ -50,22 +74,37 @@ export default function InventoryPage() {
       const res = await api.post('/inventory/bulk-upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (e) => {
-          setProgress(Math.round((e.loaded / e.total) * 80))
+          setUploadProgress(Math.round((e.loaded / e.total) * 80))
         },
       })
-      setProgress(100)
-      setResult(res.data)
-      queryClient.invalidateQueries({ queryKey: ['inventoryUploads'] })
+      setUploadProgress(100)
+      // Backend returns immediately with uploadId and PROCESSING status;
+      // start polling for progress
+      if (res.data.status === 'PROCESSING') {
+        setActiveUploadId(res.data.uploadId)
+      } else {
+        // Already completed (unlikely but handle gracefully)
+        setResult(res.data)
+        setUploading(false)
+        setUploadProgress(0)
+        queryClient.invalidateQueries({ queryKey: ['inventoryUploads'] })
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Upload failed.')
-    } finally {
       setUploading(false)
+      setUploadProgress(0)
     }
-  }
+  }, [file, organizationName, queryClient])
 
   const handleDownloadTemplate = () => {
     window.open(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api'}/inventory/template`, '_blank')
   }
+
+  // Compute progress stats from polling data
+  const processed = progressData ? progressData.successCount + progressData.failureCount : 0
+  const total = progressData ? progressData.totalRecords : 0
+  const remaining = total - processed
+  const percentComplete = total > 0 ? Math.round((processed / total) * 100) : 0
 
   return (
     <div className="space-y-6">
@@ -119,13 +158,62 @@ export default function InventoryPage() {
 
         <ErrorAlert message={error} onDismiss={() => setError('')} />
 
-        {/* Progress bar */}
-        {uploading && (
+        {/* File upload progress bar (before backend processing starts) */}
+        {uploading && !activeUploadId && (
           <div className="w-full bg-gray-200 rounded-full h-2">
             <div
               className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-              style={{ width: `${progress}%` }}
+              style={{ width: `${uploadProgress}%` }}
             />
+          </div>
+        )}
+
+        {/* Backend processing progress panel */}
+        {activeUploadId && progressData && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="font-semibold text-blue-800 flex items-center gap-2">
+                <Spinner size="sm" /> Processing Records…
+              </span>
+              <span className="text-sm font-bold text-blue-700">{percentComplete}%</span>
+            </div>
+
+            {/* Progress bar */}
+            <div className="w-full bg-blue-100 rounded-full h-3">
+              <div
+                className="h-3 rounded-full transition-all duration-500 ease-out"
+                style={{
+                  width: `${percentComplete}%`,
+                  background: progressData.failureCount > 0
+                    ? 'linear-gradient(90deg, #22c55e, #eab308)'
+                    : '#22c55e',
+                }}
+              />
+            </div>
+
+            {/* Stat cards */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-white rounded-lg p-3 text-center shadow-sm">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Total</p>
+                <p className="text-xl font-bold text-gray-800">{total}</p>
+              </div>
+              <div className="bg-white rounded-lg p-3 text-center shadow-sm">
+                <p className="text-xs text-green-600 uppercase tracking-wide">Completed</p>
+                <p className="text-xl font-bold text-green-600">{progressData.successCount}</p>
+              </div>
+              <div className="bg-white rounded-lg p-3 text-center shadow-sm">
+                <p className="text-xs text-red-600 uppercase tracking-wide">Failed</p>
+                <p className="text-xl font-bold text-red-600">{progressData.failureCount}</p>
+              </div>
+              <div className="bg-white rounded-lg p-3 text-center shadow-sm">
+                <p className="text-xs text-blue-600 uppercase tracking-wide">In Progress</p>
+                <p className="text-xl font-bold text-blue-600">{remaining}</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-500 text-center">
+              {processed} of {total} records processed
+            </p>
           </div>
         )}
 
@@ -140,8 +228,18 @@ export default function InventoryPage() {
 
         {/* Result summary */}
         {result && (
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-            <p className="font-semibold text-green-700 mb-2">✅ Upload Complete</p>
+          <div className={`border rounded-lg p-4 ${
+            result.status === 'COMPLETED' ? 'bg-green-50 border-green-200' :
+            result.status === 'FAILED' ? 'bg-red-50 border-red-200' :
+            'bg-yellow-50 border-yellow-200'
+          }`}>
+            <p className={`font-semibold mb-2 ${
+              result.status === 'COMPLETED' ? 'text-green-700' :
+              result.status === 'FAILED' ? 'text-red-700' :
+              'text-yellow-700'
+            }`}>
+              {result.status === 'COMPLETED' ? '✅' : result.status === 'FAILED' ? '❌' : '⚠️'} Upload {result.status === 'COMPLETED' ? 'Complete' : result.status === 'FAILED' ? 'Failed' : 'Partially Complete'}
+            </p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
               <div><span className="text-gray-500">Total:</span> <strong>{result.totalRecords}</strong></div>
               <div><span className="text-gray-500">Success:</span> <strong className="text-green-600">{result.successCount}</strong></div>
