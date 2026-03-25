@@ -270,6 +270,7 @@ export default function InventoryPage() {
                 <tr className="bg-gray-50 text-gray-500 text-xs uppercase">
                   <th className="px-4 py-2 text-left">ID</th>
                   <th className="px-4 py-2 text-left">Filename</th>
+                  <th className="px-4 py-2 text-left">Organization</th>
                   <th className="px-4 py-2 text-left">Total</th>
                   <th className="px-4 py-2 text-left">Success</th>
                   <th className="px-4 py-2 text-left">Failed</th>
@@ -280,12 +281,13 @@ export default function InventoryPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {(!uploadsData?.uploads || uploadsData.uploads.length === 0) && (
-                  <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No uploads yet</td></tr>
+                  <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">No uploads yet</td></tr>
                 )}
                 {uploadsData?.uploads?.map((u) => (
                   <tr key={u.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-gray-500">#{u.id}</td>
                     <td className="px-4 py-3 text-gray-700 font-mono text-xs">{u.filename}</td>
+                    <td className="px-4 py-3 text-gray-600 text-xs">{u.organizationName || '—'}</td>
                     <td className="px-4 py-3">{u.totalRecords}</td>
                     <td className="px-4 py-3 text-green-600 font-medium">{u.successCount}</td>
                     <td className="px-4 py-3 text-red-600 font-medium">{u.failureCount}</td>
@@ -296,14 +298,22 @@ export default function InventoryPage() {
                       {new Date(u.createdAt).toLocaleDateString()}
                     </td>
                     <td className="px-4 py-3">
-                      {u.failureCount > 0 && (
+                      <div className="flex gap-2">
                         <Link
-                          to={`/failures/${u.id}`}
+                          to={`/uploads/${u.id}`}
                           className="text-blue-600 hover:underline text-xs"
                         >
-                          View failures
+                          View details
                         </Link>
-                      )}
+                        {u.failureCount > 0 && (
+                          <Link
+                            to={`/failures/${u.id}`}
+                            className="text-red-600 hover:underline text-xs"
+                          >
+                            Failures
+                          </Link>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}

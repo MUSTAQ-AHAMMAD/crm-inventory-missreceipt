@@ -32,17 +32,30 @@ model User {
 
 // Tracks each bulk inventory CSV upload and its processing results
 model InventoryUpload {
-  id           Int      @id @default(autoincrement())
-  userId       Int
-  user         User     @relation(fields: [userId], references: [id])
-  filename     String
-  totalRecords Int      @default(0)
-  successCount Int      @default(0)
-  failureCount Int      @default(0)
-  status       String   @default("PENDING")
-  createdAt    DateTime @default(now())
+  id               Int      @id @default(autoincrement())
+  userId           Int
+  user             User     @relation(fields: [userId], references: [id])
+  filename         String
+  organizationName String   @default("")
+  totalRecords     Int      @default(0)
+  successCount     Int      @default(0)
+  failureCount     Int      @default(0)
+  status           String   @default("PENDING")
+  createdAt        DateTime @default(now())
 
-  failures InventoryFailureRecord[]
+  failures  InventoryFailureRecord[]
+  successes InventorySuccessRecord[]
+}
+
+// Stores individual rows that succeeded during an inventory upload
+// NOTE: rawData is stored as a JSON string (SQLite has no native JSON type)
+model InventorySuccessRecord {
+  id        Int             @id @default(autoincrement())
+  uploadId  Int
+  upload    InventoryUpload @relation(fields: [uploadId], references: [id])
+  rowNumber Int
+  rawData   String
+  createdAt DateTime        @default(now())
 }
 
 // Stores individual rows that failed during an inventory upload

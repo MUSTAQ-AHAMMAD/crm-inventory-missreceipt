@@ -32,22 +32,34 @@ app.use(
   })
 );
 
-// Parse JSON & URL-encoded bodies
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+// Parse JSON & URL-encoded bodies (50 MB limit for large CSV uploads)
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // Request / response logging
 app.use(requestLogger);
 
-// Rate limiting – 100 requests per 15 minutes per IP
-const limiter = rateLimit({
+// Rate limiting – generous limit for authenticated API usage.
+// The previous limit of 100/15min caused "Too many requests" errors during
+// progress polling (every 1.5s = 600 requests per 15 min window).
+const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: 2000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
 });
-app.use('/api/', limiter);
+app.use('/api/', apiLimiter);
+
+// Stricter rate limit on login endpoint to prevent brute force attacks
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts, please try again later.' },
+});
+app.use('/api/auth/login', authLimiter);
 
 // ─── Swagger Docs ─────────────────────────────────────────────────────────────
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));

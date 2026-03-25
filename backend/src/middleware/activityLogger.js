@@ -9,11 +9,18 @@ const prisma = require('../services/prisma');
 /**
  * Logs the current request to ActivityLog after the response has been sent.
  * Only logs authenticated requests (req.user must be set by JWT middleware).
+ * Skips high-frequency polling endpoints to avoid excessive DB writes.
  */
 async function activityLogger(req, res, next) {
   // Let the route handler process the request first
   res.on('finish', async () => {
     if (!req.user) return; // skip unauthenticated requests
+
+    // Skip logging for high-frequency polling endpoints (progress, detail)
+    // to avoid DB contention during large uploads
+    if (req.method === 'GET' && /\/uploads\/\d+\/(progress|detail|successes)/.test(req.originalUrl)) {
+      return;
+    }
 
     try {
       await prisma.activityLog.create({

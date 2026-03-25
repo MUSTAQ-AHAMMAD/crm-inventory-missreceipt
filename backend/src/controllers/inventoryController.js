@@ -225,53 +225,57 @@ function mapRowToPayload(row, organizationName) {
   };
 }
 
+// Number of Oracle API requests to send in parallel per batch.
+// Increase for faster throughput; decrease if Oracle rate-limits.
+const CONCURRENCY = 10;
+
+// How many success / failure records to accumulate before flushing to DB.
+const DB_FLUSH_SIZE = 500;
+
 /**
- * Processes upload rows in the background.
- * Updates the database after each row so the frontend can poll for progress.
+ * Processes upload rows in the background using concurrent batches.
+ * Sends CONCURRENCY rows to the Oracle API in parallel, flushes success/failure
+ * records to the database periodically, and updates progress after each batch
+ * so the frontend can poll efficiently.
  */
 async function processUploadRows(upload, records, organizationName) {
   let successCount = 0;
   let failureCount = 0;
-  const failures = [];
+  let pendingSuccesses = [];
+  let pendingFailures = [];
 
   // Oracle API configuration from environment variables
   const oracleAuth = Buffer.from(
     `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
   ).toString('base64');
 
-  // Process each CSV row
-  for (let i = 0; i < records.length; i++) {
-    const row = records[i];
-    const rowNumber = i + 2; // +2: 1-based + header row
+  /** Flush accumulated success/failure records to the database. */
+  async function flushRecords() {
+    if (pendingSuccesses.length > 0) {
+      await prisma.inventorySuccessRecord.createMany({ data: pendingSuccesses });
+      pendingSuccesses = [];
+    }
+    if (pendingFailures.length > 0) {
+      await prisma.inventoryFailureRecord.createMany({ data: pendingFailures });
+      pendingFailures = [];
+    }
+  }
 
-    // Validate the row
+  /** Process a single row: validate, map, call Oracle API. */
+  async function processRow(row, rowNumber) {
     const validationError = validateRow(row);
     if (validationError) {
-      failureCount++;
-      failures.push({
-        uploadId: upload.id,
+      return {
+        type: 'failure',
         rowNumber,
-        rawData: JSON.stringify(row), // keep the raw row for validation failures (debugging)
-        errorMessage: `${VALIDATION_ERROR_PREFIX}${validationError}`,
-      });
-      console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (validation): ${validationError} | Item: ${row.ItemNumber || 'N/A'}`);
-
-      // Update progress in database
-      await prisma.inventoryUpload.update({
-        where: { id: upload.id },
-        data: { successCount, failureCount },
-      });
-      continue;
+        rawData: JSON.stringify(row),
+        error: `${VALIDATION_ERROR_PREFIX}${validationError}`,
+      };
     }
 
-    // Map CSV columns to Oracle API payload (OrganizationName from form field)
     const payload = mapRowToPayload(row, organizationName);
 
-    // Log the payload being sent (detailed logging matching Python reference)
-    console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} PAYLOAD: ${JSON.stringify(payload)}`);
-
     try {
-      // Send to Oracle REST API
       const apiResponse = await axios.post(process.env.ORACLE_INVENTORY_API_URL, payload, {
         headers: {
           'Content-Type': 'application/json',
@@ -279,43 +283,67 @@ async function processUploadRows(upload, records, organizationName) {
         },
         timeout: 30000,
       });
-      successCount++;
-      // Log full API response data
       const responseData = typeof apiResponse.data === 'object'
         ? JSON.stringify(apiResponse.data)
         : String(apiResponse.data || '');
       console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} SUCCESS | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status} | Response: ${responseData.substring(0, 500)}`);
+      return { type: 'success', rowNumber, rawData: JSON.stringify(payload) };
     } catch (apiErr) {
-      failureCount++;
       const errMsg =
         apiErr.response?.data?.detail ||
         apiErr.response?.data?.message ||
         apiErr.message ||
         'Oracle API error';
-      failures.push({
-        uploadId: upload.id,
-        rowNumber,
-        rawData: JSON.stringify(payload), // store the mapped payload so retry can re-send it
-        errorMessage: errMsg,
-      });
-      // Log detailed error response
       const errorBody = apiErr.response?.data
         ? (typeof apiErr.response.data === 'object' ? JSON.stringify(apiErr.response.data) : String(apiErr.response.data))
         : '';
       console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (API): ${errMsg} | Item: ${payload.ItemNumber} | HTTP ${apiErr.response?.status || 'N/A'} | Response: ${errorBody.substring(0, 500)}`);
+      return { type: 'failure', rowNumber, rawData: JSON.stringify(payload), error: errMsg };
+    }
+  }
+
+  // Process rows in concurrent batches of CONCURRENCY
+  for (let batchStart = 0; batchStart < records.length; batchStart += CONCURRENCY) {
+    const batchEnd = Math.min(batchStart + CONCURRENCY, records.length);
+    const batch = records.slice(batchStart, batchEnd);
+
+    const batchResults = await Promise.all(
+      batch.map((row, idx) => processRow(row, batchStart + idx + 2)) // +2: 1-based + header row
+    );
+
+    for (const result of batchResults) {
+      if (result.type === 'success') {
+        successCount++;
+        pendingSuccesses.push({
+          uploadId: upload.id,
+          rowNumber: result.rowNumber,
+          rawData: result.rawData,
+        });
+      } else {
+        failureCount++;
+        pendingFailures.push({
+          uploadId: upload.id,
+          rowNumber: result.rowNumber,
+          rawData: result.rawData,
+          errorMessage: result.error,
+        });
+      }
     }
 
-    // Update progress in database after each row
+    // Flush to DB when buffers are large enough to avoid memory pressure
+    if (pendingSuccesses.length >= DB_FLUSH_SIZE || pendingFailures.length >= DB_FLUSH_SIZE) {
+      await flushRecords();
+    }
+
+    // Update progress counters after each batch (not each row)
     await prisma.inventoryUpload.update({
       where: { id: upload.id },
       data: { successCount, failureCount },
     });
   }
 
-  // Persist failure records in bulk
-  if (failures.length > 0) {
-    await prisma.inventoryFailureRecord.createMany({ data: failures });
-  }
+  // Flush any remaining buffered records
+  await flushRecords();
 
   // Update final upload status
   const finalStatus = failureCount === 0 ? 'COMPLETED' : successCount === 0 ? 'FAILED' : 'PARTIAL';
@@ -369,6 +397,7 @@ async function bulkUpload(req, res, next) {
       data: {
         userId: req.user.id,
         filename: req.file.originalname,
+        organizationName,
         totalRecords: records.length,
         status: 'PROCESSING',
       },
@@ -494,40 +523,58 @@ async function retryUpload(req, res, next) {
     let retryFail = 0;
     const stillFailing = [];
 
-    for (const failure of failures) {
-      // rawData is stored as a JSON string – parse it back to an object.
-      // For API failures it contains the mapped Oracle payload; for validation
-      // failures it contains the raw CSV row (skip those).
-      const rawDataObj = (() => { try { return JSON.parse(failure.rawData); } catch { return failure.rawData; } })();
+    // Process retries in concurrent batches for speed
+    for (let batchStart = 0; batchStart < failures.length; batchStart += CONCURRENCY) {
+      const batch = failures.slice(batchStart, Math.min(batchStart + CONCURRENCY, failures.length));
 
-      // Skip validation failures (they don't have the Oracle payload fields)
-      if (failure.errorMessage.startsWith(VALIDATION_ERROR_PREFIX)) {
-        retryFail++;
-        stillFailing.push({ ...failure, errorMessage: failure.errorMessage });
-        continue;
-      }
+      const batchResults = await Promise.all(batch.map(async (failure) => {
+        const rawDataObj = (() => { try { return JSON.parse(failure.rawData); } catch { return failure.rawData; } })();
 
-      try {
-        const apiResponse = await axios.post(process.env.ORACLE_INVENTORY_API_URL, rawDataObj, {
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Basic ${oracleAuth}`,
-          },
-          timeout: 30000,
-        });
-        // Remove the failure record on success
-        await prisma.inventoryFailureRecord.delete({ where: { id: failure.id } });
-        retrySuccess++;
-        console.log(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} SUCCESS | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiResponse.status}`);
-      } catch (apiErr) {
-        retryFail++;
-        const errMsg =
-          apiErr.response?.data?.detail ||
-          apiErr.response?.data?.message ||
-          apiErr.message ||
-          'Oracle API error';
-        stillFailing.push({ ...failure, errorMessage: errMsg });
-        console.error(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED: ${errMsg} | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'}`);
+        // Skip validation failures (they don't have the Oracle payload fields)
+        if (failure.errorMessage.startsWith(VALIDATION_ERROR_PREFIX)) {
+          return { status: 'skip', failure };
+        }
+
+        try {
+          const apiResponse = await axios.post(process.env.ORACLE_INVENTORY_API_URL, rawDataObj, {
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Basic ${oracleAuth}`,
+            },
+            timeout: 30000,
+          });
+          console.log(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} SUCCESS | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiResponse.status}`);
+          return { status: 'success', failure };
+        } catch (apiErr) {
+          const errMsg =
+            apiErr.response?.data?.detail ||
+            apiErr.response?.data?.message ||
+            apiErr.message ||
+            'Oracle API error';
+          console.error(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED: ${errMsg} | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'}`);
+          return { status: 'fail', failure, errMsg };
+        }
+      }));
+
+      for (const result of batchResults) {
+        if (result.status === 'success') {
+          retrySuccess++;
+          await prisma.inventoryFailureRecord.delete({ where: { id: result.failure.id } });
+          // Store as success record
+          await prisma.inventorySuccessRecord.create({
+            data: {
+              uploadId,
+              rowNumber: result.failure.rowNumber,
+              rawData: result.failure.rawData,
+            },
+          });
+        } else if (result.status === 'skip') {
+          retryFail++;
+          stillFailing.push({ ...result.failure, errorMessage: result.failure.errorMessage });
+        } else {
+          retryFail++;
+          stillFailing.push({ ...result.failure, errorMessage: result.errMsg });
+        }
       }
     }
 
@@ -586,10 +633,128 @@ async function getUploadProgress(req, res, next) {
       successCount: upload.successCount,
       failureCount: upload.failureCount,
       status: upload.status,
+      organizationName: upload.organizationName,
     });
   } catch (err) {
     next(err);
   }
 }
 
-module.exports = { bulkUpload, listUploads, getFailures, retryUpload, downloadTemplate, getUploadProgress };
+/**
+ * GET /api/inventory/uploads/:id/detail
+ * Returns full upload details including both success and failure records
+ * for complete visibility of the upload process.
+ */
+async function getUploadDetail(req, res, next) {
+  try {
+    const uploadId = parseInt(req.params.id);
+
+    const upload = await prisma.inventoryUpload.findUnique({
+      where: { id: uploadId },
+      include: { user: { select: { email: true } } },
+    });
+    if (!upload) {
+      return res.status(404).json({ error: 'Upload not found.' });
+    }
+    if (req.user.role === 'USER' && upload.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 50);
+    const skip = (page - 1) * limit;
+    const recordType = req.query.type || 'all'; // 'all', 'success', 'failure'
+
+    let successes = [];
+    let failures = [];
+    let totalSuccessRecords = 0;
+    let totalFailureRecords = 0;
+
+    if (recordType === 'all' || recordType === 'success') {
+      [successes, totalSuccessRecords] = await Promise.all([
+        prisma.inventorySuccessRecord.findMany({
+          where: { uploadId },
+          orderBy: { rowNumber: 'asc' },
+          skip: recordType === 'success' ? skip : 0,
+          take: recordType === 'success' ? limit : 10,
+        }),
+        prisma.inventorySuccessRecord.count({ where: { uploadId } }),
+      ]);
+      successes = successes.map((s) => ({
+        ...s,
+        rawData: (() => { try { return JSON.parse(s.rawData); } catch { return s.rawData; } })(),
+      }));
+    }
+
+    if (recordType === 'all' || recordType === 'failure') {
+      [failures, totalFailureRecords] = await Promise.all([
+        prisma.inventoryFailureRecord.findMany({
+          where: { uploadId },
+          orderBy: { rowNumber: 'asc' },
+          skip: recordType === 'failure' ? skip : 0,
+          take: recordType === 'failure' ? limit : 10,
+        }),
+        prisma.inventoryFailureRecord.count({ where: { uploadId } }),
+      ]);
+      failures = failures.map((f) => ({
+        ...f,
+        rawData: (() => { try { return JSON.parse(f.rawData); } catch { return f.rawData; } })(),
+      }));
+    }
+
+    return res.json({
+      upload,
+      successes,
+      failures,
+      totalSuccessRecords,
+      totalFailureRecords,
+      page,
+      limit,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/inventory/uploads/:id/successes
+ * Returns paginated success records for a specific upload.
+ */
+async function getSuccessRecords(req, res, next) {
+  try {
+    const uploadId = parseInt(req.params.id);
+
+    const upload = await prisma.inventoryUpload.findUnique({ where: { id: uploadId } });
+    if (!upload) {
+      return res.status(404).json({ error: 'Upload not found.' });
+    }
+    if (req.user.role === 'USER' && upload.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 50);
+    const skip = (page - 1) * limit;
+
+    const [successes, total] = await Promise.all([
+      prisma.inventorySuccessRecord.findMany({
+        where: { uploadId },
+        orderBy: { rowNumber: 'asc' },
+        skip,
+        take: limit,
+      }),
+      prisma.inventorySuccessRecord.count({ where: { uploadId } }),
+    ]);
+
+    const parsed = successes.map((s) => ({
+      ...s,
+      rawData: (() => { try { return JSON.parse(s.rawData); } catch { return s.rawData; } })(),
+    }));
+
+    return res.json({ upload, successes: parsed, total, page, limit });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { bulkUpload, listUploads, getFailures, retryUpload, downloadTemplate, getUploadProgress, getUploadDetail, getSuccessRecords };
