@@ -134,7 +134,7 @@ async function bulkUpload(req, res, next) {
         failures.push({
           uploadId: upload.id,
           rowNumber,
-          rawData: row,
+          rawData: JSON.stringify(row), // SQLite stores JSON as a string
           errorMessage: `Validation: ${validationError}`,
         });
         continue;
@@ -163,7 +163,7 @@ async function bulkUpload(req, res, next) {
         failures.push({
           uploadId: upload.id,
           rowNumber,
-          rawData: row,
+          rawData: JSON.stringify(row), // SQLite stores JSON as a string
           errorMessage: errMsg,
         });
       }
@@ -250,7 +250,13 @@ async function getFailures(req, res, next) {
       orderBy: { rowNumber: 'asc' },
     });
 
-    return res.json({ upload, failures });
+    // Parse rawData JSON strings back to objects for the frontend
+    const parsedFailures = failures.map((f) => ({
+      ...f,
+      rawData: (() => { try { return JSON.parse(f.rawData); } catch { return f.rawData; } })(),
+    }));
+
+    return res.json({ upload, failures: parsedFailures });
   } catch (err) {
     next(err);
   }
@@ -286,8 +292,10 @@ async function retryUpload(req, res, next) {
     const stillFailing = [];
 
     for (const failure of failures) {
+      // rawData is stored as a JSON string in SQLite – parse it back to an object
+      const rawDataObj = (() => { try { return JSON.parse(failure.rawData); } catch { return failure.rawData; } })();
       try {
-        await axios.post(process.env.ORACLE_INVENTORY_API_URL, failure.rawData, {
+        await axios.post(process.env.ORACLE_INVENTORY_API_URL, rawDataObj, {
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Basic ${oracleAuth}`,

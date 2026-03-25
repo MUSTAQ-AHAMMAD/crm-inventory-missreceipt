@@ -1,28 +1,26 @@
 // Prisma schema for CRM Inventory & Misc Receipt application
-// Defines the database models for PostgreSQL
+// Uses SQLite for zero-install local deployment on Windows / macOS / Linux
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "postgresql"
+  // SQLite – a single file database, no server required
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
-// User roles enumeration
-enum Role {
-  ADMIN
-  MANAGER
-  USER
-}
+// NOTE: SQLite does not support native enums.
+// The `role` field is stored as a plain String.
+// Valid values: "ADMIN", "MANAGER", "USER"
 
 // User model – stores authentication credentials and role information
 model User {
   id           Int      @id @default(autoincrement())
   email        String   @unique
   passwordHash String
-  role         Role     @default(USER)
+  role         String   @default("USER")
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -48,12 +46,13 @@ model InventoryUpload {
 }
 
 // Stores individual rows that failed during an inventory upload
+// NOTE: rawData is stored as a JSON string (SQLite has no native JSON type)
 model InventoryFailureRecord {
   id           Int             @id @default(autoincrement())
   uploadId     Int
   upload       InventoryUpload @relation(fields: [uploadId], references: [id])
   rowNumber    Int
-  rawData      Json
+  rawData      String
   errorMessage String
   createdAt    DateTime        @default(now())
 }
@@ -73,12 +72,13 @@ model MiscReceiptUpload {
 }
 
 // Stores rows that failed during a misc receipt upload
+// NOTE: rawData is stored as a JSON string (SQLite has no native JSON type)
 model MiscReceiptFailure {
   id           Int               @id @default(autoincrement())
   uploadId     Int
   upload       MiscReceiptUpload @relation(fields: [uploadId], references: [id])
   rowNumber    Int
-  rawData      Json
+  rawData      String
   errorMessage String
   createdAt    DateTime          @default(now())
 }

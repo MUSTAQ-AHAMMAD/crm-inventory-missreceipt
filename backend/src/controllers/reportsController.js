@@ -101,23 +101,33 @@ async function failures(req, res, next) {
     let miscFailures = [];
 
     if (!type || type === 'inventory') {
-      inventoryFailures = await prisma.inventoryFailureRecord.findMany({
+      const raw = await prisma.inventoryFailureRecord.findMany({
         where: dateFilter.gte || dateFilter.lte ? { createdAt: dateFilter } : {},
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: { upload: { select: { filename: true, userId: true } } },
       });
+      // Parse rawData JSON strings back to objects
+      inventoryFailures = raw.map((f) => ({
+        ...f,
+        rawData: (() => { try { return JSON.parse(f.rawData); } catch { return f.rawData; } })(),
+      }));
     }
 
     if (!type || type === 'misc') {
-      miscFailures = await prisma.miscReceiptFailure.findMany({
+      const raw = await prisma.miscReceiptFailure.findMany({
         where: dateFilter.gte || dateFilter.lte ? { createdAt: dateFilter } : {},
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: { upload: { select: { filename: true, userId: true } } },
       });
+      // Parse rawData JSON strings back to objects
+      miscFailures = raw.map((f) => ({
+        ...f,
+        rawData: (() => { try { return JSON.parse(f.rawData); } catch { return f.rawData; } })(),
+      }));
     }
 
     return res.json({ inventoryFailures, miscFailures });

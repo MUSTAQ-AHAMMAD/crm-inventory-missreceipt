@@ -1,11 +1,16 @@
 # Dependencies
 node_modules/
 
+# SQLite database file (auto-generated, contains user data)
+# Prisma resolves file:./crm.db relative to backend/prisma/ → backend/prisma/crm.db
+backend/prisma/crm.db
+backend/prisma/crm.db-shm
+backend/prisma/crm.db-wal
+
 # Build artifacts
-backend/prisma/migrations/
 frontend/dist/
 
-# Environment files (contain secrets)
+# Environment files (contain secrets – copy from .env.example)
 backend/.env
 frontend/.env
 

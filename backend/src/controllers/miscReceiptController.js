@@ -168,7 +168,7 @@ async function upload(req, res, next) {
           failures.push({
             uploadId: uploadRecord.id,
             rowNumber,
-            rawData: row,
+            rawData: JSON.stringify(row), // SQLite stores JSON as a string
             errorMessage: faultMsg,
           });
           lastResponseStatus = 'PARTIAL';
@@ -183,7 +183,7 @@ async function upload(req, res, next) {
         failures.push({
           uploadId: uploadRecord.id,
           rowNumber,
-          rawData: row,
+          rawData: JSON.stringify(row), // SQLite stores JSON as a string
           errorMessage: typeof errMsg === 'string' ? errMsg.substring(0, 500) : JSON.stringify(errMsg).substring(0, 500),
         });
         lastResponseStatus = failureCount === records.length ? 'FAILED' : 'PARTIAL';
@@ -268,7 +268,16 @@ async function getUpload(req, res, next) {
       return res.status(403).json({ error: 'Access denied.' });
     }
 
-    return res.json(uploadRecord);
+    // Parse rawData JSON strings back to objects for the frontend
+    const parsedRecord = {
+      ...uploadRecord,
+      failures: uploadRecord.failures.map((f) => ({
+        ...f,
+        rawData: (() => { try { return JSON.parse(f.rawData); } catch { return f.rawData; } })(),
+      })),
+    };
+
+    return res.json(parsedRecord);
   } catch (err) {
     next(err);
   }
