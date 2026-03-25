@@ -108,7 +108,12 @@ export default function InventoryPage() {
             ))}
           </div>
           <p className="text-xs text-blue-600 mt-2">
-            Alternative column names are also accepted (e.g. <span className="font-mono">Order Lines/Product/Barcode</span> for <span className="font-mono">ItemNumber</span>).
+            Alternative column names are also accepted (e.g. <span className="font-mono">Order Lines/Product/Barcode</span> for <span className="font-mono">ItemNumber</span>,{' '}
+            <span className="font-mono">Order Lines/Branch/Name</span> for <span className="font-mono">SubinventoryCode</span>,{' '}
+            <span className="font-mono">diff</span> for <span className="font-mono">TransactionQuantity</span>,{' '}
+            <span className="font-mono">Order Lines/Order Ref</span> for <span className="font-mono">TransactionReference</span>,{' '}
+            <span className="font-mono">Order Lines/Order Ref/Date</span> for <span className="font-mono">TransactionDate</span>).
+            UOM defaults to <span className="font-mono">Each</span> when not provided.
           </p>
         </div>
 
