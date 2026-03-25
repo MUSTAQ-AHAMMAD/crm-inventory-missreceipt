@@ -7,6 +7,9 @@ const { parse } = require('csv-parse/sync');
 const axios = require('axios');
 const prisma = require('../services/prisma');
 
+// Prefix used to tag validation failure messages so retry logic can identify them
+const VALIDATION_ERROR_PREFIX = 'Validation: ';
+
 // Required CSV column names mapped to Oracle REST API fields
 // OrganizationName is now provided via a form field, not the CSV
 const REQUIRED_FIELDS = [
@@ -31,12 +34,22 @@ const COLUMN_ALIASES = {
   'transaction type': 'TransactionTypeName',
   'subinventory code': 'SubinventoryCode',
   'subinventory': 'SubinventoryCode',
+  'order lines/branch/name': 'SubinventoryCode',
+  'branch': 'SubinventoryCode',
+  'branch/name': 'SubinventoryCode',
   'transaction date': 'TransactionDate',
+  'order lines/order ref/date': 'TransactionDate',
+  'date': 'TransactionDate',
   'transaction quantity': 'TransactionQuantity',
+  'diff': 'TransactionQuantity',
+  'quantity': 'TransactionQuantity',
   'transaction reference': 'TransactionReference',
+  'order lines/order ref': 'TransactionReference',
+  'order ref': 'TransactionReference',
   'transaction unit of measure': 'TransactionUnitOfMeasure',
   'unit of measure': 'TransactionUnitOfMeasure',
   'uom': 'TransactionUnitOfMeasure',
+  'order lines/product/name': 'ProductName',
 };
 
 /**
@@ -97,7 +110,22 @@ function extractBranchFromRef(ref) {
 }
 
 /**
+ * Extracts a clean order reference by taking the first whitespace-delimited
+ * token from the reference string.
+ */
+function cleanReference(ref) {
+  if (!ref) return '';
+  const trimmed = ref.trim();
+  const parts = trimmed.split(/\s+/);
+  return parts[0] || trimmed;
+}
+
+/**
  * Maps a CSV row to the Oracle REST API payload format.
+ * Includes the fixed fields required by the Oracle inventoryStagedTransactions
+ * REST API (SourceHeaderId, SourceLineId, TransactionMode, SourceCode,
+ * UseCurrentCostFlag) that the Python reference script also sends.
+ *
  * @param {object} row – parsed CSV row
  * @param {string} organizationName – provided via the upload form field
  */
@@ -114,15 +142,28 @@ function mapRowToPayload(row, organizationName) {
     txDate = txDate.split(' ')[0]; // keep only date part
   }
 
+  // Default TransactionUnitOfMeasure to "Each" when not provided
+  const uom = row.TransactionUnitOfMeasure?.trim() || 'Each';
+
+  // TransactionQuantity is already validated (non-NaN, non-zero) in validateRow
+  const qty = parseFloat(row.TransactionQuantity);
+
   return {
     OrganizationName: organizationName,
     TransactionTypeName: row.TransactionTypeName?.trim(),
     ItemNumber: row.ItemNumber?.trim(),
     SubinventoryCode: subinventory,
     TransactionDate: txDate,
-    TransactionQuantity: parseFloat(row.TransactionQuantity),
-    TransactionReference: row.TransactionReference?.trim(),
-    TransactionUnitOfMeasure: row.TransactionUnitOfMeasure?.trim(),
+    TransactionQuantity: String(isNaN(qty) ? 0 : qty),
+    TransactionReference: cleanReference(row.TransactionReference),
+    TransactionUnitOfMeasure: uom,
+    // Fixed fields required by the Oracle inventoryStagedTransactions REST API.
+    // Values match the working Python reference script provided by the client.
+    SourceHeaderId: '1',
+    SourceLineId: '0',
+    TransactionMode: '1',
+    SourceCode: 'SERVICE',
+    UseCurrentCostFlag: 'true',
   };
 }
 
@@ -189,8 +230,8 @@ async function bulkUpload(req, res, next) {
         failures.push({
           uploadId: upload.id,
           rowNumber,
-          rawData: JSON.stringify(row), // SQLite stores JSON as a string
-          errorMessage: `Validation: ${validationError}`,
+          rawData: JSON.stringify(row), // keep the raw row for validation failures (debugging)
+          errorMessage: `${VALIDATION_ERROR_PREFIX}${validationError}`,
         });
         console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (validation): ${validationError} | Item: ${row.ItemNumber || 'N/A'}`);
         continue;
@@ -220,7 +261,7 @@ async function bulkUpload(req, res, next) {
         failures.push({
           uploadId: upload.id,
           rowNumber,
-          rawData: JSON.stringify(row), // SQLite stores JSON as a string
+          rawData: JSON.stringify(payload), // store the mapped payload so retry can re-send it
           errorMessage: errMsg,
         });
         console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (API): ${errMsg} | Item: ${payload.ItemNumber} | HTTP ${apiErr.response?.status || 'N/A'}`);
@@ -352,8 +393,18 @@ async function retryUpload(req, res, next) {
     const stillFailing = [];
 
     for (const failure of failures) {
-      // rawData is stored as a JSON string in SQLite – parse it back to an object
+      // rawData is stored as a JSON string – parse it back to an object.
+      // For API failures it contains the mapped Oracle payload; for validation
+      // failures it contains the raw CSV row (skip those).
       const rawDataObj = (() => { try { return JSON.parse(failure.rawData); } catch { return failure.rawData; } })();
+
+      // Skip validation failures (they don't have the Oracle payload fields)
+      if (failure.errorMessage.startsWith(VALIDATION_ERROR_PREFIX)) {
+        retryFail++;
+        stillFailing.push({ ...failure, errorMessage: failure.errorMessage });
+        continue;
+      }
+
       try {
         const apiResponse = await axios.post(process.env.ORACLE_INVENTORY_API_URL, rawDataObj, {
           headers: {
