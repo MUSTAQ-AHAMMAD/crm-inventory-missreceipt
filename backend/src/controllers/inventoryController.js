@@ -96,6 +96,17 @@ function validateRow(row) {
   if (isNaN(qty) || qty === 0) {
     return 'Zero or invalid transaction quantity';
   }
+  // If SubinventoryCode is empty, try to extract from TransactionReference
+  let subinventory = row.SubinventoryCode?.trim();
+  if (!subinventory && row.TransactionReference) {
+    subinventory = extractBranchFromRef(row.TransactionReference);
+    if (subinventory) {
+      row.SubinventoryCode = subinventory;
+    }
+  }
+  if (!subinventory) {
+    return 'Empty branch/subinventory code';
+  }
   return null;
 }
 
@@ -145,8 +156,10 @@ function mapRowToPayload(row, organizationName) {
   // Default TransactionUnitOfMeasure to "Each" when not provided
   const uom = row.TransactionUnitOfMeasure?.trim() || 'Each';
 
-  // TransactionQuantity is already validated (non-NaN, non-zero) in validateRow
-  const qty = parseFloat(row.TransactionQuantity);
+  // TransactionQuantity is already validated (non-NaN, non-zero) in validateRow.
+  // Preserve the original CSV string value (e.g. "-1.00") instead of parsing and
+  // re-stringifying, which would lose trailing zeros.
+  const txQty = row.TransactionQuantity?.trim() || '0';
 
   return {
     OrganizationName: organizationName,
@@ -154,7 +167,7 @@ function mapRowToPayload(row, organizationName) {
     ItemNumber: row.ItemNumber?.trim(),
     SubinventoryCode: subinventory,
     TransactionDate: txDate,
-    TransactionQuantity: String(isNaN(qty) ? 0 : qty),
+    TransactionQuantity: txQty,
     TransactionReference: cleanReference(row.TransactionReference),
     TransactionUnitOfMeasure: uom,
     // Fixed fields required by the Oracle inventoryStagedTransactions REST API.
@@ -240,6 +253,9 @@ async function bulkUpload(req, res, next) {
       // Map CSV columns to Oracle API payload (OrganizationName from form field)
       const payload = mapRowToPayload(row, organizationName);
 
+      // Log the payload being sent (detailed logging matching Python reference)
+      console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} PAYLOAD: ${JSON.stringify(payload)}`);
+
       try {
         // Send to Oracle REST API
         const apiResponse = await axios.post(process.env.ORACLE_INVENTORY_API_URL, payload, {
@@ -250,7 +266,11 @@ async function bulkUpload(req, res, next) {
           timeout: 30000,
         });
         successCount++;
-        console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} SUCCESS | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status}`);
+        // Log full API response data
+        const responseData = typeof apiResponse.data === 'object'
+          ? JSON.stringify(apiResponse.data)
+          : String(apiResponse.data || '');
+        console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} SUCCESS | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status} | Response: ${responseData.substring(0, 500)}`);
       } catch (apiErr) {
         failureCount++;
         const errMsg =
@@ -264,7 +284,11 @@ async function bulkUpload(req, res, next) {
           rawData: JSON.stringify(payload), // store the mapped payload so retry can re-send it
           errorMessage: errMsg,
         });
-        console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (API): ${errMsg} | Item: ${payload.ItemNumber} | HTTP ${apiErr.response?.status || 'N/A'}`);
+        // Log detailed error response
+        const errorBody = apiErr.response?.data
+          ? (typeof apiErr.response.data === 'object' ? JSON.stringify(apiErr.response.data) : String(apiErr.response.data))
+          : '';
+        console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (API): ${errMsg} | Item: ${payload.ItemNumber} | HTTP ${apiErr.response?.status || 'N/A'} | Response: ${errorBody.substring(0, 500)}`);
       }
     }
 
