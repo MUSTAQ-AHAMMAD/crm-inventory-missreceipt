@@ -36,7 +36,23 @@ const upload = multer({
   },
 });
 
-// Apply JWT auth and activity logging to all routes
+// ── Public routes (no authentication required) ──────────────────────────
+
+/**
+ * @swagger
+ * /inventory/template:
+ *   get:
+ *     tags: [Inventory]
+ *     summary: Download the CSV template for inventory uploads
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: CSV file download
+ */
+router.get('/template', downloadTemplate);
+
+// ── Protected routes (JWT auth + activity logging) ──────────────────────
+
 router.use(authenticate, activityLogger);
 
 /**
@@ -123,18 +139,5 @@ router.get('/uploads/:id/failures', getFailures);
  *         description: Retry results
  */
 router.post('/uploads/:id/retry', retryUpload);
-
-/**
- * @swagger
- * /inventory/template:
- *   get:
- *     tags: [Inventory]
- *     summary: Download the CSV template for inventory uploads
- *     security: []
- *     responses:
- *       200:
- *         description: CSV file download
- */
-router.get('/template', downloadTemplate);
 
 module.exports = router;

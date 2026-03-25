@@ -224,11 +224,29 @@ function ActivityTab({ filters }) {
 }
 
 function ExportTab({ filters }) {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api'
+  const [exporting, setExporting] = useState('')
 
-  const buildUrl = (type) => {
-    const params = new URLSearchParams({ type, ...filters })
-    return `${baseUrl}/reports/export?${params}`
+  const handleExport = async (type) => {
+    setExporting(type)
+    try {
+      const res = await api.get('/reports/export', {
+        params: { type, ...filters },
+        responseType: 'blob',
+      })
+      const filename = type === 'activity' ? 'activity_export.csv' : 'failures_export.csv'
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const link = document.createElement('a')
+      link.href = url
+      link.setAttribute('download', filename)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      // 401 errors are handled by the axios response interceptor
+    } finally {
+      setExporting('')
+    }
   }
 
   return (
@@ -236,18 +254,20 @@ function ExportTab({ filters }) {
       <h2 className="font-semibold text-gray-700">Export Reports</h2>
       <p className="text-sm text-gray-500">Download CSV reports with the current date filters applied.</p>
       <div className="flex flex-wrap gap-4 mt-4">
-        <a
-          href={buildUrl('failures')}
-          className="px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+        <button
+          onClick={() => handleExport('failures')}
+          disabled={!!exporting}
+          className="px-5 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center gap-2"
         >
-          ⬇️ Export Failures CSV
-        </a>
-        <a
-          href={buildUrl('activity')}
-          className="px-5 py-2.5 bg-gray-600 text-white text-sm font-semibold rounded-lg hover:bg-gray-700 transition-colors flex items-center gap-2"
+          ⬇️ {exporting === 'failures' ? 'Exporting…' : 'Export Failures CSV'}
+        </button>
+        <button
+          onClick={() => handleExport('activity')}
+          disabled={!!exporting}
+          className="px-5 py-2.5 bg-gray-600 text-white text-sm font-semibold rounded-lg hover:bg-gray-700 disabled:opacity-60 transition-colors flex items-center gap-2"
         >
-          ⬇️ Export Activity CSV
-        </a>
+          ⬇️ {exporting === 'activity' ? 'Exporting…' : 'Export Activity CSV'}
+        </button>
       </div>
     </div>
   )
