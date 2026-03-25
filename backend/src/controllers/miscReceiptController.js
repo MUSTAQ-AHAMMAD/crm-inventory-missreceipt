@@ -257,6 +257,9 @@ async function listUploads(req, res, next) {
 async function getUpload(req, res, next) {
   try {
     const uploadId = parseInt(req.params.id);
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
 
     const uploadRecord = await prisma.miscReceiptUpload.findUnique({
       where: { id: uploadId },

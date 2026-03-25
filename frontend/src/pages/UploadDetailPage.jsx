@@ -25,7 +25,7 @@ export default function UploadDetailPage() {
   const PAGE_SIZE = 50
 
   // Fetch upload detail
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error: queryError } = useQuery({
     queryKey: ['uploadDetail', uploadId, tab, successPage, failurePage],
     queryFn: () => {
       const type = tab === 'Success Records' ? 'success' : tab === 'Failure Records' ? 'failure' : 'all'
@@ -66,7 +66,15 @@ export default function UploadDetailPage() {
   }
 
   if (isLoading) return <div className="flex justify-center mt-20"><Spinner size="lg" /></div>
-  if (isError) return <ErrorAlert message="Failed to load upload details." />
+  if (isError) return (
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold text-gray-800">Upload Details</h1>
+      <ErrorAlert message={queryError?.response?.data?.error || 'Failed to load upload details.'} />
+      <Link to="/inventory" className="inline-block px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
+        ← Back to Uploads
+      </Link>
+    </div>
+  )
 
   const { upload, successes = [], failures = [], totalSuccessRecords = 0, totalFailureRecords = 0 } = data || {}
 
