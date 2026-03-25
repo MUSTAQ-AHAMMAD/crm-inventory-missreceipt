@@ -132,6 +132,51 @@ function cleanReference(ref) {
 }
 
 /**
+ * Converts a date string from various formats to the ISO 8601 timestamp
+ * format required by Oracle: YYYY-MM-DDTHH:MM:SS.000+00:00.
+ *
+ * Supported input formats:
+ *   DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD, YYYY/MM/DD,
+ *   and any of the above followed by a time component.
+ *
+ * @param {string} dateStr – raw date string from CSV
+ * @returns {string} ISO 8601 formatted timestamp
+ */
+function formatDateToISO(dateStr) {
+  if (!dateStr) return '';
+  let trimmed = dateStr.trim();
+
+  // Strip any time component – we only use the date part
+  const spaceIdx = trimmed.indexOf(' ');
+  if (spaceIdx !== -1) {
+    trimmed = trimmed.substring(0, spaceIdx);
+  }
+
+  let year, month, day;
+  // Determine separator and field order
+  const sep = trimmed.includes('/') ? '/' : '-';
+  const parts = trimmed.split(sep);
+  if (parts.length !== 3) {
+    console.warn(`[Inventory] Unable to parse date "${trimmed}" – expected DD-MM-YYYY or YYYY-MM-DD format`);
+    return trimmed; // can't parse – return as-is
+  }
+
+  if (parts[0].length === 4) {
+    // YYYY-MM-DD or YYYY/MM/DD
+    [year, month, day] = parts;
+  } else {
+    // DD-MM-YYYY or DD/MM/YYYY
+    [day, month, year] = parts;
+  }
+
+  // Zero-pad to two digits
+  month = month.padStart(2, '0');
+  day = day.padStart(2, '0');
+
+  return `${year}-${month}-${day}T00:00:00.000+00:00`;
+}
+
+/**
  * Maps a CSV row to the Oracle REST API payload format.
  * Includes the fixed fields required by the Oracle inventoryStagedTransactions
  * REST API (SourceHeaderId, SourceLineId, TransactionMode, SourceCode,
@@ -147,11 +192,8 @@ function mapRowToPayload(row, organizationName) {
     subinventory = extractBranchFromRef(row.TransactionReference) || '';
   }
 
-  // Parse date (supports YYYY-MM-DD HH:MM:SS or YYYY-MM-DD)
-  let txDate = row.TransactionDate?.trim();
-  if (txDate && txDate.includes(' ')) {
-    txDate = txDate.split(' ')[0]; // keep only date part
-  }
+  // Convert TransactionDate to ISO 8601 format required by Oracle
+  const txDate = formatDateToISO(row.TransactionDate);
 
   // Default TransactionUnitOfMeasure to "Each" when not provided
   const uom = row.TransactionUnitOfMeasure?.trim() || 'Each';
@@ -161,6 +203,8 @@ function mapRowToPayload(row, organizationName) {
   // re-stringifying, which would lose trailing zeros.
   const txQty = row.TransactionQuantity?.trim() || '0';
 
+  const txRef = cleanReference(row.TransactionReference);
+
   return {
     OrganizationName: organizationName,
     TransactionTypeName: row.TransactionTypeName?.trim(),
@@ -168,7 +212,8 @@ function mapRowToPayload(row, organizationName) {
     SubinventoryCode: subinventory,
     TransactionDate: txDate,
     TransactionQuantity: txQty,
-    TransactionReference: cleanReference(row.TransactionReference),
+    TransactionReference: txRef,
+    ExternalSystemTransactionReference: txRef,
     TransactionUnitOfMeasure: uom,
     // Fixed fields required by the Oracle inventoryStagedTransactions REST API.
     // Values match the working Python reference script provided by the client.
