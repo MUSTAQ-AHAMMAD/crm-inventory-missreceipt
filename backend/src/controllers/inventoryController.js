@@ -467,6 +467,9 @@ async function listUploads(req, res, next) {
 async function getFailures(req, res, next) {
   try {
     const uploadId = parseInt(req.params.id);
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
 
     // Verify the upload exists and belongs to the requesting user (or admin)
     const upload = await prisma.inventoryUpload.findUnique({ where: { id: uploadId } });
@@ -501,6 +504,9 @@ async function getFailures(req, res, next) {
 async function retryUpload(req, res, next) {
   try {
     const uploadId = parseInt(req.params.id);
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
 
     const upload = await prisma.inventoryUpload.findUnique({ where: { id: uploadId } });
     if (!upload) {
@@ -618,6 +624,9 @@ function downloadTemplate(_req, res) {
 async function getUploadProgress(req, res, next) {
   try {
     const uploadId = parseInt(req.params.id);
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
 
     const upload = await prisma.inventoryUpload.findUnique({ where: { id: uploadId } });
     if (!upload) {
@@ -648,6 +657,9 @@ async function getUploadProgress(req, res, next) {
 async function getUploadDetail(req, res, next) {
   try {
     const uploadId = parseInt(req.params.id);
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
 
     const upload = await prisma.inventoryUpload.findUnique({
       where: { id: uploadId },
@@ -723,6 +735,9 @@ async function getUploadDetail(req, res, next) {
 async function getSuccessRecords(req, res, next) {
   try {
     const uploadId = parseInt(req.params.id);
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
 
     const upload = await prisma.inventoryUpload.findUnique({ where: { id: uploadId } });
     if (!upload) {
