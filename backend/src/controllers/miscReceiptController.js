@@ -22,6 +22,13 @@ const REQUIRED_FIELDS = [
   'OrgId',
 ];
 
+// SOAP namespaces and action for Oracle MiscellaneousReceiptService
+const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
+const MISC_SERVICE_NS =
+  'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/';
+const MISC_TYPES_NS = `${MISC_SERVICE_NS}types/`;
+const SOAP_ACTION = `${MISC_TYPES_NS}createMiscellaneousReceipt`;
+
 /**
  * Generates a SOAP XML envelope for a single miscellaneous receipt row.
  *
@@ -30,28 +37,26 @@ const REQUIRED_FIELDS = [
  */
 function generateSoapEnvelope(row) {
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope
-    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-    xmlns:misc="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/">
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${MISC_TYPES_NS}">
   <soapenv:Header/>
   <soapenv:Body>
-    <misc:createMiscellaneousReceipt>
-      <misc:miscellaneousReceipt>
-        <misc:CurrencyCode>${escapeXml(row.CurrencyCode)}</misc:CurrencyCode>
-        <misc:Amount>
-          <misc:value>${escapeXml(row.Amount)}</misc:value>
-          <misc:currencyCode>${escapeXml(row.CurrencyCode)}</misc:currencyCode>
-        </misc:Amount>
-        <misc:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</misc:ReceiptNumber>
-        <misc:ReceiptDate>${escapeXml(row.ReceiptDate)}</misc:ReceiptDate>
-        <misc:GlDate>${escapeXml(row.GlDate)}</misc:GlDate>
-        <misc:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</misc:ReceiptMethodId>
-        <misc:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</misc:ReceiptMethodName>
-        <misc:BankAccountName>${escapeXml(row.BankAccountName)}</misc:BankAccountName>
-        <misc:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</misc:ReceivableActivityName>
-        <misc:OrgId>${escapeXml(row.OrgId)}</misc:OrgId>
-      </misc:miscellaneousReceipt>
-    </misc:createMiscellaneousReceipt>
+    <typ:createMiscellaneousReceipt>
+      <typ:miscellaneousReceipt>
+        <typ:CurrencyCode>${escapeXml(row.CurrencyCode)}</typ:CurrencyCode>
+        <typ:Amount>
+          <typ:value>${escapeXml(row.Amount)}</typ:value>
+          <typ:currencyCode>${escapeXml(row.CurrencyCode)}</typ:currencyCode>
+        </typ:Amount>
+        <typ:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</typ:ReceiptNumber>
+        <typ:ReceiptDate>${escapeXml(row.ReceiptDate)}</typ:ReceiptDate>
+        <typ:GlDate>${escapeXml(row.GlDate)}</typ:GlDate>
+        <typ:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</typ:ReceiptMethodId>
+        <typ:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</typ:ReceiptMethodName>
+        <typ:BankAccountName>${escapeXml(row.BankAccountName)}</typ:BankAccountName>
+        <typ:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</typ:ReceivableActivityName>
+        <typ:OrgId>${escapeXml(row.OrgId)}</typ:OrgId>
+      </typ:miscellaneousReceipt>
+    </typ:createMiscellaneousReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
 }
@@ -154,7 +159,8 @@ async function upload(req, res, next) {
         const response = await axios.post(process.env.ORACLE_SOAP_URL, soapXml, {
           headers: {
             'Content-Type': 'text/xml; charset=utf-8',
-            SOAPAction: 'createMiscellaneousReceipt',
+            Accept: 'text/xml',
+            SOAPAction: SOAP_ACTION,
             Authorization: `Basic ${oracleAuth}`,
           },
           timeout: 30000,
