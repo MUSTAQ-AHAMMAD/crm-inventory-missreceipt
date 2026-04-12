@@ -46,8 +46,8 @@ const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
 const MISC_SERVICE_NS =
   'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/';
 const MISC_TYPES_NS = `${MISC_SERVICE_NS}types/`;
-// Oracle expects the SOAPAction header to be the plain operation name, quoted
-const SOAP_ACTION = '"createMiscellaneousReceipt"';
+const SOAP_ACTION = `${MISC_TYPES_NS}createMiscellaneousReceipt`;
+const SOAP_ACTION_HEADER = `"${SOAP_ACTION}"`;
 
 function asText(data) {
   if (data == null) return '';
@@ -128,29 +128,29 @@ function validateCsv(records) {
  */
 function generateSoapEnvelope(row) {
   const receiptMethodIdTag = row.ReceiptMethodId
-    ? `        <com:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</com:ReceiptMethodId>\n`
+    ? `        <ser:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</ser:ReceiptMethodId>\n`
     : '';
   const receiptMethodNameTag = row.ReceiptMethodName
-    ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
+    ? `        <ser:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</ser:ReceiptMethodName>\n`
     : '';
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:com="${MISC_TYPES_NS}">
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${MISC_TYPES_NS}" xmlns:ser="${MISC_SERVICE_NS}">
   <soapenv:Header/>
   <soapenv:Body>
-    <com:createMiscellaneousReceipt>
-      <com:miscellaneousReceipt>
-        <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
-        <com:Amount>${escapeXml(row.Amount)}</com:Amount>
-        <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
-        <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
-        <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
-        <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
-${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
-        <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
-        <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
-      </com:miscellaneousReceipt>
-    </com:createMiscellaneousReceipt>
+    <typ:createMiscellaneousReceipt>
+      <typ:miscellaneousReceipt>
+        <ser:CurrencyCode>${escapeXml(row.CurrencyCode)}</ser:CurrencyCode>
+        <ser:Amount>${escapeXml(row.Amount)}</ser:Amount>
+        <ser:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</ser:ReceiptNumber>
+        <ser:ReceiptDate>${escapeXml(row.ReceiptDate)}</ser:ReceiptDate>
+        <ser:DepositDate>${escapeXml(row.DepositDate)}</ser:DepositDate>
+        <ser:GlDate>${escapeXml(row.GlDate)}</ser:GlDate>
+${receiptMethodIdTag}${receiptMethodNameTag}        <ser:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</ser:ReceivableActivityName>
+        <ser:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</ser:BankAccountNumber>
+        <ser:OrgId>${escapeXml(row.OrgId)}</ser:OrgId>
+      </typ:miscellaneousReceipt>
+    </typ:createMiscellaneousReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
 }
@@ -254,19 +254,21 @@ async function upload(req, res, next) {
     const responseLogs = [];
     let firstErrorMessage = '';
     let lastSuccessMessage = '';
+    const logContext = `Action=${SOAP_ACTION_HEADER} | Endpoint=${process.env.ORACLE_SOAP_URL}`;
 
     // Send each row to the SOAP endpoint
     for (let i = 0; i < records.length; i++) {
       const row = records[i];
       const rowNumber = i + 2;
       const soapXml = generateSoapEnvelope(row);
+      const requestPreview = snippet(soapXml);
 
       try {
         const response = await axios.post(process.env.ORACLE_SOAP_URL, soapXml, {
           headers: {
             'Content-Type': 'text/xml; charset=utf-8',
             Accept: 'text/xml',
-            SOAPAction: SOAP_ACTION,
+            SOAPAction: SOAP_ACTION_HEADER,
             Authorization: `Basic ${oracleAuth}`,
           },
           timeout: 30000,
@@ -296,7 +298,7 @@ async function upload(req, res, next) {
           }
           const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (${faultMsg ? 'SOAP fault' : 'HTTP error'}): ${snippet(
             faultMsg || xmlPayload || responseText
-          )} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status}`;
+          )} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status} | ${logContext} | Request: ${requestPreview}`;
           responseLogs.push(logLine);
           console.error(logLine);
         } else {
@@ -305,7 +307,7 @@ async function upload(req, res, next) {
           if (!lastSuccessMessage) {
             lastSuccessMessage = successSnippet || 'Success';
           }
-          const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SUCCESS | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status} | Response: ${successSnippet || 'Success'}`;
+          const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SUCCESS | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status} | Response: ${successSnippet || 'Success'} | ${logContext}`;
           responseLogs.push(logLine);
           console.log(logLine);
         }
@@ -331,7 +333,7 @@ async function upload(req, res, next) {
         if (!firstErrorMessage) {
           firstErrorMessage = `Row ${rowNumber}: ${errSnippet}`;
         }
-        const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (API): ${errSnippet} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'}`;
+        const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (API): ${errSnippet} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'} | ${logContext} | Request: ${requestPreview}`;
         responseLogs.push(logLine);
         console.error(logLine);
       }
