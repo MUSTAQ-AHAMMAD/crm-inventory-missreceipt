@@ -79,6 +79,7 @@ model MiscReceiptUpload {
   xmlPayload      String
   responseStatus  String?
   responseMessage String?
+  responseLog     String?
   createdAt       DateTime @default(now())
 
   failures MiscReceiptFailure[]
