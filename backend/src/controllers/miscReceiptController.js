@@ -46,7 +46,8 @@ const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
 const MISC_SERVICE_NS =
   'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/';
 const MISC_TYPES_NS = `${MISC_SERVICE_NS}types/`;
-const SOAP_ACTION = `${MISC_TYPES_NS}createMiscellaneousReceipt`;
+// Oracle expects the SOAPAction header to be the plain operation name, quoted
+const SOAP_ACTION = '"createMiscellaneousReceipt"';
 
 function asText(data) {
   if (data == null) return '';
