@@ -74,11 +74,11 @@ function generateSoapEnvelope(row) {
         </typ:Amount>
         <typ:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</typ:ReceiptNumber>
         <typ:ReceiptDate>${escapeXml(row.ReceiptDate)}</typ:ReceiptDate>
+        <typ:DepositDate>${escapeXml(row.DepositDate)}</typ:DepositDate>
         <typ:GlDate>${escapeXml(row.GlDate)}</typ:GlDate>
-        <typ:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</typ:ReceiptMethodId>
         <typ:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</typ:ReceiptMethodName>
-        <typ:BankAccountName>${escapeXml(row.BankAccountName)}</typ:BankAccountName>
         <typ:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</typ:ReceivableActivityName>
+        <typ:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</typ:BankAccountNumber>
         <typ:OrgId>${escapeXml(row.OrgId)}</typ:OrgId>
       </typ:miscellaneousReceipt>
     </typ:createMiscellaneousReceipt>
