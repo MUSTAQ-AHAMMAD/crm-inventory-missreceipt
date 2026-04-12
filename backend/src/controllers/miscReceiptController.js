@@ -23,6 +23,31 @@ const REQUIRED_FIELDS = [
 ];
 
 /**
+ * Validates that the parsed CSV has the required headers and non-empty values.
+ * Returns an error string when validation fails; otherwise null.
+ */
+function validateCsv(records) {
+  const headers = Object.keys(records[0] || {}).map((h) => h.trim());
+  const missingHeaders = REQUIRED_FIELDS.filter((field) => !headers.includes(field));
+  if (missingHeaders.length > 0) {
+    return `CSV is missing required columns: ${missingHeaders.join(', ')}`;
+  }
+
+  for (let i = 0; i < records.length; i++) {
+    const row = records[i];
+    const missingValues = REQUIRED_FIELDS.filter((field) => {
+      const value = row[field];
+      return value === undefined || value === null || String(value).trim() === '';
+    });
+    if (missingValues.length > 0) {
+      return `Row ${i + 2} is missing values for: ${missingValues.join(', ')}`;
+    }
+  }
+
+  return null;
+}
+
+/**
  * Generates a SOAP XML envelope for a single miscellaneous receipt row.
  *
  * @param {Object} row - CSV row data
@@ -88,6 +113,11 @@ async function previewXml(req, res, next) {
       return res.status(400).json({ error: 'CSV file is empty.' });
     }
 
+    const validationError = validateCsv(records);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
     const previews = records.map((row, i) => ({
       rowNumber: i + 2,
       xml: generateSoapEnvelope(row),
@@ -118,6 +148,11 @@ async function upload(req, res, next) {
 
     if (records.length === 0) {
       return res.status(400).json({ error: 'CSV file is empty.' });
+    }
+
+    const validationError = validateCsv(records);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
     }
 
     // Generate combined XML payload (all rows) for storage
