@@ -18,8 +18,14 @@ echo "  CRM Portal – Starting Application"
 echo " ============================================="
 echo ""
 
+# Keep Prisma client + migrations in sync (covers schema changes after git pull)
+echo "[1/3] Syncing Prisma client and migrations..."
+cd "$SCRIPT_DIR/backend"
+npx prisma generate --schema prisma/schema.prisma
+npx prisma migrate deploy
+
 # Start backend in background
-echo "[1/2] Starting backend (port 4000)..."
+echo "[2/3] Starting backend (port 4000)..."
 cd "$SCRIPT_DIR/backend"
 node src/index.js &
 BACKEND_PID=$!
@@ -28,7 +34,7 @@ echo "[OK] Backend PID: $BACKEND_PID"
 sleep 2
 
 # Start frontend in background
-echo "[2/2] Starting frontend (port 3000)..."
+echo "[3/3] Starting frontend (port 3000)..."
 cd "$SCRIPT_DIR/frontend"
 npm run dev &
 FRONTEND_PID=$!
