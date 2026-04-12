@@ -29,6 +29,41 @@ const MISC_SERVICE_NS =
 const MISC_TYPES_NS = `${MISC_SERVICE_NS}types/`;
 const SOAP_ACTION = `${MISC_TYPES_NS}createMiscellaneousReceipt`;
 
+function asText(data) {
+  if (data == null) return '';
+  if (typeof data === 'string') return data;
+  if (Buffer.isBuffer(data)) return data.toString('utf-8');
+  if (data?.data && Array.isArray(data.data)) {
+    return Buffer.from(data.data).toString('utf-8');
+  }
+  if (typeof data === 'object' && data.toString) {
+    return data.toString();
+  }
+  return String(data);
+}
+
+function extractXmlPayload(text) {
+  if (!text) return '';
+  const xmlStart = text.indexOf('<?xml');
+  if (xmlStart !== -1) return text.slice(xmlStart);
+  const envStart = text.search(/<\s*[\w.:-]*Envelope/i);
+  return envStart !== -1 ? text.slice(envStart) : text;
+}
+
+function extractSoapFaultMessage(text) {
+  const xml = extractXmlPayload(text);
+  if (!xml) return null;
+  const faultMatch = xml.match(/<faultstring[^>]*>([\s\S]*?)<\/faultstring>/i);
+  if (faultMatch) return faultMatch[1].trim();
+  const textMatch = xml.match(/<[\w.:-]*Text[^>]*>([\s\S]*?)<\/[\w.:-]*Text>/i);
+  return textMatch ? textMatch[1].trim() : null;
+}
+
+function snippet(text, length = 500) {
+  if (!text) return '';
+  return text.length > length ? text.slice(0, length) : text;
+}
+
 /**
  * Validates that the parsed CSV has the required headers and non-empty values.
  * Returns an error string when validation fails; otherwise null.
@@ -198,32 +233,38 @@ async function upload(req, res, next) {
             Authorization: `Basic ${oracleAuth}`,
           },
           timeout: 30000,
+          responseType: 'text',
+          validateStatus: () => true, // capture SOAP faults even when HTTP status is 500
         });
 
-        // Parse SOAP response for fault detection
-        if (response.data && response.data.includes('faultstring')) {
-          const faultMatch = response.data.match(/<faultstring[^>]*>([\s\S]*?)<\/faultstring>/);
-          const faultMsg = faultMatch ? faultMatch[1] : 'SOAP fault';
+        const responseText = asText(response.data);
+        const xmlPayload = extractXmlPayload(responseText);
+        const faultMsg = extractSoapFaultMessage(responseText);
+        const hasHttpError = response.status >= 400;
+
+        if (hasHttpError || faultMsg) {
           failureCount++;
+          const errorDetail =
+            faultMsg ||
+            `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`.trim();
+          const errorSnippet = snippet(errorDetail);
           failures.push({
             uploadId: uploadRecord.id,
             rowNumber,
             rawData: JSON.stringify(row), // SQLite stores JSON as a string
-            errorMessage: faultMsg,
+            errorMessage: errorSnippet,
           });
-          const faultSnippet = faultMsg.substring(0, 500);
           if (!firstErrorMessage) {
-            firstErrorMessage = `Row ${rowNumber}: ${faultSnippet}`;
+            firstErrorMessage = `Row ${rowNumber}: ${errorSnippet}`;
           }
-          const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (SOAP fault): ${faultSnippet} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status}`;
+          const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (${faultMsg ? 'SOAP fault' : 'HTTP error'}): ${snippet(
+            faultMsg || xmlPayload || responseText
+          )} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status}`;
           responseLogs.push(logLine);
           console.error(logLine);
         } else {
           successCount++;
-          const successSnippet =
-            typeof response.data === 'string'
-              ? response.data.substring(0, 500)
-              : JSON.stringify(response.data || '').substring(0, 500);
+          const successSnippet = snippet(xmlPayload || responseText) || 'Success';
           if (!lastSuccessMessage) {
             lastSuccessMessage = successSnippet || 'Success';
           }
@@ -233,18 +274,23 @@ async function upload(req, res, next) {
         }
       } catch (apiErr) {
         failureCount++;
+        const responseText = asText(apiErr.response?.data);
+        const faultMsg = extractSoapFaultMessage(responseText);
         const errMsg =
-          apiErr.response?.data || apiErr.message || 'Oracle SOAP API error';
+          faultMsg ||
+          responseText ||
+          apiErr.message ||
+          'Oracle SOAP API error';
         failures.push({
           uploadId: uploadRecord.id,
           rowNumber,
           rawData: JSON.stringify(row), // SQLite stores JSON as a string
-          errorMessage: typeof errMsg === 'string' ? errMsg.substring(0, 500) : JSON.stringify(errMsg).substring(0, 500),
+          errorMessage: typeof errMsg === 'string' ? snippet(errMsg) : JSON.stringify(errMsg || '').substring(0, 500),
         });
         const errSnippet =
           typeof errMsg === 'string'
-            ? errMsg.substring(0, 500)
-            : JSON.stringify(errMsg).substring(0, 500);
+            ? snippet(errMsg)
+            : JSON.stringify(errMsg || '').substring(0, 500);
         if (!firstErrorMessage) {
           firstErrorMessage = `Row ${rowNumber}: ${errSnippet}`;
         }
