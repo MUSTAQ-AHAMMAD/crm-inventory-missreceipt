@@ -8,7 +8,7 @@ const { parse } = require('csv-parse/sync');
 const axios = require('axios');
 const prisma = require('../services/prisma');
 
-// Expected CSV columns for Misc Receipt uploads
+// Required CSV columns (receipt method handled separately to allow ID or name)
 const REQUIRED_FIELDS = [
   'Amount',
   'CurrencyCode',
@@ -17,7 +17,26 @@ const REQUIRED_FIELDS = [
   'GlDate',
   'OrgId',
   'ReceiptNumber',
+  'ReceivableActivityName',
+  'BankAccountNumber',
+];
+
+// At least one of these must be provided to identify the receipt method
+const RECEIPT_METHOD_FIELDS = [
+  'ReceiptMethodId',
   'ReceiptMethodName',
+];
+
+// Template + display columns (includes both method columns)
+const TEMPLATE_FIELDS = [
+  'Amount',
+  'CurrencyCode',
+  'DepositDate',
+  'ReceiptDate',
+  'GlDate',
+  'OrgId',
+  'ReceiptNumber',
+  ...RECEIPT_METHOD_FIELDS,
   'ReceivableActivityName',
   'BankAccountNumber',
 ];
@@ -71,8 +90,12 @@ function snippet(text, length = 500) {
 function validateCsv(records) {
   const headers = Object.keys(records[0] || {}).map((h) => h.trim());
   const missingHeaders = REQUIRED_FIELDS.filter((field) => !headers.includes(field));
+  const hasReceiptMethodHeader = RECEIPT_METHOD_FIELDS.some((field) => headers.includes(field));
   if (missingHeaders.length > 0) {
     return `CSV is missing required columns: ${missingHeaders.join(', ')}`;
+  }
+  if (!hasReceiptMethodHeader) {
+    return 'CSV is missing required columns: ReceiptMethodId or ReceiptMethodName';
   }
 
   for (let i = 0; i < records.length; i++) {
@@ -81,6 +104,13 @@ function validateCsv(records) {
       const value = row[field];
       return value === undefined || value === null || String(value).trim() === '';
     });
+    const hasReceiptMethodValue = RECEIPT_METHOD_FIELDS.some((field) => {
+      const value = row[field];
+      return value !== undefined && value !== null && String(value).trim() !== '';
+    });
+    if (!hasReceiptMethodValue) {
+      missingValues.push('ReceiptMethodId or ReceiptMethodName');
+    }
     if (missingValues.length > 0) {
       return `Row ${i + 2} is missing values for: ${missingValues.join(', ')}`;
     }
@@ -96,6 +126,13 @@ function validateCsv(records) {
  * @returns {string} SOAP XML string
  */
 function generateSoapEnvelope(row) {
+  const receiptMethodIdTag = row.ReceiptMethodId
+    ? `        <com:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</com:ReceiptMethodId>\n`
+    : '';
+  const receiptMethodNameTag = row.ReceiptMethodName
+    ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
+    : '';
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:com="${MISC_TYPES_NS}">
   <soapenv:Header/>
@@ -108,8 +145,7 @@ function generateSoapEnvelope(row) {
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
         <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
         <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
-        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>
-        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
+${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
         <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
         <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
       </com:miscellaneousReceipt>
@@ -415,9 +451,9 @@ async function getUpload(req, res, next) {
  * Returns a downloadable CSV template for misc receipt uploads.
  */
 function downloadTemplate(_req, res) {
-  const header = REQUIRED_FIELDS.join(',');
+  const header = TEMPLATE_FIELDS.join(',');
   const sample =
-    '1000.00,USD,2024-01-20,2024-01-15,2024-01-15,REC001,101,Check,Misc Activity,123456789';
+    '1000.00,USD,2024-01-20,2024-01-15,2024-01-15,101,REC001,98765,Check,Misc Activity,123456789';
   const csv = `${header}\n${sample}\n`;
 
   res.setHeader('Content-Type', 'text/csv');
