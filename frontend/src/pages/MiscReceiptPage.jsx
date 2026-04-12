@@ -16,8 +16,9 @@ const REQUIRED_COLUMNS = [
   'DepositDate',
   'ReceiptDate',
   'GlDate',
-  'ReceiptNumber',
   'OrgId',
+  'ReceiptNumber',
+  'ReceiptMethodId',
   'ReceiptMethodName',
   'ReceivableActivityName',
   'BankAccountNumber',
@@ -107,6 +108,9 @@ export default function MiscReceiptPage() {
               <span key={col} className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-mono">{col}</span>
             ))}
           </div>
+          <p className="text-xs text-purple-700 mt-2">
+            Include either <strong>ReceiptMethodId</strong> or <strong>ReceiptMethodName</strong> (both if available) so Oracle can find the receipt method.
+          </p>
         </div>
 
         <ErrorAlert message={error} onDismiss={() => setError('')} />
