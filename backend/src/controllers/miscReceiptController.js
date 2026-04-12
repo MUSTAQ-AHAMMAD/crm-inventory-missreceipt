@@ -62,23 +62,23 @@ function validateCsv(records) {
  */
 function generateSoapEnvelope(row) {
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${MISC_TYPES_NS}">
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:com="${MISC_TYPES_NS}">
   <soapenv:Header/>
   <soapenv:Body>
-    <typ:createMiscellaneousReceipt>
-      <typ:miscellaneousReceipt>
-        <typ:CurrencyCode>${escapeXml(row.CurrencyCode)}</typ:CurrencyCode>
-        <typ:Amount>${escapeXml(row.Amount)}</typ:Amount>
-        <typ:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</typ:ReceiptNumber>
-        <typ:ReceiptDate>${escapeXml(row.ReceiptDate)}</typ:ReceiptDate>
-        <typ:DepositDate>${escapeXml(row.DepositDate)}</typ:DepositDate>
-        <typ:GlDate>${escapeXml(row.GlDate)}</typ:GlDate>
-        <typ:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</typ:ReceiptMethodName>
-        <typ:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</typ:ReceivableActivityName>
-        <typ:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</typ:BankAccountNumber>
-        <typ:OrgId>${escapeXml(row.OrgId)}</typ:OrgId>
-      </typ:miscellaneousReceipt>
-    </typ:createMiscellaneousReceipt>
+    <com:createMiscellaneousReceipt>
+      <com:miscellaneousReceipt>
+        <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
+        <com:Amount>${escapeXml(row.Amount)}</com:Amount>
+        <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
+        <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
+        <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
+        <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
+        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>
+        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
+        <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
+        <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
+      </com:miscellaneousReceipt>
+    </com:createMiscellaneousReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
 }
