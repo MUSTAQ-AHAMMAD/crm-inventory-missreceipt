@@ -10,16 +10,16 @@ const prisma = require('../services/prisma');
 
 // Expected CSV columns for Misc Receipt uploads
 const REQUIRED_FIELDS = [
-  'CurrencyCode',
   'Amount',
-  'ReceiptNumber',
+  'CurrencyCode',
+  'DepositDate',
   'ReceiptDate',
   'GlDate',
-  'ReceiptMethodId',
-  'ReceiptMethodName',
-  'BankAccountName',
-  'ReceivableActivityName',
   'OrgId',
+  'ReceiptNumber',
+  'ReceiptMethodName',
+  'ReceivableActivityName',
+  'BankAccountNumber',
 ];
 
 // SOAP namespaces and action for Oracle MiscellaneousReceiptService
@@ -28,6 +28,31 @@ const MISC_SERVICE_NS =
   'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/';
 const MISC_TYPES_NS = `${MISC_SERVICE_NS}types/`;
 const SOAP_ACTION = `${MISC_TYPES_NS}createMiscellaneousReceipt`;
+
+/**
+ * Validates that the parsed CSV has the required headers and non-empty values.
+ * Returns an error string when validation fails; otherwise null.
+ */
+function validateCsv(records) {
+  const headers = Object.keys(records[0] || {}).map((h) => h.trim());
+  const missingHeaders = REQUIRED_FIELDS.filter((field) => !headers.includes(field));
+  if (missingHeaders.length > 0) {
+    return `CSV is missing required columns: ${missingHeaders.join(', ')}`;
+  }
+
+  for (let i = 0; i < records.length; i++) {
+    const row = records[i];
+    const missingValues = REQUIRED_FIELDS.filter((field) => {
+      const value = row[field];
+      return value === undefined || value === null || String(value).trim() === '';
+    });
+    if (missingValues.length > 0) {
+      return `Row ${i + 2} is missing values for: ${missingValues.join(', ')}`;
+    }
+  }
+
+  return null;
+}
 
 /**
  * Generates a SOAP XML envelope for a single miscellaneous receipt row.
@@ -93,6 +118,11 @@ async function previewXml(req, res, next) {
       return res.status(400).json({ error: 'CSV file is empty.' });
     }
 
+    const validationError = validateCsv(records);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
     const previews = records.map((row, i) => ({
       rowNumber: i + 2,
       xml: generateSoapEnvelope(row),
@@ -123,6 +153,11 @@ async function upload(req, res, next) {
 
     if (records.length === 0) {
       return res.status(400).json({ error: 'CSV file is empty.' });
+    }
+
+    const validationError = validateCsv(records);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
     }
 
     // Generate combined XML payload (all rows) for storage
@@ -303,7 +338,8 @@ async function getUpload(req, res, next) {
  */
 function downloadTemplate(_req, res) {
   const header = REQUIRED_FIELDS.join(',');
-  const sample = 'USD,1000.00,REC001,2024-01-15,2024-01-15,12345,Check,Main Bank,Misc Activity,101';
+  const sample =
+    '1000.00,USD,2024-01-20,2024-01-15,2024-01-15,REC001,101,Check,Misc Activity,123456789';
   const csv = `${header}\n${sample}\n`;
 
   res.setHeader('Content-Type', 'text/csv');

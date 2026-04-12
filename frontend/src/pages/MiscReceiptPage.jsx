@@ -11,9 +11,16 @@ import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 
 const REQUIRED_COLUMNS = [
-  'CurrencyCode', 'Amount', 'ReceiptNumber', 'ReceiptDate',
-  'GlDate', 'ReceiptMethodId', 'ReceiptMethodName',
-  'BankAccountName', 'ReceivableActivityName', 'OrgId',
+  'Amount',
+  'CurrencyCode',
+  'DepositDate',
+  'ReceiptDate',
+  'GlDate',
+  'ReceiptNumber',
+  'OrgId',
+  'ReceiptMethodName',
+  'ReceivableActivityName',
+  'BankAccountNumber',
 ]
 
 export default function MiscReceiptPage() {
