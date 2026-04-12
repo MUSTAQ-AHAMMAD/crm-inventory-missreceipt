@@ -167,6 +167,7 @@ async function upload(req, res, next) {
         filename: req.file.originalname,
         xmlPayload: allXml,
         responseStatus: 'PROCESSING',
+        responseLog: '',
       },
     });
 
@@ -178,8 +179,9 @@ async function upload(req, res, next) {
     let successCount = 0;
     let failureCount = 0;
     const failures = [];
-    let lastResponseStatus = 'SUCCESS';
-    let lastResponseMessage = '';
+    const responseLogs = [];
+    let firstErrorMessage = '';
+    let lastSuccessMessage = '';
 
     // Send each row to the SOAP endpoint
     for (let i = 0; i < records.length; i++) {
@@ -209,12 +211,25 @@ async function upload(req, res, next) {
             rawData: JSON.stringify(row), // SQLite stores JSON as a string
             errorMessage: faultMsg,
           });
-          lastResponseStatus = 'PARTIAL';
-          console.error(`[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (SOAP fault): ${faultMsg} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status}`);
+          const faultSnippet = faultMsg.substring(0, 500);
+          if (!firstErrorMessage) {
+            firstErrorMessage = `Row ${rowNumber}: ${faultSnippet}`;
+          }
+          const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (SOAP fault): ${faultSnippet} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status}`;
+          responseLogs.push(logLine);
+          console.error(logLine);
         } else {
           successCount++;
-          lastResponseMessage = response.data?.substring(0, 500) || 'Success';
-          console.log(`[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SUCCESS | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status}`);
+          const successSnippet =
+            typeof response.data === 'string'
+              ? response.data.substring(0, 500)
+              : JSON.stringify(response.data || '').substring(0, 500);
+          if (!lastSuccessMessage) {
+            lastSuccessMessage = successSnippet || 'Success';
+          }
+          const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SUCCESS | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status} | Response: ${successSnippet || 'Success'}`;
+          responseLogs.push(logLine);
+          console.log(logLine);
         }
       } catch (apiErr) {
         failureCount++;
@@ -226,8 +241,16 @@ async function upload(req, res, next) {
           rawData: JSON.stringify(row), // SQLite stores JSON as a string
           errorMessage: typeof errMsg === 'string' ? errMsg.substring(0, 500) : JSON.stringify(errMsg).substring(0, 500),
         });
-        lastResponseStatus = failureCount === records.length ? 'FAILED' : 'PARTIAL';
-        console.error(`[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (API): ${typeof errMsg === 'string' ? errMsg.substring(0, 200) : JSON.stringify(errMsg).substring(0, 200)} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'}`);
+        const errSnippet =
+          typeof errMsg === 'string'
+            ? errMsg.substring(0, 500)
+            : JSON.stringify(errMsg).substring(0, 500);
+        if (!firstErrorMessage) {
+          firstErrorMessage = `Row ${rowNumber}: ${errSnippet}`;
+        }
+        const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (API): ${errSnippet} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'}`;
+        responseLogs.push(logLine);
+        console.error(logLine);
       }
     }
 
@@ -236,23 +259,35 @@ async function upload(req, res, next) {
       await prisma.miscReceiptFailure.createMany({ data: failures });
     }
 
+    const finalStatus =
+      failureCount === 0 ? 'SUCCESS' : successCount === 0 ? 'FAILED' : 'PARTIAL';
+    const responseMessage =
+      firstErrorMessage ||
+      lastSuccessMessage ||
+      `${successCount} succeeded, ${failureCount} failed`;
+    const responseLog =
+      responseLogs.length > 0 ? responseLogs.join('\n') : responseMessage;
+
     // Update upload record with results
     const updatedUpload = await prisma.miscReceiptUpload.update({
       where: { id: uploadRecord.id },
       data: {
-        responseStatus: lastResponseStatus,
-        responseMessage: lastResponseMessage || `${successCount} succeeded, ${failureCount} failed`,
+        responseStatus: finalStatus,
+        responseMessage,
+        responseLog,
       },
     });
 
-    console.log(`[MiscReceipt] Upload #${uploadRecord.id} COMPLETE | Total: ${records.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${lastResponseStatus}`);
+    console.log(
+      `[MiscReceipt] Upload #${uploadRecord.id} COMPLETE | Total: ${records.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus}`
+    );
 
     return res.json({
       uploadId: updatedUpload.id,
       totalRecords: records.length,
       successCount,
       failureCount,
-      status: lastResponseStatus,
+      status: finalStatus,
     });
   } catch (err) {
     next(err);

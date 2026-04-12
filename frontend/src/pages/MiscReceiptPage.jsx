@@ -193,7 +193,12 @@ export default function MiscReceiptPage() {
                     <td className="px-4 py-3">
                       <StatusBadge status={u.responseStatus} />
                     </td>
-                    <td className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate">{u.responseMessage}</td>
+                    <td
+                      className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate"
+                      title={u.responseLog || u.responseMessage}
+                    >
+                      {u.responseMessage}
+                    </td>
                     <td className="px-4 py-3 text-gray-400 whitespace-nowrap">
                       {new Date(u.createdAt).toLocaleDateString()}
                     </td>
