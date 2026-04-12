@@ -10,16 +10,16 @@ const prisma = require('../services/prisma');
 
 // Expected CSV columns for Misc Receipt uploads
 const REQUIRED_FIELDS = [
-  'CurrencyCode',
   'Amount',
-  'ReceiptNumber',
+  'CurrencyCode',
+  'DepositDate',
   'ReceiptDate',
   'GlDate',
-  'ReceiptMethodId',
-  'ReceiptMethodName',
-  'BankAccountName',
-  'ReceivableActivityName',
   'OrgId',
+  'ReceiptNumber',
+  'ReceiptMethodName',
+  'ReceivableActivityName',
+  'BankAccountNumber',
 ];
 
 /**
@@ -67,14 +67,14 @@ function generateSoapEnvelope(row) {
           <misc:value>${escapeXml(row.Amount)}</misc:value>
           <misc:currencyCode>${escapeXml(row.CurrencyCode)}</misc:currencyCode>
         </misc:Amount>
-        <misc:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</misc:ReceiptNumber>
+        <misc:DepositDate>${escapeXml(row.DepositDate)}</misc:DepositDate>
         <misc:ReceiptDate>${escapeXml(row.ReceiptDate)}</misc:ReceiptDate>
         <misc:GlDate>${escapeXml(row.GlDate)}</misc:GlDate>
-        <misc:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</misc:ReceiptMethodId>
+        <misc:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</misc:ReceiptNumber>
         <misc:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</misc:ReceiptMethodName>
-        <misc:BankAccountName>${escapeXml(row.BankAccountName)}</misc:BankAccountName>
         <misc:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</misc:ReceivableActivityName>
         <misc:OrgId>${escapeXml(row.OrgId)}</misc:OrgId>
+        <misc:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</misc:BankAccountNumber>
       </misc:miscellaneousReceipt>
     </misc:createMiscellaneousReceipt>
   </soapenv:Body>
@@ -332,7 +332,8 @@ async function getUpload(req, res, next) {
  */
 function downloadTemplate(_req, res) {
   const header = REQUIRED_FIELDS.join(',');
-  const sample = 'USD,1000.00,REC001,2024-01-15,2024-01-15,12345,Check,Main Bank,Misc Activity,101';
+  const sample =
+    '1000.00,USD,2024-01-20,2024-01-15,2024-01-15,REC001,101,Check,Misc Activity,123456789';
   const csv = `${header}\n${sample}\n`;
 
   res.setHeader('Content-Type', 'text/csv');
