@@ -43,10 +43,9 @@ const TEMPLATE_FIELDS = [
 
 // SOAP namespaces and action for Oracle MiscellaneousReceiptService
 const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
-const MISC_SERVICE_NS =
-  'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/';
-const MISC_TYPES_NS = `${MISC_SERVICE_NS}types/`;
-const SOAP_ACTION = `${MISC_TYPES_NS}createMiscellaneousReceipt`;
+const MISC_COMMON_NS =
+  'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
+const SOAP_ACTION = 'createMiscellaneousReceipt';
 const SOAP_ACTION_HEADER = `"${SOAP_ACTION}"`;
 
 function asText(data) {
@@ -128,29 +127,29 @@ function validateCsv(records) {
  */
 function generateSoapEnvelope(row) {
   const receiptMethodIdTag = row.ReceiptMethodId
-    ? `        <ser:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</ser:ReceiptMethodId>\n`
+    ? `        <misc:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</misc:ReceiptMethodId>\n`
     : '';
   const receiptMethodNameTag = row.ReceiptMethodName
-    ? `        <ser:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</ser:ReceiptMethodName>\n`
+    ? `        <misc:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</misc:ReceiptMethodName>\n`
     : '';
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${MISC_TYPES_NS}" xmlns:ser="${MISC_SERVICE_NS}">
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:misc="${MISC_COMMON_NS}">
   <soapenv:Header/>
   <soapenv:Body>
-    <typ:createMiscellaneousReceipt>
-      <typ:miscellaneousReceipt>
-        <ser:CurrencyCode>${escapeXml(row.CurrencyCode)}</ser:CurrencyCode>
-        <ser:Amount>${escapeXml(row.Amount)}</ser:Amount>
-        <ser:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</ser:ReceiptNumber>
-        <ser:ReceiptDate>${escapeXml(row.ReceiptDate)}</ser:ReceiptDate>
-        <ser:DepositDate>${escapeXml(row.DepositDate)}</ser:DepositDate>
-        <ser:GlDate>${escapeXml(row.GlDate)}</ser:GlDate>
-${receiptMethodIdTag}${receiptMethodNameTag}        <ser:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</ser:ReceivableActivityName>
-        <ser:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</ser:BankAccountNumber>
-        <ser:OrgId>${escapeXml(row.OrgId)}</ser:OrgId>
-      </typ:miscellaneousReceipt>
-    </typ:createMiscellaneousReceipt>
+    <misc:createMiscellaneousReceipt>
+      <misc:miscellaneousReceipt>
+        <misc:CurrencyCode>${escapeXml(row.CurrencyCode)}</misc:CurrencyCode>
+        <misc:Amount>${escapeXml(row.Amount)}</misc:Amount>
+        <misc:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</misc:ReceiptNumber>
+        <misc:ReceiptDate>${escapeXml(row.ReceiptDate)}</misc:ReceiptDate>
+        <misc:DepositDate>${escapeXml(row.DepositDate)}</misc:DepositDate>
+        <misc:GlDate>${escapeXml(row.GlDate)}</misc:GlDate>
+${receiptMethodIdTag}${receiptMethodNameTag}        <misc:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</misc:ReceivableActivityName>
+        <misc:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</misc:BankAccountNumber>
+        <misc:OrgId>${escapeXml(row.OrgId)}</misc:OrgId>
+      </misc:miscellaneousReceipt>
+    </misc:createMiscellaneousReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
 }
