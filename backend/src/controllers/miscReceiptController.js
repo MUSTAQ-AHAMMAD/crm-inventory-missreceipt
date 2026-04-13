@@ -47,6 +47,7 @@ const MISC_COMMON_NS =
   'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
 const SOAP_ACTION = 'createMiscellaneousReceipt';
 const SOAP_ACTION_HEADER = `"${SOAP_ACTION}"`;
+const REQUIRED_CURRENCY = 'SAR';
 
 function asText(data) {
   if (data == null) return '';
@@ -127,29 +128,29 @@ function validateCsv(records) {
  */
 function generateSoapEnvelope(row) {
   const receiptMethodIdTag = row.ReceiptMethodId
-    ? `        <misc:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</misc:ReceiptMethodId>\n`
+    ? `        <com:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</com:ReceiptMethodId>\n`
     : '';
   const receiptMethodNameTag = row.ReceiptMethodName
-    ? `        <misc:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</misc:ReceiptMethodName>\n`
+    ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
     : '';
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:misc="${MISC_COMMON_NS}">
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:com="${MISC_COMMON_NS}">
   <soapenv:Header/>
   <soapenv:Body>
-    <misc:createMiscellaneousReceipt>
-      <misc:miscellaneousReceipt>
-        <misc:CurrencyCode>${escapeXml(row.CurrencyCode)}</misc:CurrencyCode>
-        <misc:Amount>${escapeXml(row.Amount)}</misc:Amount>
-        <misc:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</misc:ReceiptNumber>
-        <misc:ReceiptDate>${escapeXml(row.ReceiptDate)}</misc:ReceiptDate>
-        <misc:DepositDate>${escapeXml(row.DepositDate)}</misc:DepositDate>
-        <misc:GlDate>${escapeXml(row.GlDate)}</misc:GlDate>
-${receiptMethodIdTag}${receiptMethodNameTag}        <misc:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</misc:ReceivableActivityName>
-        <misc:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</misc:BankAccountNumber>
-        <misc:OrgId>${escapeXml(row.OrgId)}</misc:OrgId>
-      </misc:miscellaneousReceipt>
-    </misc:createMiscellaneousReceipt>
+    <com:createMiscellaneousReceipt>
+      <com:miscellaneousReceipt>
+        <com:Amount>${escapeXml(row.Amount)}</com:Amount>
+        <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
+        <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
+        <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
+        <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
+        <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
+${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
+        <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
+        <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
+      </com:miscellaneousReceipt>
+    </com:createMiscellaneousReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
 }
@@ -163,6 +164,70 @@ function escapeXml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
+}
+
+function ensureNegativeAmount(rawAmount) {
+  const trimmed = String(rawAmount ?? '').trim();
+  if (trimmed === '') {
+    throw new Error('Amount is required');
+  }
+  const decimalMatch = trimmed.match(/\.(\d+)/);
+  const decimals = decimalMatch ? decimalMatch[1].length : 0;
+  const numeric = Number(trimmed);
+  if (!Number.isFinite(numeric)) {
+    throw new Error('Amount must be a valid number');
+  }
+  const negativeValue = numeric > 0 ? -numeric : numeric;
+  return decimals > 0 ? negativeValue.toFixed(decimals) : negativeValue.toString();
+}
+
+function normalizeDate(raw, fieldName) {
+  const value = String(raw ?? '').trim();
+  if (!value) {
+    throw new Error(`${fieldName} is required`);
+  }
+  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) return value;
+  const dmyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (dmyMatch) {
+    return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
+  }
+  throw new Error(`${fieldName} must be in YYYY-MM-DD format`);
+}
+
+function normalizeRow(row) {
+  return {
+    ...row,
+    Amount: ensureNegativeAmount(row.Amount),
+    CurrencyCode: REQUIRED_CURRENCY,
+    ReceiptNumber: String(row.ReceiptNumber ?? '').trim(),
+    ReceiptDate: normalizeDate(row.ReceiptDate, 'ReceiptDate'),
+    DepositDate: normalizeDate(row.DepositDate, 'DepositDate'),
+    GlDate: normalizeDate(row.GlDate, 'GlDate'),
+    ReceiptMethodId:
+      row.ReceiptMethodId !== undefined && row.ReceiptMethodId !== null
+        ? String(row.ReceiptMethodId).trim()
+        : undefined,
+    ReceiptMethodName:
+      row.ReceiptMethodName !== undefined && row.ReceiptMethodName !== null
+        ? String(row.ReceiptMethodName).trim()
+        : undefined,
+    ReceivableActivityName: String(row.ReceivableActivityName ?? '').trim(),
+    BankAccountNumber: String(row.BankAccountNumber ?? '').trim(),
+    OrgId: String(row.OrgId ?? '').trim(),
+  };
+}
+
+function normalizeRecords(records) {
+  const normalized = [];
+  for (let i = 0; i < records.length; i++) {
+    try {
+      normalized.push(normalizeRow(records[i]));
+    } catch (err) {
+      throw new Error(`Row ${i + 2}: ${err.message}`);
+    }
+  }
+  return normalized;
 }
 
 /**
@@ -191,12 +256,19 @@ async function previewXml(req, res, next) {
       return res.status(400).json({ error: validationError });
     }
 
-    const previews = records.map((row, i) => ({
+    let normalizedRecords;
+    try {
+      normalizedRecords = normalizeRecords(records);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+
+    const previews = normalizedRecords.map((row, i) => ({
       rowNumber: i + 2,
       xml: generateSoapEnvelope(row),
     }));
 
-    return res.json({ totalRows: records.length, previews });
+    return res.json({ totalRows: normalizedRecords.length, previews });
   } catch (err) {
     next(err);
   }
@@ -228,8 +300,15 @@ async function upload(req, res, next) {
       return res.status(400).json({ error: validationError });
     }
 
+    let normalizedRecords;
+    try {
+      normalizedRecords = normalizeRecords(records);
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+
     // Generate combined XML payload (all rows) for storage
-    const allXml = records.map(generateSoapEnvelope).join('\n\n');
+    const allXml = normalizedRecords.map(generateSoapEnvelope).join('\n\n');
 
     // Create upload record
     const uploadRecord = await prisma.miscReceiptUpload.create({
@@ -256,8 +335,8 @@ async function upload(req, res, next) {
     const logContext = `Action=${SOAP_ACTION_HEADER} | Endpoint=${process.env.ORACLE_SOAP_URL}`;
 
     // Send each row to the SOAP endpoint
-    for (let i = 0; i < records.length; i++) {
-      const row = records[i];
+    for (let i = 0; i < normalizedRecords.length; i++) {
+      const row = normalizedRecords[i];
       const rowNumber = i + 2;
       const soapXml = generateSoapEnvelope(row);
       const requestPreview = snippet(soapXml);
@@ -363,12 +442,12 @@ async function upload(req, res, next) {
     });
 
     console.log(
-      `[MiscReceipt] Upload #${uploadRecord.id} COMPLETE | Total: ${records.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus}`
+      `[MiscReceipt] Upload #${uploadRecord.id} COMPLETE | Total: ${normalizedRecords.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus}`
     );
 
     return res.json({
       uploadId: updatedUpload.id,
-      totalRecords: records.length,
+      totalRecords: normalizedRecords.length,
       successCount,
       failureCount,
       status: finalStatus,
@@ -455,7 +534,7 @@ async function getUpload(req, res, next) {
 function downloadTemplate(_req, res) {
   const header = TEMPLATE_FIELDS.join(',');
   const sample =
-    '1000.00,USD,2024-01-20,2024-01-15,2024-01-15,101,REC001,98765,Check,Misc Activity,123456789';
+    '-100.00,SAR,2024-01-20,2024-01-20,2024-01-20,101,REC001,98765,Cash,Misc Activity,123456789';
   const csv = `${header}\n${sample}\n`;
 
   res.setHeader('Content-Type', 'text/csv');
