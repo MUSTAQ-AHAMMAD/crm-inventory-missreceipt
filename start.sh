@@ -24,14 +24,23 @@ cd "$SCRIPT_DIR/backend"
 npx prisma generate --schema prisma/schema.prisma
 npx prisma migrate deploy
 
+# Determine backend port (env PORT overrides backend/.env, default 4000)
+BACKEND_PORT="${PORT:-$(grep -E '^PORT=' "$SCRIPT_DIR/backend/.env" | tail -n 1 | cut -d '=' -f2)}"
+BACKEND_PORT="${BACKEND_PORT:-4000}"
+
 # Start backend in background
-echo "[2/3] Starting backend (port 4000)..."
+echo "[2/3] Starting backend (port ${BACKEND_PORT})..."
 cd "$SCRIPT_DIR/backend"
-node src/index.js &
+PORT="$BACKEND_PORT" node src/index.js &
 BACKEND_PID=$!
 echo "[OK] Backend PID: $BACKEND_PID"
 
+# Give backend a moment to start and fail fast if it exited
 sleep 2
+if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+  echo "[ERROR] Backend failed to start. Check the logs above for details."
+  exit 1
+fi
 
 # Start frontend in background
 echo "[3/3] Starting frontend (port 3000)..."
@@ -48,8 +57,8 @@ echo "  Application is running!"
 echo " ============================================="
 echo ""
 echo "  Frontend : http://localhost:3000"
-echo "  Backend  : http://localhost:4000"
-echo "  API Docs : http://localhost:4000/api/docs"
+echo "  Backend  : http://localhost:${BACKEND_PORT}"
+echo "  API Docs : http://localhost:${BACKEND_PORT}/api/docs"
 echo ""
 echo "  Login:  admin@crm.com  /  Admin@123"
 echo ""
