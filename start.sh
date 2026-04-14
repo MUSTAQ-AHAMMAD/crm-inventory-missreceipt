@@ -28,6 +28,19 @@ npx prisma migrate deploy
 BACKEND_PORT="${PORT:-$(grep -E '^PORT=' "$SCRIPT_DIR/backend/.env" | tail -n 1 | cut -d '=' -f2)}"
 BACKEND_PORT="${BACKEND_PORT:-4000}"
 
+# Fail fast if the port is already in use
+PORT_PID=""
+if command -v lsof >/dev/null 2>&1; then
+  PORT_PID=$(lsof -iTCP:"$BACKEND_PORT" -sTCP:LISTEN -t 2>/dev/null | head -n 1)
+elif command -v netstat >/dev/null 2>&1; then
+  PORT_PID=$(netstat -anp 2>/dev/null | awk -v port=":${BACKEND_PORT}" '$4 ~ port && $6 == "LISTEN" {print $7}' | head -n 1 | cut -d/ -f1)
+fi
+
+if [ -n "$PORT_PID" ]; then
+  echo "[ERROR] Port ${BACKEND_PORT} is already in use (PID ${PORT_PID}). Stop that process or set PORT in backend/.env to a free port."
+  exit 1
+fi
+
 # Start backend in background
 echo "[2/3] Starting backend (port ${BACKEND_PORT})..."
 cd "$SCRIPT_DIR/backend"
