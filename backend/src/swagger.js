@@ -9,10 +9,10 @@ const options = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'CRM Inventory & Misc Receipt API',
+      title: 'CRM Inventory & Receipt API',
       version: '1.0.0',
       description:
-        'Full-stack CRM application for managing Oracle Cloud inventory uploads and miscellaneous receipts.',
+        'Full-stack CRM application for managing Oracle Cloud inventory uploads, miscellaneous receipts (SOAP), and standard receipts (REST).',
     },
     servers: [{ url: `http://localhost:${process.env.PORT || 4000}/api` }],
     components: {

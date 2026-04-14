@@ -27,6 +27,7 @@ model User {
 
   inventoryUploads   InventoryUpload[]
   miscReceiptUploads MiscReceiptUpload[]
+  standardReceiptUploads StandardReceiptUpload[]
   activityLogs       ActivityLog[]
 }
 
@@ -95,6 +96,36 @@ model MiscReceiptFailure {
   rawData      String
   errorMessage String
   createdAt    DateTime          @default(now())
+}
+
+// Tracks each standard receipt CSV upload and its REST responses
+model StandardReceiptUpload {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  user            User     @relation(fields: [userId], references: [id])
+  filename        String
+  payloadJson     String
+  totalRecords    Int      @default(0)
+  successCount    Int      @default(0)
+  failureCount    Int      @default(0)
+  status          String   @default("PROCESSING")
+  responseMessage String?
+  responseLog     String?
+  createdAt       DateTime @default(now())
+
+  failures StandardReceiptFailure[]
+}
+
+// Stores rows that failed during a standard receipt upload
+// NOTE: rawData is stored as a JSON string (SQLite has no native JSON type)
+model StandardReceiptFailure {
+  id           Int                   @id @default(autoincrement())
+  uploadId     Int
+  upload       StandardReceiptUpload @relation(fields: [uploadId], references: [id])
+  rowNumber    Int
+  rawData      String
+  errorMessage String
+  createdAt    DateTime              @default(now())
 }
 
 // Audit log for all user actions within the system

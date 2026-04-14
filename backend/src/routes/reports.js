@@ -39,7 +39,7 @@ router.get('/dashboard', dashboard);
  *         name: type
  *         schema:
  *           type: string
- *           enum: [inventory, misc]
+ *           enum: [inventory, misc, standard]
  *       - in: query
  *         name: from
  *         schema:

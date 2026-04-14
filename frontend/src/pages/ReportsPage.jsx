@@ -68,6 +68,7 @@ export default function ReportsPage() {
               <option value="">All</option>
               <option value="inventory">Inventory</option>
               <option value="misc">Misc Receipt</option>
+              <option value="standard">Standard Receipt</option>
             </select>
           </div>
         )}
@@ -101,10 +102,11 @@ function DashboardTab() {
   return (
     <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
       <h2 className="font-semibold text-gray-700">Summary Metrics</h2>
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
         {[
           { label: 'Inventory Uploads', value: data?.totalInventoryUploads },
           { label: 'Misc Uploads', value: data?.totalMiscUploads },
+          { label: 'Standard Uploads', value: data?.totalStandardReceiptUploads },
           { label: 'Success Records', value: data?.totalSuccessRecords },
           { label: 'Failed Records', value: data?.totalFailureRecords },
         ].map(({ label, value }) => (
@@ -249,6 +251,7 @@ function FailuresTab({ filters }) {
 
   const invFails = data?.inventoryFailures || []
   const miscFails = data?.miscFailures || []
+  const standardFails = data?.standardFailures || []
 
   return (
     <div className="space-y-6">
@@ -262,6 +265,12 @@ function FailuresTab({ filters }) {
         <div className="bg-white rounded-xl shadow-sm p-6">
           <h2 className="font-semibold text-gray-700 mb-4">Misc Receipt Failures ({miscFails.length})</h2>
           <FailureTable rows={miscFails} />
+        </div>
+      )}
+      {(!filters.type || filters.type === 'standard') && (
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h2 className="font-semibold text-gray-700 mb-4">Standard Receipt Failures ({standardFails.length})</h2>
+          <FailureTable rows={standardFails} />
         </div>
       )}
     </div>
