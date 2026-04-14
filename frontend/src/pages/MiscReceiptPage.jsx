@@ -18,11 +18,11 @@ const REQUIRED_COLUMNS = [
   'GlDate',
   'OrgId',
   'ReceiptNumber',
-  'ReceiptMethodId',
-  'ReceiptMethodName',
   'ReceivableActivityName',
   'BankAccountNumber',
 ]
+
+const OPTIONAL_COLUMNS = ['ReceiptMethodId', 'ReceiptMethodName']
 
 export default function MiscReceiptPage() {
   const queryClient = useQueryClient()
@@ -108,9 +108,17 @@ export default function MiscReceiptPage() {
               <span key={col} className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-mono">{col}</span>
             ))}
           </div>
-          <p className="text-xs text-purple-700 mt-2">
-            Include either <strong>ReceiptMethodId</strong> or <strong>ReceiptMethodName</strong> (both if available) so Oracle can find the receipt method.
-          </p>
+          <div className="mt-3 space-y-1">
+            <p className="text-sm font-medium text-purple-700">Optional columns (supported if your org needs a receipt method):</p>
+            <div className="flex flex-wrap gap-2">
+              {OPTIONAL_COLUMNS.map((col) => (
+                <span key={col} className="px-2 py-0.5 bg-purple-50 text-purple-600 border border-purple-200 rounded text-xs font-mono">{col}</span>
+              ))}
+            </div>
+            <p className="text-xs text-purple-700">
+              Leave these blank if your Oracle setup defaults the receipt method automatically.
+            </p>
+          </div>
         </div>
 
         <ErrorAlert message={error} onDismiss={() => setError('')} />
