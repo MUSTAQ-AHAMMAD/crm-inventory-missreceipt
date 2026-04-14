@@ -80,9 +80,21 @@ app.get('/api/health', (_req, res) => {
 app.use(errorHandler);
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`CRM Backend running on http://localhost:${PORT}`);
   console.log(`Swagger docs available at http://localhost:${PORT}/api/docs`);
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(
+      `[ERROR] Port ${PORT} is already in use. Stop the other process or set PORT to an open port in backend/.env (and update VITE_API_BASE_URL in frontend/.env).`
+    );
+    process.exit(1);
+  }
+
+  console.error(`[ERROR] Failed to start server: ${err.message}`);
+  process.exit(1);
 });
 
 module.exports = app;

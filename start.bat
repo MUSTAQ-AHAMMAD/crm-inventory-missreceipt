@@ -25,8 +25,24 @@ call npx prisma generate --schema prisma\schema.prisma
 call npx prisma migrate deploy
 echo.
 
-echo [2/3] Starting backend API server (port 4000)...
-start "CRM Backend" cmd /k "cd /d "%~dp0backend" && node src/index.js"
+REM Resolve backend port: use PORT env var, otherwise read backend\.env, fallback 4000
+set BACKEND_PORT=%PORT%
+if "%BACKEND_PORT%"=="" (
+    for /f "usebackq tokens=1,2 delims==" %%A in ("%~dp0backend\.env") do (
+        if /I "%%A"=="PORT" set BACKEND_PORT=%%B
+    )
+)
+if "%BACKEND_PORT%"=="" set BACKEND_PORT=4000
+
+REM Fail fast if the port is already in use
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":%BACKEND_PORT% .*LISTENING"') do (
+    echo [ERROR] Port %BACKEND_PORT% is already in use. Stop the process (PID %%P) or set PORT in backend\.env to a free port.
+    pause
+    exit /b 1
+)
+
+echo [2/3] Starting backend API server (port %BACKEND_PORT%)...
+start "CRM Backend" cmd /k "cd /d \"%~dp0backend\" && set PORT=%BACKEND_PORT% && node src/index.js"
 
 REM Give the backend a moment to start before opening the browser
 timeout /t 3 /nobreak >nul
@@ -43,8 +59,8 @@ echo   Application is running!
 echo  =============================================
 echo.
 echo  Frontend : http://localhost:3000
-echo  Backend  : http://localhost:4000
-echo  API Docs : http://localhost:4000/api/docs
+echo  Backend  : http://localhost:%BACKEND_PORT%
+echo  API Docs : http://localhost:%BACKEND_PORT%/api/docs
 echo.
 echo  Login with:  admin@crm.com  /  Admin@123
 echo.
