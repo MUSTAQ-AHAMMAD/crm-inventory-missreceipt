@@ -83,6 +83,9 @@ ORACLE_PASSWORD=your-oracle-password
 # Oracle REST API endpoint (inventory)
 ORACLE_INVENTORY_API_URL=https://ehxk-test.fa.em2.oraclecloud.com/fscmRestApi/resources/11.13.18.05/inventoryStagedTransactions
 
+# Oracle REST API endpoint (standard receipts)
+ORACLE_STANDARD_RECEIPT_API_URL=https://ehxk.fa.em2.oraclecloud.com/fscmRestApi/resources/11.13.18.05/standardReceipts
+
 # Oracle SOAP endpoint (miscellaneous receipts)
 ORACLE_SOAP_URL=https://ehxk-test.fa.em2.oraclecloud.com/fscmService/MiscellaneousReceiptService
 

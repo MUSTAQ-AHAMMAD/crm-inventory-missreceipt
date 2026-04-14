@@ -19,9 +19,12 @@ async function dashboard(req, res, next) {
       totalInventoryUploads,
       inventoryStats,
       totalMiscUploads,
+      totalStandardUploads,
+      standardStats,
       activeUsers,
       recentInventory,
       recentMisc,
+      recentStandard,
       recentActivity,
     ] = await Promise.all([
       prisma.inventoryUpload.count(),
@@ -29,6 +32,10 @@ async function dashboard(req, res, next) {
         _sum: { successCount: true, failureCount: true, totalRecords: true },
       }),
       prisma.miscReceiptUpload.count(),
+      prisma.standardReceiptUpload.count(),
+      prisma.standardReceiptUpload.aggregate({
+        _sum: { successCount: true, failureCount: true, totalRecords: true },
+      }),
       prisma.user.count({ where: { isActive: true } }),
       // Daily trend for inventory uploads over last 30 days
       prisma.inventoryUpload.findMany({
@@ -40,6 +47,12 @@ async function dashboard(req, res, next) {
       prisma.miscReceiptUpload.findMany({
         where: { createdAt: { gte: thirtyDaysAgo } },
         select: { createdAt: true, responseStatus: true },
+        orderBy: { createdAt: 'asc' },
+      }),
+      // Daily trend for standard receipts
+      prisma.standardReceiptUpload.findMany({
+        where: { createdAt: { gte: thirtyDaysAgo } },
+        select: { createdAt: true, status: true, successCount: true, failureCount: true },
         orderBy: { createdAt: 'asc' },
       }),
       // Recent activity logs
@@ -54,15 +67,48 @@ async function dashboard(req, res, next) {
     const trendMap = {};
     recentInventory.forEach(({ createdAt, successCount, failureCount }) => {
       const day = createdAt.toISOString().split('T')[0];
-      if (!trendMap[day]) trendMap[day] = { date: day, inventorySuccess: 0, inventoryFail: 0, miscSuccess: 0, miscFail: 0 };
+      if (!trendMap[day])
+        trendMap[day] = {
+          date: day,
+          inventorySuccess: 0,
+          inventoryFail: 0,
+          miscSuccess: 0,
+          miscFail: 0,
+          standardSuccess: 0,
+          standardFail: 0,
+        };
       trendMap[day].inventorySuccess += successCount;
       trendMap[day].inventoryFail += failureCount;
     });
     recentMisc.forEach(({ createdAt, responseStatus }) => {
       const day = createdAt.toISOString().split('T')[0];
-      if (!trendMap[day]) trendMap[day] = { date: day, inventorySuccess: 0, inventoryFail: 0, miscSuccess: 0, miscFail: 0 };
+      if (!trendMap[day])
+        trendMap[day] = {
+          date: day,
+          inventorySuccess: 0,
+          inventoryFail: 0,
+          miscSuccess: 0,
+          miscFail: 0,
+          standardSuccess: 0,
+          standardFail: 0,
+        };
       if (responseStatus === 'SUCCESS') trendMap[day].miscSuccess++;
       else trendMap[day].miscFail++;
+    });
+    recentStandard.forEach(({ createdAt, status, successCount, failureCount }) => {
+      const day = createdAt.toISOString().split('T')[0];
+      if (!trendMap[day])
+        trendMap[day] = {
+          date: day,
+          inventorySuccess: 0,
+          inventoryFail: 0,
+          miscSuccess: 0,
+          miscFail: 0,
+          standardSuccess: 0,
+          standardFail: 0,
+        };
+      trendMap[day].standardSuccess += successCount || (status === 'SUCCESS' ? 1 : 0);
+      trendMap[day].standardFail += failureCount || (status === 'SUCCESS' ? 0 : 1);
     });
 
     const dailyTrend = Object.values(trendMap).sort((a, b) => a.date.localeCompare(b.date));
@@ -70,8 +116,11 @@ async function dashboard(req, res, next) {
     return res.json({
       totalInventoryUploads,
       totalMiscUploads,
+      totalStandardReceiptUploads: totalStandardUploads,
       totalSuccessRecords: inventoryStats._sum.successCount || 0,
       totalFailureRecords: inventoryStats._sum.failureCount || 0,
+      standardReceiptSuccessRecords: standardStats._sum.successCount || 0,
+      standardReceiptFailureRecords: standardStats._sum.failureCount || 0,
       totalRecordsProcessed: inventoryStats._sum.totalRecords || 0,
       activeUsers,
       dailyTrend,
@@ -99,6 +148,7 @@ async function failures(req, res, next) {
 
     let inventoryFailures = [];
     let miscFailures = [];
+    let standardFailures = [];
 
     if (!type || type === 'inventory') {
       const raw = await prisma.inventoryFailureRecord.findMany({
@@ -130,7 +180,21 @@ async function failures(req, res, next) {
       }));
     }
 
-    return res.json({ inventoryFailures, miscFailures });
+    if (!type || type === 'standard') {
+      const raw = await prisma.standardReceiptFailure.findMany({
+        where: dateFilter.gte || dateFilter.lte ? { createdAt: dateFilter } : {},
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: { upload: { select: { filename: true, userId: true } } },
+      });
+      standardFailures = raw.map((f) => ({
+        ...f,
+        rawData: (() => { try { return JSON.parse(f.rawData); } catch { return f.rawData; } })(),
+      }));
+    }
+
+    return res.json({ inventoryFailures, miscFailures, standardFailures });
   } catch (err) {
     next(err);
   }

@@ -24,16 +24,21 @@ export default function DashboardPage() {
   const {
     totalInventoryUploads = 0,
     totalMiscUploads = 0,
+    totalStandardReceiptUploads = 0,
     totalSuccessRecords = 0,
     totalFailureRecords = 0,
+    standardReceiptSuccessRecords = 0,
+    standardReceiptFailureRecords = 0,
     activeUsers = 0,
     dailyTrend = [],
     recentActivity = [],
   } = data
 
+  const combinedSuccessRecords = totalSuccessRecords + standardReceiptSuccessRecords
+  const combinedFailureRecords = totalFailureRecords + standardReceiptFailureRecords
   const successRate =
-    totalSuccessRecords + totalFailureRecords > 0
-      ? Math.round((totalSuccessRecords / (totalSuccessRecords + totalFailureRecords)) * 100)
+    combinedSuccessRecords + combinedFailureRecords > 0
+      ? Math.round((combinedSuccessRecords / (combinedSuccessRecords + combinedFailureRecords)) * 100)
       : 0
 
   return (
@@ -41,11 +46,12 @@ export default function DashboardPage() {
       <h1 className="text-2xl font-bold text-gray-800">Dashboard</h1>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
         <StatCard title="Inventory Uploads" value={totalInventoryUploads} icon="📦" colorClass="bg-blue-500" />
         <StatCard title="Misc Receipt Uploads" value={totalMiscUploads} icon="🧾" colorClass="bg-purple-500" />
-        <StatCard title="Success Rate" value={`${successRate}%`} icon="✅" colorClass="bg-green-500" subtitle={`${totalSuccessRecords} succeeded`} />
-        <StatCard title="Failed Records" value={totalFailureRecords} icon="❌" colorClass="bg-red-500" />
+        <StatCard title="Standard Receipt Uploads" value={totalStandardReceiptUploads} icon="💳" colorClass="bg-indigo-500" />
+        <StatCard title="Success Rate" value={`${successRate}%`} icon="✅" colorClass="bg-green-500" subtitle={`${combinedSuccessRecords} succeeded`} />
+        <StatCard title="Failed Records" value={combinedFailureRecords} icon="❌" colorClass="bg-red-500" />
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
