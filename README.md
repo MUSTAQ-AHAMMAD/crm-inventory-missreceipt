@@ -247,6 +247,121 @@ crm-inventory-missreceipt/
 - Re-install Node.js from https://nodejs.org and make sure "Add to PATH" is checked.
 - Restart Command Prompt / PowerShell after installing.
 
+**Import error: `Row 14: Missing Product/Barcode`**
+- The inventory template generator normalizes headers (lowercase + strip non-alphanumerics) and throws this when the product/barcode column exists but the value in that row is empty or whitespace. Row numbers include the header row, so "Row 14" means the 13th data row.
+- Accepted column names: `Product/Barcode`, `Product`, `Barcode`, `Product Code`, `SKU` (or any header that normalizes to those names, e.g., `product barcode`).
+- If you need to pre-validate a file before uploading, use one of the snippets below. Both show how to either skip bad rows or fill a default barcode and log the problematic row for debugging.
+
+Pandas (`read_csv` or `read_excel`):
+```python
+import logging
+import pandas as pd
+
+logging.basicConfig(level=logging.INFO)
+
+BARCODE_HEADERS = ["Product/Barcode", "Product", "Barcode", "Product Code", "SKU"]
+
+def normalize(name: str) -> str:
+    """Match backend logic: lowercase + remove non-alphanumerics."""
+    return "".join(ch for ch in name.lower() if ch.isalnum())
+
+def pick_value(row, header_lookup, aliases):
+    """Return the first non-empty, non-whitespace value for any alias."""
+    for alias in aliases:
+        col = header_lookup.get(normalize(alias))
+        if not col:
+            continue
+        value = str(row.get(col, "") or "").strip()
+        if value:
+            return value, col
+    return "", None
+
+def validate_inventory_df(df, default_barcode=None, skip_missing=True):
+    header_lookup = {normalize(col): col for col in df.columns}
+    cleaned_rows = []
+    errors = []
+
+    for idx, row in df.fillna("").iterrows():
+        row_number = idx + 2  # add 1 for 0-based index + 1 for header row
+        barcode, col = pick_value(row, header_lookup, BARCODE_HEADERS)
+        if not barcode:
+            msg = f"Row {row_number}: Missing Product/Barcode"
+            logging.warning("%s | data=%s", msg, row.to_dict())  # log problematic row
+            errors.append(msg)
+            if skip_missing:
+                continue  # option 1: drop bad row
+            # option 2: fill default (caller supplies a safe placeholder)
+            barcode = default_barcode or ""
+            col = col or BARCODE_HEADERS[0]
+        # make sure the chosen column is populated in the cleaned data
+        row_out = row.copy()
+        row_out[col] = barcode
+        cleaned_rows.append(row_out)
+
+    return pd.DataFrame(cleaned_rows), errors
+
+# Usage examples:
+df = pd.read_csv("inventory.csv")  # or pd.read_excel("inventory.xlsx")
+validated_df, errors = validate_inventory_df(df, default_barcode="UNKNOWN-SKU", skip_missing=False)
+validated_df.to_csv("inventory_clean.csv", index=False)
+```
+
+Plain Python `csv` module:
+```python
+import csv
+import logging
+
+logging.basicConfig(level=logging.INFO)
+
+BARCODE_HEADERS = ["Product/Barcode", "Product", "Barcode", "Product Code", "SKU"]
+
+def normalize(name: str) -> str:
+    return "".join(ch for ch in name.lower() if ch.isalnum())
+
+def pick_value(row, header_lookup, aliases):
+    for alias in aliases:
+        col = header_lookup.get(normalize(alias))
+        if not col:
+            continue
+        value = str(row.get(col, "") or "").strip()
+        if value:
+            return value, col
+    return "", None
+
+def validate_csv(path, default_barcode=None, skip_missing=True):
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.DictReader(f)
+        header_lookup = {normalize(col): col for col in reader.fieldnames}
+        cleaned = []
+        errors = []
+
+        for row_idx, row in enumerate(reader, start=2):  # start=2 to account for header
+            barcode, col = pick_value(row, header_lookup, BARCODE_HEADERS)
+            if not barcode:
+                msg = f"Row {row_idx}: Missing Product/Barcode"
+                logging.warning("%s | data=%s", msg, row)  # print/log the bad row
+                errors.append(msg)
+                if skip_missing:
+                    continue
+                barcode = default_barcode or ""
+                col = col or BARCODE_HEADERS[0]
+            row[col] = barcode
+            cleaned.append(row)
+
+    return cleaned, errors
+
+clean_rows, errors = validate_csv("inventory.csv", default_barcode="UNKNOWN-SKU", skip_missing=False)
+with open("inventory_clean.csv", "w", newline="", encoding="utf-8") as f:
+    writer = csv.DictWriter(f, fieldnames=clean_rows[0].keys())
+    writer.writeheader()
+    writer.writerows(clean_rows)
+```
+
+Tips:
+- If you consistently want to drop bad rows, set `skip_missing=True` (default in both examples).
+- If you prefer to keep rows but mark them, pass `skip_missing=False` and provide a `default_barcode` placeholder that your downstream system can reject or flag.
+- Logging includes the row content to quickly spot formatting issues such as trailing spaces or hidden characters.
+
 **Port already in use (EADDRINUSE)**
 - Something else is using port 4000 or 3000.
 - Change `PORT=4001` in `backend/.env` and update `VITE_API_BASE_URL` in `frontend/.env`.
