@@ -352,6 +352,10 @@ async function processUploadRows(upload, records, organizationName) {
   async function processRow(row, rowNumber) {
     const validationError = validateRow(row);
     if (validationError) {
+      if (validationError === 'Empty item number (barcode)') {
+        console.warn(`[Inventory] Upload #${upload.id} Row ${rowNumber} SKIPPED: Missing barcode`);
+        return { type: 'skip-missing-barcode', rowNumber };
+      }
       return {
         type: 'failure',
         rowNumber,
@@ -418,6 +422,9 @@ async function processUploadRows(upload, records, organizationName) {
       } else if (result.type === 'skip-duplicate') {
         // Count as success for this upload to keep progress accurate,
         // but do not create another success record.
+        successCount++;
+      } else if (result.type === 'skip-missing-barcode') {
+        // Skip rows with missing barcodes without recording a failure
         successCount++;
       } else {
         failureCount++;
