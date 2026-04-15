@@ -17,10 +17,17 @@ const OUTPUT_COLUMNS = [
 ];
 
 const COLUMN_ALIASES = {
-  subinventory: ['order lines/branch/name'],
-  itemNumber: ['order lines/product/barcode'],
-  transactionReference: ['order lines/order ref'],
-  quantity: ['total', 'sum of total', 'order lines/total'],
+  subinventory: ['order lines/branch/name', 'branch/name', 'branch name', 'branch'],
+  itemNumber: ['order lines/product/barcode', 'product/barcode', 'barcode', 'item number'],
+  transactionReference: ['order lines/order ref', 'order ref', 'order reference'],
+  quantity: ['total', 'sum of total', 'order lines/total', 'total qty', 'quantity', 'qty'],
+};
+
+const REQUIRED_LABELS = {
+  subinventory: 'Branch/Name (Order Lines/Branch/Name)',
+  itemNumber: 'Product/Barcode (Order Lines/Product/Barcode)',
+  transactionReference: 'Order Ref (Order Lines/Order Ref)',
+  quantity: 'Total',
 };
 
 const PREVIEW_LIMIT = 50;
@@ -29,6 +36,10 @@ function validationError(message) {
   const err = new Error(message);
   err.isValidation = true;
   return err;
+}
+
+function normalizeKey(key) {
+  return key.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 function parseCsv(buffer) {
@@ -46,16 +57,13 @@ function parseCsv(buffer) {
 }
 
 function ensureRequiredHeaders(records) {
-  const headerSet = new Set(Object.keys(records[0] || {}).map((h) => h.trim().toLowerCase()));
+  const headerSet = new Set(Object.keys(records[0] || {}).map(normalizeKey));
   const missing = [];
 
   for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
-    const hasMatch = aliases.some((alias) => headerSet.has(alias));
+    const hasMatch = aliases.some((alias) => headerSet.has(normalizeKey(alias)));
     if (!hasMatch) {
-      if (field === 'subinventory') missing.push('Order Lines/Branch/Name');
-      if (field === 'itemNumber') missing.push('Order Lines/Product/Barcode');
-      if (field === 'transactionReference') missing.push('Order Lines/Order Ref');
-      if (field === 'quantity') missing.push('Total');
+      missing.push(REQUIRED_LABELS[field]);
     }
   }
 
@@ -64,18 +72,19 @@ function ensureRequiredHeaders(records) {
   }
 }
 
-function toLowerRow(row) {
+function toNormalizedRow(row) {
   const normalized = {};
   for (const [key, value] of Object.entries(row)) {
-    normalized[key.trim().toLowerCase()] = value;
+    normalized[normalizeKey(key)] = value;
   }
   return normalized;
 }
 
 function pickField(row, aliases, label, rowNumber) {
   for (const alias of aliases) {
-    if (Object.prototype.hasOwnProperty.call(row, alias)) {
-      const value = String(row[alias] ?? '').trim();
+    const normalizedKey = normalizeKey(alias);
+    if (Object.prototype.hasOwnProperty.call(row, normalizedKey)) {
+      const value = String(row[normalizedKey] ?? '').trim();
       if (value) return value;
       break;
     }
@@ -103,18 +112,18 @@ function convertRecords(records) {
 
   records.forEach((row, idx) => {
     const rowNumber = idx + 2; // account for header row
-    const normalized = toLowerRow(row);
+    const normalized = toNormalizedRow(row);
 
-    const itemNumber = pickField(normalized, COLUMN_ALIASES.itemNumber, 'Order Lines/Product/Barcode', rowNumber);
-    const subinventory = pickField(normalized, COLUMN_ALIASES.subinventory, 'Order Lines/Branch/Name', rowNumber);
+    const itemNumber = pickField(normalized, COLUMN_ALIASES.itemNumber, REQUIRED_LABELS.itemNumber, rowNumber);
+    const subinventory = pickField(normalized, COLUMN_ALIASES.subinventory, REQUIRED_LABELS.subinventory, rowNumber);
     const transactionReference = pickField(
       normalized,
       COLUMN_ALIASES.transactionReference,
-      'Order Lines/Order Ref',
+      REQUIRED_LABELS.transactionReference,
       rowNumber
     );
     const quantity = parseQuantity(
-      pickField(normalized, COLUMN_ALIASES.quantity, 'Total', rowNumber),
+      pickField(normalized, COLUMN_ALIASES.quantity, REQUIRED_LABELS.quantity, rowNumber),
       rowNumber
     );
 

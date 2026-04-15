@@ -95,10 +95,10 @@ export default function InventoryTemplateGenerationPage() {
           <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
             <p className="text-sm font-semibold text-blue-700 mb-2">Mapping</p>
             <ul className="text-sm text-blue-800 space-y-1 list-disc list-inside">
-              <li>Order Lines/Branch/Name → SubinventoryCode</li>
-              <li>Order Lines/Product/Barcode → ItemNumber</li>
-              <li>Order Lines/Order Ref → TransactionReference</li>
-              <li>Sum of Total (keeps sign) → TransactionQuantity</li>
+              <li>Branch/Name or Order Lines/Branch/Name → SubinventoryCode</li>
+              <li>Product/Barcode or Order Lines/Product/Barcode → ItemNumber</li>
+              <li>Order Ref (Order Lines/Order Ref also works) → TransactionReference</li>
+              <li>Total or Sum of Total (keeps sign) → TransactionQuantity</li>
             </ul>
           </div>
           <div className="bg-green-50 border border-green-100 rounded-lg p-4">
