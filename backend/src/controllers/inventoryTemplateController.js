@@ -48,6 +48,7 @@ const REQUIRED_LABELS = {
 const REQUIRED_FIELDS = ['subinventory', 'itemNumber', 'transactionReference', 'quantity'];
 
 const PREVIEW_LIMIT = 50;
+const MAX_WARNINGS = 20;
 
 function validationError(message) {
   const err = new Error(message);
@@ -190,48 +191,72 @@ function convertRecords(records) {
   ensureRequiredHeaders(records);
 
   const aggregated = new Map();
+  const warnings = [];
+  let skippedRows = 0;
+
+  const addWarning = (message) => {
+    if (warnings.length < MAX_WARNINGS) {
+      warnings.push(message);
+    }
+  };
 
   records.forEach((row, idx) => {
     const rowNumber = idx + 2; // account for header row
     const normalized = toNormalizedRow(row);
 
-    const itemNumber = pickField(normalized, COLUMN_ALIASES.itemNumber, REQUIRED_LABELS.itemNumber, rowNumber);
-    const subinventory = extractSubinventoryFromName(
-      pickField(normalized, COLUMN_ALIASES.subinventory, REQUIRED_LABELS.subinventory, rowNumber),
-      rowNumber
-    );
-    const transactionReference = pickField(
-      normalized,
-      COLUMN_ALIASES.transactionReference,
-      REQUIRED_LABELS.transactionReference,
-      rowNumber
-    );
-    const transactionDate = (() => {
-      const rawDate = pickOptionalField(normalized, COLUMN_ALIASES.transactionDate);
-      return rawDate ? parseDate(rawDate, rowNumber) : currentDateString();
-    })();
-    const transactionUnitOfMeasure = pickOptionalField(normalized, COLUMN_ALIASES.unitOfMeasure) || 'Each';
-    const quantity = parseQuantity(
-      pickField(normalized, COLUMN_ALIASES.quantity, REQUIRED_LABELS.quantity, rowNumber),
-      rowNumber,
-      REQUIRED_LABELS.quantity
-    );
+    const hasAnyValue = Object.values(normalized).some((val) => String(val ?? '').trim() !== '');
+    if (!hasAnyValue) {
+      skippedRows += 1;
+      addWarning(`Row ${rowNumber}: Skipped empty row`);
+      return;
+    }
 
-    const key = `${subinventory}|||${itemNumber}|||${transactionReference}|||${transactionDate}|||${transactionUnitOfMeasure}`;
-    const existing = aggregated.get(key);
+    try {
+      const itemNumber = pickField(normalized, COLUMN_ALIASES.itemNumber, REQUIRED_LABELS.itemNumber, rowNumber);
+      const subinventory = extractSubinventoryFromName(
+        pickField(normalized, COLUMN_ALIASES.subinventory, REQUIRED_LABELS.subinventory, rowNumber),
+        rowNumber
+      );
+      const transactionReference = pickField(
+        normalized,
+        COLUMN_ALIASES.transactionReference,
+        REQUIRED_LABELS.transactionReference,
+        rowNumber
+      );
+      const transactionDate = (() => {
+        const rawDate = pickOptionalField(normalized, COLUMN_ALIASES.transactionDate);
+        return rawDate ? parseDate(rawDate, rowNumber) : currentDateString();
+      })();
+      const transactionUnitOfMeasure = pickOptionalField(normalized, COLUMN_ALIASES.unitOfMeasure) || 'Each';
+      const quantity = parseQuantity(
+        pickField(normalized, COLUMN_ALIASES.quantity, REQUIRED_LABELS.quantity, rowNumber),
+        rowNumber,
+        REQUIRED_LABELS.quantity
+      );
 
-    if (existing) {
-      existing.TransactionQuantity += quantity;
-    } else {
-      aggregated.set(key, {
-        TransactionTypeName: '',
-        ItemNumber: itemNumber,
-        SubinventoryCode: subinventory,
-        TransactionDate: transactionDate,
-        TransactionQuantity: quantity,
-        TransactionReference: transactionReference,
-        TransactionUnitOfMeasure: transactionUnitOfMeasure,
-      });
+      const key = `${subinventory}|||${itemNumber}|||${transactionReference}|||${transactionDate}|||${transactionUnitOfMeasure}`;
+      const existing = aggregated.get(key);
+
+      if (existing) {
+        existing.TransactionQuantity += quantity;
+      } else {
+        aggregated.set(key, {
+          TransactionTypeName: '',
+          ItemNumber: itemNumber,
+          SubinventoryCode: subinventory,
+          TransactionDate: transactionDate,
+          TransactionQuantity: quantity,
+          TransactionReference: transactionReference,
+          TransactionUnitOfMeasure: transactionUnitOfMeasure,
+        });
+      }
+    } catch (err) {
+      if (err.isValidation) {
+        skippedRows += 1;
+        addWarning(err.message);
+        return;
+      }
+      throw err;
     }
   });
 
@@ -249,7 +274,7 @@ function convertRecords(records) {
     throw validationError('No rows to convert after processing CSV.');
   }
 
-  return converted;
+  return { converted, warnings, skippedRows };
 }
 
 function toCsvValue(value) {
@@ -276,7 +301,7 @@ async function previewTemplate(req, res, next) {
     }
 
     const records = parseCsv(req.file.buffer);
-    const converted = convertRecords(records);
+    const { converted, warnings, skippedRows } = convertRecords(records);
 
     const previewRows = converted.slice(0, PREVIEW_LIMIT);
 
@@ -284,6 +309,8 @@ async function previewTemplate(req, res, next) {
       totalRows: converted.length,
       previewRows,
       headers: OUTPUT_COLUMNS,
+      warnings,
+      skippedRows,
     });
   } catch (err) {
     if (err.isValidation) {
@@ -300,11 +327,12 @@ async function downloadTemplate(req, res, next) {
     }
 
     const records = parseCsv(req.file.buffer);
-    const converted = convertRecords(records);
+    const { converted, skippedRows } = convertRecords(records);
     const csv = toCsv(converted);
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename=\"inventory_template_generated.csv\"');
+    res.setHeader('X-Inventory-Template-Skipped-Rows', skippedRows);
     return res.send(csv);
   } catch (err) {
     if (err.isValidation) {
