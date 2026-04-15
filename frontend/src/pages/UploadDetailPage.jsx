@@ -11,6 +11,32 @@ import api from '../hooks/useApi'
 import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 
+function parseResponseBody(body) {
+  if (!body) return null
+  if (typeof body === 'string') {
+    try {
+      return JSON.parse(body)
+    } catch {
+      return body
+    }
+  }
+  return body
+}
+
+function formatResponsePreview(body) {
+  const parsed = parseResponseBody(body)
+  if (!parsed) return '—'
+  const text = typeof parsed === 'string' ? parsed : JSON.stringify(parsed)
+  return text.length > 80 ? `${text.slice(0, 80)}…` : text
+}
+
+function formatResponseDetail(body) {
+  const parsed = parseResponseBody(body)
+  if (!parsed) return '—'
+  if (typeof parsed === 'string') return parsed
+  return JSON.stringify(parsed, null, 2)
+}
+
 const TABS = ['Overview', 'Success Records', 'Failure Records']
 
 export default function UploadDetailPage() {
@@ -268,6 +294,8 @@ function RecordsTable({ records, type }) {
             <th className="px-4 py-2 text-left">Organization</th>
             <th className="px-4 py-2 text-left">Subinventory</th>
             <th className="px-4 py-2 text-left">Quantity</th>
+            <th className="px-4 py-2 text-left">HTTP</th>
+            <th className="px-4 py-2 text-left">Response</th>
             {type === 'failure' && <th className="px-4 py-2 text-left">Error</th>}
             <th className="px-4 py-2 text-left">Data</th>
             <th className="px-4 py-2 text-left">Time</th>
@@ -288,6 +316,19 @@ function RecordsTable({ records, type }) {
               </td>
               <td className="px-4 py-3 text-xs text-gray-600">
                 {r.rawData?.TransactionQuantity || '—'}
+              </td>
+              <td className="px-4 py-3 text-xs text-gray-600">
+                {r.responseStatus ? `HTTP ${r.responseStatus}` : '—'}
+              </td>
+              <td className="px-4 py-3 text-xs text-gray-600 max-w-xs">
+                <details className="cursor-pointer">
+                  <summary className="text-xs text-blue-600 hover:underline">
+                    {formatResponsePreview(r.responseBody)}
+                  </summary>
+                  <pre className="mt-2 text-xs bg-gray-100 rounded p-2 overflow-x-auto max-w-md">
+                    {formatResponseDetail(r.responseBody)}
+                  </pre>
+                </details>
               </td>
               {type === 'failure' && (
                 <td className="px-4 py-3 text-red-600 text-xs max-w-xs">
