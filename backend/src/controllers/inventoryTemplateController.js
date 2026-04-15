@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Inventory Template Generation controller.
  * Converts Amro inventory export CSV files into the inventory transaction
  * template format with aggregated quantities and derived transaction types.
@@ -16,14 +16,13 @@ const OUTPUT_COLUMNS = [
   'TransactionUnitOfMeasure',
 ];
 
+// Aliases are matched case-insensitively against the original header (trimmed).
+// Order matters — more specific aliases should come first.
 const COLUMN_ALIASES = {
-  subinventory: [
-    'branch/name',
-    'branch',
-    'order lines/branch/name',
-    'order lines/product/name',
-    'product/name',
-    'product name',
+  orderRef: [
+    'order lines/order ref',
+    'order ref',
+    'order reference',
   ],
   itemNumber: [
     'order lines/product/barcode',
@@ -32,20 +31,34 @@ const COLUMN_ALIASES = {
     'barcode',
     'item number',
   ],
-  transactionReference: ['order lines/order ref', 'order ref', 'order reference'],
-  transactionDate: ['order lines/order ref/date', 'order ref date', 'date'],
-  quantity: ['total', 'order lines/total', 'order lines/base quantity', 'base quantity', 'quantity', 'qty'],
-  unitOfMeasure: ['order lines/base uom', 'base uom', 'uom', 'unit of measure'],
+  transactionDate: [
+    'order lines/order ref/date',
+    'order ref date',
+    'date',
+  ],
+  quantity: [
+    'total',
+    'order lines/total',
+    'order lines/base quantity',
+    'base quantity',
+    'quantity',
+    'qty',
+  ],
+  unitOfMeasure: [
+    'order lines/base uom',
+    'base uom',
+    'uom',
+    'unit of measure',
+  ],
 };
 
 const REQUIRED_LABELS = {
-  subinventory: 'Branch/Name (prefix before "/")',
+  orderRef: 'Order Lines/Order Ref',
   itemNumber: 'Product/Barcode',
-  transactionReference: 'Order Ref',
   quantity: 'Total',
 };
 
-const REQUIRED_FIELDS = ['subinventory', 'itemNumber', 'transactionReference', 'quantity'];
+const REQUIRED_FIELDS = ['orderRef', 'itemNumber', 'quantity'];
 
 const PREVIEW_LIMIT = 50;
 const MAX_WARNINGS = 20;
@@ -54,10 +67,6 @@ function validationError(message) {
   const err = new Error(message);
   err.isValidation = true;
   return err;
-}
-
-function normalizeKey(key) {
-  return key.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 function parseCsv(buffer) {
@@ -74,13 +83,26 @@ function parseCsv(buffer) {
   return records;
 }
 
+/**
+ * Builds a lookup map from normalised header → original header.
+ * Normalisation here is ONLY lowercase + trim — we keep slashes and spaces
+ * so that "order lines/order ref" and "order lines/order ref/date" remain distinct.
+ */
+function buildHeaderMap(record) {
+  const map = new Map();
+  for (const key of Object.keys(record)) {
+    map.set(key.trim().toLowerCase(), key);
+  }
+  return map;
+}
+
 function ensureRequiredHeaders(records) {
-  const headerSet = new Set(Object.keys(records[0] || {}).map(normalizeKey));
+  const headerMap = buildHeaderMap(records[0] || {});
   const missing = [];
 
   for (const field of REQUIRED_FIELDS) {
     const aliases = COLUMN_ALIASES[field] || [];
-    const hasMatch = aliases.some((alias) => headerSet.has(normalizeKey(alias)));
+    const hasMatch = aliases.some((alias) => headerMap.has(alias.trim().toLowerCase()));
     if (!hasMatch) {
       missing.push(REQUIRED_LABELS[field]);
     }
@@ -91,33 +113,30 @@ function ensureRequiredHeaders(records) {
   }
 }
 
-function toNormalizedRow(row) {
-  const normalized = {};
-  for (const [key, value] of Object.entries(row)) {
-    normalized[normalizeKey(key)] = value;
-  }
-  return normalized;
-}
-
-function pickField(row, aliases, label, rowNumber) {
+/**
+ * Picks the first alias that exists in the row (case-insensitive, trim only).
+ * Throws a validation error if no alias resolves to a non-empty value.
+ */
+function pickField(row, headerMap, aliases, label, rowNumber) {
   for (const alias of aliases) {
-    const normalizedKey = normalizeKey(alias);
-    if (Object.prototype.hasOwnProperty.call(row, normalizedKey)) {
-      const value = String(row[normalizedKey] ?? '').trim();
+    const originalKey = headerMap.get(alias.trim().toLowerCase());
+    if (originalKey !== undefined) {
+      const value = String(row[originalKey] ?? '').trim();
       if (value) return value;
-      break;
     }
   }
   throw validationError(`Row ${rowNumber}: Missing ${label}`);
 }
 
-function pickOptionalField(row, aliases) {
+/**
+ * Same as pickField but returns '' instead of throwing when not found.
+ */
+function pickOptionalField(row, headerMap, aliases) {
   for (const alias of aliases) {
-    const normalizedKey = normalizeKey(alias);
-    if (Object.prototype.hasOwnProperty.call(row, normalizedKey)) {
-      const value = String(row[normalizedKey] ?? '').trim();
+    const originalKey = headerMap.get(alias.trim().toLowerCase());
+    if (originalKey !== undefined) {
+      const value = String(row[originalKey] ?? '').trim();
       if (value) return value;
-      break;
     }
   }
   return '';
@@ -160,14 +179,20 @@ function parseDate(raw, rowNumber) {
   month = month.padStart(2, '0');
   day = day.padStart(2, '0');
 
-  if (!year || !month || !day || Number.isNaN(Number(year)) || Number.isNaN(Number(month)) || Number.isNaN(Number(day))) {
+  if (
+    !year || !month || !day ||
+    Number.isNaN(Number(year)) ||
+    Number.isNaN(Number(month)) ||
+    Number.isNaN(Number(day))
+  ) {
     throw validationError(`Row ${rowNumber}: Invalid TransactionDate value "${trimmed}"`);
   }
 
   return `${year}-${month}-${day}`;
 }
 
-function extractSubinventoryFromName(raw, rowNumber) {
+// "ALARIDAH/8371" → "ALARIDAH"
+function extractSubinventoryFromOrderRef(raw, rowNumber) {
   if (!raw) {
     throw validationError(`Row ${rowNumber}: Missing SubinventoryCode`);
   }
@@ -201,10 +226,13 @@ function convertRecords(records) {
   };
 
   records.forEach((row, idx) => {
-    const rowNumber = idx + 2; // account for header row
-    const normalized = toNormalizedRow(row);
+    const rowNumber = idx + 2;
 
-    const hasAnyValue = Object.values(normalized).some((val) => String(val ?? '').trim() !== '');
+    // Build header map once per row (headers are the same for all rows,
+    // but building from the row keys is safe and simple).
+    const headerMap = buildHeaderMap(row);
+
+    const hasAnyValue = Object.values(row).some((val) => String(val ?? '').trim() !== '');
     if (!hasAnyValue) {
       skippedRows += 1;
       addWarning(`Row ${rowNumber}: Skipped empty row`);
@@ -212,24 +240,27 @@ function convertRecords(records) {
     }
 
     try {
-      const itemNumber = pickField(normalized, COLUMN_ALIASES.itemNumber, REQUIRED_LABELS.itemNumber, rowNumber);
-      const subinventory = extractSubinventoryFromName(
-        pickField(normalized, COLUMN_ALIASES.subinventory, REQUIRED_LABELS.subinventory, rowNumber),
-        rowNumber
-      );
-      const transactionReference = pickField(
-        normalized,
-        COLUMN_ALIASES.transactionReference,
-        REQUIRED_LABELS.transactionReference,
-        rowNumber
-      );
+      const itemNumber = pickField(row, headerMap, COLUMN_ALIASES.itemNumber, REQUIRED_LABELS.itemNumber, rowNumber);
+
+      // "ALARIDAH/8371" — used for both SubinventoryCode and TransactionReference
+      const orderRefRaw = pickField(row, headerMap, COLUMN_ALIASES.orderRef, REQUIRED_LABELS.orderRef, rowNumber);
+
+      // SubinventoryCode = "ALARIDAH"
+      const subinventory = extractSubinventoryFromOrderRef(orderRefRaw, rowNumber);
+
+      // TransactionReference = "ALARIDAH/8371"
+      const transactionReference = orderRefRaw;
+
       const transactionDate = (() => {
-        const rawDate = pickOptionalField(normalized, COLUMN_ALIASES.transactionDate);
+        const rawDate = pickOptionalField(row, headerMap, COLUMN_ALIASES.transactionDate);
         return rawDate ? parseDate(rawDate, rowNumber) : currentDateString();
       })();
-      const transactionUnitOfMeasure = pickOptionalField(normalized, COLUMN_ALIASES.unitOfMeasure) || 'Each';
+
+      const transactionUnitOfMeasure =
+        pickOptionalField(row, headerMap, COLUMN_ALIASES.unitOfMeasure) || 'Each';
+
       const quantity = parseQuantity(
-        pickField(normalized, COLUMN_ALIASES.quantity, REQUIRED_LABELS.quantity, rowNumber),
+        pickField(row, headerMap, COLUMN_ALIASES.quantity, REQUIRED_LABELS.quantity, rowNumber),
         rowNumber,
         REQUIRED_LABELS.quantity
       );
@@ -302,7 +333,6 @@ async function previewTemplate(req, res, next) {
 
     const records = parseCsv(req.file.buffer);
     const { converted, warnings, skippedRows } = convertRecords(records);
-
     const previewRows = converted.slice(0, PREVIEW_LIMIT);
 
     return res.json({
@@ -331,7 +361,7 @@ async function downloadTemplate(req, res, next) {
     const csv = toCsv(converted);
 
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename=\"inventory_template_generated.csv\"');
+    res.setHeader('Content-Disposition', 'attachment; filename="inventory_template_generated.csv"');
     res.setHeader('X-Inventory-Template-Skipped-Rows', skippedRows);
     return res.send(csv);
   } catch (err) {
