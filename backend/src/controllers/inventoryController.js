@@ -9,6 +9,7 @@ const prisma = require('../services/prisma');
 
 // Prefix used to tag validation failure messages so retry logic can identify them
 const VALIDATION_ERROR_PREFIX = 'Validation: ';
+const MISSING_BARCODE_ERROR = 'Empty item number (barcode)';
 
 // Required CSV column names mapped to Oracle REST API fields
 // OrganizationName is now provided via a form field, not the CSV
@@ -100,7 +101,7 @@ function normalizeRow(row) {
  */
 function validateRow(row) {
   if (!row.ItemNumber || row.ItemNumber.trim() === '') {
-    return 'Empty item number (barcode)';
+    return MISSING_BARCODE_ERROR;
   }
   if (!row.TransactionTypeName || row.TransactionTypeName.trim() === '') {
     return 'Empty transaction type';
@@ -352,7 +353,7 @@ async function processUploadRows(upload, records, organizationName) {
   async function processRow(row, rowNumber) {
     const validationError = validateRow(row);
     if (validationError) {
-      if (validationError === 'Empty item number (barcode)') {
+      if (validationError === MISSING_BARCODE_ERROR) {
         console.warn(`[Inventory] Upload #${upload.id} Row ${rowNumber} SKIPPED: Missing barcode`);
         return { type: 'skip-missing-barcode', rowNumber };
       }
