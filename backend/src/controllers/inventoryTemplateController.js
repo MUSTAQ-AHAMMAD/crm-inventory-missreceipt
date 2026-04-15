@@ -17,17 +17,21 @@ const OUTPUT_COLUMNS = [
 ];
 
 const COLUMN_ALIASES = {
-  subinventory: ['order lines/branch/name', 'branch/name', 'branch name', 'branch'],
+  subinventory: ['order lines/product/name', 'product/name', 'product name'],
   itemNumber: ['order lines/product/barcode', 'product/barcode', 'barcode', 'item number'],
   transactionReference: ['order lines/order ref', 'order ref', 'order reference'],
-  quantity: ['total', 'sum of total', 'order lines/total', 'total qty', 'quantity', 'qty'],
+  transactionDate: ['order lines/order ref/date', 'order ref date', 'date'],
+  quantity: ['order lines/base quantity', 'base quantity', 'quantity', 'qty'],
+  unitOfMeasure: ['order lines/base uom', 'base uom', 'uom', 'unit of measure'],
 };
 
 const REQUIRED_LABELS = {
-  subinventory: 'Branch/Name (Order Lines/Branch/Name)',
-  itemNumber: 'Product/Barcode (Order Lines/Product/Barcode)',
-  transactionReference: 'Order Ref (Order Lines/Order Ref)',
-  quantity: 'Total',
+  subinventory: 'Order Lines/Product/Name (prefix before "/")',
+  itemNumber: 'Order Lines/Product/Barcode',
+  transactionReference: 'Order Lines/Order Ref',
+  transactionDate: 'Order Lines/Order Ref/Date',
+  quantity: 'Order Lines/Base Quantity',
+  unitOfMeasure: 'Order Lines/Base UoM',
 };
 
 const PREVIEW_LIMIT = 50;
@@ -95,19 +99,62 @@ function pickField(row, aliases, label, rowNumber) {
 function parseQuantity(raw, rowNumber) {
   const cleaned = String(raw ?? '').replace(/,/g, '').trim();
   if (cleaned === '') {
-    throw validationError(`Row ${rowNumber}: Missing Total value`);
+    throw validationError(`Row ${rowNumber}: Missing Base Quantity value`);
   }
   const qty = Number(cleaned);
   if (!Number.isFinite(qty)) {
-    throw validationError(`Row ${rowNumber}: Invalid Total value "${cleaned}"`);
+    throw validationError(`Row ${rowNumber}: Invalid Base Quantity value "${cleaned}"`);
   }
   return qty;
+}
+
+function parseDate(raw, rowNumber) {
+  if (!raw) throw validationError(`Row ${rowNumber}: Missing TransactionDate`);
+  const trimmed = String(raw).trim();
+  const spaceIdx = trimmed.indexOf(' ');
+  const datePart = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
+
+  const sep = datePart.includes('/') ? '/' : datePart.includes('-') ? '-' : null;
+  if (!sep) {
+    throw validationError(`Row ${rowNumber}: Invalid TransactionDate value "${trimmed}"`);
+  }
+  const parts = datePart.split(sep);
+  if (parts.length !== 3) {
+    throw validationError(`Row ${rowNumber}: Invalid TransactionDate value "${trimmed}"`);
+  }
+
+  let year, month, day;
+  if (parts[0].length === 4) {
+    [year, month, day] = parts;
+  } else {
+    [day, month, year] = parts;
+  }
+
+  month = month.padStart(2, '0');
+  day = day.padStart(2, '0');
+
+  if (!year || !month || !day || Number.isNaN(Number(year)) || Number.isNaN(Number(month)) || Number.isNaN(Number(day))) {
+    throw validationError(`Row ${rowNumber}: Invalid TransactionDate value "${trimmed}"`);
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function extractSubinventoryFromName(raw, rowNumber) {
+  if (!raw) {
+    throw validationError(`Row ${rowNumber}: Missing SubinventoryCode`);
+  }
+  const value = String(raw).trim();
+  const prefix = value.split('/')[0]?.trim();
+  if (!prefix) {
+    throw validationError(`Row ${rowNumber}: Missing SubinventoryCode`);
+  }
+  return prefix;
 }
 
 function convertRecords(records) {
   ensureRequiredHeaders(records);
 
-  const today = new Date().toISOString().slice(0, 10);
   const aggregated = new Map();
 
   records.forEach((row, idx) => {
@@ -115,11 +162,24 @@ function convertRecords(records) {
     const normalized = toNormalizedRow(row);
 
     const itemNumber = pickField(normalized, COLUMN_ALIASES.itemNumber, REQUIRED_LABELS.itemNumber, rowNumber);
-    const subinventory = pickField(normalized, COLUMN_ALIASES.subinventory, REQUIRED_LABELS.subinventory, rowNumber);
+    const subinventory = extractSubinventoryFromName(
+      pickField(normalized, COLUMN_ALIASES.subinventory, REQUIRED_LABELS.subinventory, rowNumber),
+      rowNumber
+    );
     const transactionReference = pickField(
       normalized,
       COLUMN_ALIASES.transactionReference,
       REQUIRED_LABELS.transactionReference,
+      rowNumber
+    );
+    const transactionDate = parseDate(
+      pickField(normalized, COLUMN_ALIASES.transactionDate, REQUIRED_LABELS.transactionDate, rowNumber),
+      rowNumber
+    );
+    const transactionUnitOfMeasure = pickField(
+      normalized,
+      COLUMN_ALIASES.unitOfMeasure,
+      REQUIRED_LABELS.unitOfMeasure,
       rowNumber
     );
     const quantity = parseQuantity(
@@ -127,7 +187,7 @@ function convertRecords(records) {
       rowNumber
     );
 
-    const key = `${subinventory}|||${itemNumber}|||${transactionReference}`;
+    const key = `${subinventory}|||${itemNumber}|||${transactionReference}|||${transactionDate}|||${transactionUnitOfMeasure}`;
     const existing = aggregated.get(key);
 
     if (existing) {
@@ -137,10 +197,10 @@ function convertRecords(records) {
         TransactionTypeName: '',
         ItemNumber: itemNumber,
         SubinventoryCode: subinventory,
-        TransactionDate: today,
+        TransactionDate: transactionDate,
         TransactionQuantity: quantity,
         TransactionReference: transactionReference,
-        TransactionUnitOfMeasure: 'Ea',
+        TransactionUnitOfMeasure: transactionUnitOfMeasure,
       });
     }
   });
