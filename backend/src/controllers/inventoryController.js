@@ -30,6 +30,8 @@ const COLUMN_ALIASES = {
   'barcode': 'ItemNumber',
   'item number': 'ItemNumber',
   'product barcode': 'ItemNumber',
+  'order lines/base uom': 'TransactionUnitOfMeasure',
+  'order lines/base quantity': 'TransactionQuantity',
   'transaction type name': 'TransactionTypeName',
   'transaction type': 'TransactionTypeName',
   'subinventory code': 'SubinventoryCode',
@@ -63,6 +65,17 @@ function normalizeRow(row) {
   const normalized = {};
   for (const [key, value] of Object.entries(row)) {
     const lowerKey = key.trim().toLowerCase();
+    if (lowerKey === 'order lines/order ref') {
+      const rawRef = value ?? '';
+      const refStr = String(rawRef);
+      const subinventory = extractBranchFromRef(refStr) || refStr.trim();
+      if (subinventory && !('SubinventoryCode' in normalized)) {
+        normalized.SubinventoryCode = subinventory;
+      }
+      if (!('TransactionReference' in normalized)) {
+        normalized.TransactionReference = rawRef;
+      }
+    }
     const canonical = COLUMN_ALIASES[lowerKey];
     if (canonical && !(canonical in normalized)) {
       normalized[canonical] = value;
