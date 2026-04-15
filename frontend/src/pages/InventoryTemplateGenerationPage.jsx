@@ -23,6 +23,8 @@ export default function InventoryTemplateGenerationPage() {
   const [file, setFile] = useState(null)
   const [previewRows, setPreviewRows] = useState([])
   const [totalRows, setTotalRows] = useState(0)
+  const [skippedRows, setSkippedRows] = useState(0)
+  const [warnings, setWarnings] = useState([])
   const [previewing, setPreviewing] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [error, setError] = useState('')
@@ -32,6 +34,8 @@ export default function InventoryTemplateGenerationPage() {
     setError('')
     setPreviewRows([])
     setTotalRows(0)
+    setSkippedRows(0)
+    setWarnings([])
     setPreviewing(true)
 
     const formData = new FormData()
@@ -43,6 +47,8 @@ export default function InventoryTemplateGenerationPage() {
       })
       setPreviewRows(res.data.previewRows || [])
       setTotalRows(res.data.totalRows || 0)
+      setSkippedRows(res.data.skippedRows || 0)
+      setWarnings(res.data.warnings || [])
     } catch (err) {
       setError(err.response?.data?.error || 'Preview failed.')
     } finally {
@@ -149,6 +155,21 @@ export default function InventoryTemplateGenerationPage() {
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
             <strong>{totalRows}</strong> converted row{totalRows === 1 ? '' : 's'}. Preview shows the first{' '}
             {Math.min(totalRows, previewRows.length)}.
+          </div>
+        )}
+
+        {(skippedRows > 0 || warnings.length > 0) && (
+          <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-sm text-yellow-800 space-y-2">
+            <div className="font-semibold text-yellow-900">
+              Skipped {skippedRows} row{skippedRows === 1 ? '' : 's'} due to missing or invalid data.
+            </div>
+            {warnings.length > 0 && (
+              <ul className="list-disc list-inside space-y-1 text-yellow-900">
+                {warnings.map((msg, idx) => (
+                  <li key={idx}>{msg}</li>
+                ))}
+              </ul>
+            )}
           </div>
         )}
       </div>
