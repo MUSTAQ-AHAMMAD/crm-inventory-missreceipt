@@ -9,6 +9,7 @@ import Layout from './components/layout/Layout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import InventoryPage from './pages/InventoryPage'
+import InventoryTemplateGenerationPage from './pages/InventoryTemplateGenerationPage'
 import MiscReceiptPage from './pages/MiscReceiptPage'
 import StandardReceiptPage from './pages/StandardReceiptPage'
 import UserManagementPage from './pages/UserManagementPage'
@@ -50,6 +51,7 @@ export default function App() {
           >
             <Route index element={<DashboardPage />} />
             <Route path="inventory" element={<InventoryPage />} />
+            <Route path="inventory-template" element={<InventoryTemplateGenerationPage />} />
             <Route path="misc-receipt" element={<MiscReceiptPage />} />
             <Route path="standard-receipt" element={<StandardReceiptPage />} />
             <Route

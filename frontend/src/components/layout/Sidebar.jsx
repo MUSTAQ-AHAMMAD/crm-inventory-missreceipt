@@ -9,6 +9,7 @@ import { useAuth } from '../../context/AuthContext'
 const NAV_ITEMS = [
   { to: '/', label: 'Dashboard', icon: '📊', exact: true },
   { to: '/inventory', label: 'Inventory Upload', icon: '📦' },
+  { to: '/inventory-template', label: 'Inventory Template Generation', icon: '🧩' },
   { to: '/misc-receipt', label: 'Misc Receipt', icon: '🧾' },
   { to: '/standard-receipt', label: 'Standard Receipt', icon: '💳' },
   { to: '/reports', label: 'Reports', icon: '📈' },

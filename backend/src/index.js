@@ -12,6 +12,7 @@ const swaggerSpec = require('./swagger');
 
 const authRoutes = require('./routes/auth');
 const inventoryRoutes = require('./routes/inventory');
+const inventoryTemplateRoutes = require('./routes/inventoryTemplate');
 const miscReceiptRoutes = require('./routes/miscReceipt');
 const standardReceiptRoutes = require('./routes/standardReceipt');
 const adminRoutes = require('./routes/admin');
@@ -68,6 +69,7 @@ app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 // ─── API Routes ───────────────────────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/inventory-template', inventoryTemplateRoutes);
 app.use('/api/misc-receipt', miscReceiptRoutes);
 app.use('/api/standard-receipt', standardReceiptRoutes);
 app.use('/api/admin', adminRoutes);
