@@ -17,10 +17,21 @@ const OUTPUT_COLUMNS = [
 ];
 
 const COLUMN_ALIASES = {
-  subinventory: ['order lines/branch/name'],
-  itemNumber: ['order lines/product/barcode'],
-  transactionReference: ['order lines/order ref'],
-  quantity: ['total', 'sum of total', 'order lines/total'],
+  subinventory: ['order lines/product/name', 'product/name', 'product name'],
+  itemNumber: ['order lines/product/barcode', 'product/barcode', 'barcode', 'item number'],
+  transactionReference: ['order lines/order ref', 'order ref', 'order reference'],
+  transactionDate: ['order lines/order ref/date', 'order ref date', 'date'],
+  quantity: ['order lines/base quantity', 'base quantity', 'quantity', 'qty'],
+  unitOfMeasure: ['order lines/base uom', 'base uom', 'uom', 'unit of measure'],
+};
+
+const REQUIRED_LABELS = {
+  subinventory: 'Order Lines/Product/Name (prefix before "/")',
+  itemNumber: 'Order Lines/Product/Barcode',
+  transactionReference: 'Order Lines/Order Ref',
+  transactionDate: 'Order Lines/Order Ref/Date',
+  quantity: 'Order Lines/Base Quantity',
+  unitOfMeasure: 'Order Lines/Base UoM',
 };
 
 const PREVIEW_LIMIT = 50;
@@ -29,6 +40,10 @@ function validationError(message) {
   const err = new Error(message);
   err.isValidation = true;
   return err;
+}
+
+function normalizeKey(key) {
+  return key.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
 function parseCsv(buffer) {
@@ -46,16 +61,13 @@ function parseCsv(buffer) {
 }
 
 function ensureRequiredHeaders(records) {
-  const headerSet = new Set(Object.keys(records[0] || {}).map((h) => h.trim().toLowerCase()));
+  const headerSet = new Set(Object.keys(records[0] || {}).map(normalizeKey));
   const missing = [];
 
   for (const [field, aliases] of Object.entries(COLUMN_ALIASES)) {
-    const hasMatch = aliases.some((alias) => headerSet.has(alias));
+    const hasMatch = aliases.some((alias) => headerSet.has(normalizeKey(alias)));
     if (!hasMatch) {
-      if (field === 'subinventory') missing.push('Order Lines/Branch/Name');
-      if (field === 'itemNumber') missing.push('Order Lines/Product/Barcode');
-      if (field === 'transactionReference') missing.push('Order Lines/Order Ref');
-      if (field === 'quantity') missing.push('Total');
+      missing.push(REQUIRED_LABELS[field]);
     }
   }
 
@@ -64,18 +76,19 @@ function ensureRequiredHeaders(records) {
   }
 }
 
-function toLowerRow(row) {
+function toNormalizedRow(row) {
   const normalized = {};
   for (const [key, value] of Object.entries(row)) {
-    normalized[key.trim().toLowerCase()] = value;
+    normalized[normalizeKey(key)] = value;
   }
   return normalized;
 }
 
 function pickField(row, aliases, label, rowNumber) {
   for (const alias of aliases) {
-    if (Object.prototype.hasOwnProperty.call(row, alias)) {
-      const value = String(row[alias] ?? '').trim();
+    const normalizedKey = normalizeKey(alias);
+    if (Object.prototype.hasOwnProperty.call(row, normalizedKey)) {
+      const value = String(row[normalizedKey] ?? '').trim();
       if (value) return value;
       break;
     }
@@ -86,39 +99,95 @@ function pickField(row, aliases, label, rowNumber) {
 function parseQuantity(raw, rowNumber) {
   const cleaned = String(raw ?? '').replace(/,/g, '').trim();
   if (cleaned === '') {
-    throw validationError(`Row ${rowNumber}: Missing Total value`);
+    throw validationError(`Row ${rowNumber}: Missing Base Quantity value`);
   }
   const qty = Number(cleaned);
   if (!Number.isFinite(qty)) {
-    throw validationError(`Row ${rowNumber}: Invalid Total value "${cleaned}"`);
+    throw validationError(`Row ${rowNumber}: Invalid Base Quantity value "${cleaned}"`);
   }
   return qty;
+}
+
+function parseDate(raw, rowNumber) {
+  if (!raw) throw validationError(`Row ${rowNumber}: Missing TransactionDate`);
+  const trimmed = String(raw).trim();
+  const spaceIdx = trimmed.indexOf(' ');
+  const datePart = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
+
+  const sep = datePart.includes('/') ? '/' : datePart.includes('-') ? '-' : null;
+  if (!sep) {
+    throw validationError(`Row ${rowNumber}: Invalid TransactionDate value "${trimmed}"`);
+  }
+  const parts = datePart.split(sep);
+  if (parts.length !== 3) {
+    throw validationError(`Row ${rowNumber}: Invalid TransactionDate value "${trimmed}"`);
+  }
+
+  let year, month, day;
+  if (parts[0].length === 4) {
+    [year, month, day] = parts;
+  } else {
+    [day, month, year] = parts;
+  }
+
+  month = month.padStart(2, '0');
+  day = day.padStart(2, '0');
+
+  if (!year || !month || !day || Number.isNaN(Number(year)) || Number.isNaN(Number(month)) || Number.isNaN(Number(day))) {
+    throw validationError(`Row ${rowNumber}: Invalid TransactionDate value "${trimmed}"`);
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function extractSubinventoryFromName(raw, rowNumber) {
+  if (!raw) {
+    throw validationError(`Row ${rowNumber}: Missing SubinventoryCode`);
+  }
+  const value = String(raw).trim();
+  const prefix = value.split('/')[0]?.trim();
+  if (!prefix) {
+    throw validationError(`Row ${rowNumber}: Missing SubinventoryCode`);
+  }
+  return prefix;
 }
 
 function convertRecords(records) {
   ensureRequiredHeaders(records);
 
-  const today = new Date().toISOString().slice(0, 10);
   const aggregated = new Map();
 
   records.forEach((row, idx) => {
     const rowNumber = idx + 2; // account for header row
-    const normalized = toLowerRow(row);
+    const normalized = toNormalizedRow(row);
 
-    const itemNumber = pickField(normalized, COLUMN_ALIASES.itemNumber, 'Order Lines/Product/Barcode', rowNumber);
-    const subinventory = pickField(normalized, COLUMN_ALIASES.subinventory, 'Order Lines/Branch/Name', rowNumber);
+    const itemNumber = pickField(normalized, COLUMN_ALIASES.itemNumber, REQUIRED_LABELS.itemNumber, rowNumber);
+    const subinventory = extractSubinventoryFromName(
+      pickField(normalized, COLUMN_ALIASES.subinventory, REQUIRED_LABELS.subinventory, rowNumber),
+      rowNumber
+    );
     const transactionReference = pickField(
       normalized,
       COLUMN_ALIASES.transactionReference,
-      'Order Lines/Order Ref',
+      REQUIRED_LABELS.transactionReference,
+      rowNumber
+    );
+    const transactionDate = parseDate(
+      pickField(normalized, COLUMN_ALIASES.transactionDate, REQUIRED_LABELS.transactionDate, rowNumber),
+      rowNumber
+    );
+    const transactionUnitOfMeasure = pickField(
+      normalized,
+      COLUMN_ALIASES.unitOfMeasure,
+      REQUIRED_LABELS.unitOfMeasure,
       rowNumber
     );
     const quantity = parseQuantity(
-      pickField(normalized, COLUMN_ALIASES.quantity, 'Total', rowNumber),
+      pickField(normalized, COLUMN_ALIASES.quantity, REQUIRED_LABELS.quantity, rowNumber),
       rowNumber
     );
 
-    const key = `${subinventory}|||${itemNumber}|||${transactionReference}`;
+    const key = `${subinventory}|||${itemNumber}|||${transactionReference}|||${transactionDate}|||${transactionUnitOfMeasure}`;
     const existing = aggregated.get(key);
 
     if (existing) {
@@ -128,10 +197,10 @@ function convertRecords(records) {
         TransactionTypeName: '',
         ItemNumber: itemNumber,
         SubinventoryCode: subinventory,
-        TransactionDate: today,
+        TransactionDate: transactionDate,
         TransactionQuantity: quantity,
         TransactionReference: transactionReference,
-        TransactionUnitOfMeasure: 'Ea',
+        TransactionUnitOfMeasure: transactionUnitOfMeasure,
       });
     }
   });
