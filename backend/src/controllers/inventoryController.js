@@ -110,6 +110,12 @@ function validateRow(row) {
   if (isNaN(qty) || qty === 0) {
     return 'Zero or invalid transaction quantity';
   }
+  const { value: formattedDate, error: dateError } = formatDateToISO(row.TransactionDate);
+  if (dateError) {
+    return dateError;
+  }
+  // Cache parsed date to avoid recomputing in mapRowToPayload
+  row.__formattedTransactionDate = formattedDate;
   // If SubinventoryCode is empty, try to extract from TransactionReference
   let subinventory = row.SubinventoryCode?.trim();
   if (!subinventory && row.TransactionReference) {
@@ -154,40 +160,70 @@ function cleanReference(ref) {
  *   and any of the above followed by a time component.
  *
  * @param {string} dateStr – raw date string from CSV
- * @returns {string} ISO 8601 formatted timestamp
+ * @returns {{ value?: string, error?: string }} ISO 8601 formatted timestamp or error
  */
 function formatDateToISO(dateStr) {
-  if (!dateStr) return '';
-  let trimmed = dateStr.trim();
+  const raw = String(dateStr ?? '').trim();
+  if (!raw) return { error: 'Empty transaction date' };
 
-  // Strip any time component – we only use the date part
-  const spaceIdx = trimmed.indexOf(' ');
-  if (spaceIdx !== -1) {
-    trimmed = trimmed.substring(0, spaceIdx);
-  }
-
-  let year, month, day;
-  // Determine separator and field order
-  const sep = trimmed.includes('/') ? '/' : '-';
-  const parts = trimmed.split(sep);
+  // Use only the date part before any whitespace or time separator
+  const datePart = raw.split(/[T\s]/)[0];
+  const sep = datePart.includes('/') ? '/' : '-';
+  const parts = datePart.split(sep);
   if (parts.length !== 3) {
-    console.warn(`[Inventory] Unable to parse date "${trimmed}" – expected DD-MM-YYYY or YYYY-MM-DD format`);
-    return trimmed; // can't parse – return as-is
+    return { error: `Invalid transaction date format: ${raw}` };
   }
 
-  if (parts[0].length === 4) {
-    // YYYY-MM-DD or YYYY/MM/DD
-    [year, month, day] = parts;
+  const nums = parts.map((p) => Number(p));
+  if (nums.some((n) => !Number.isFinite(n))) {
+    return { error: `Invalid transaction date format: ${raw}` };
+  }
+
+  let [a, b, c] = nums;
+  let year;
+  let month;
+  let day;
+
+  if (a > 999) {
+    // Year-first formats (YYYY-MM-DD or YYYY-DD-MM)
+    year = a;
+    if (b > 12 && c <= 12) {
+      day = b;
+      month = c;
+    } else {
+      month = b;
+      day = c;
+    }
   } else {
-    // DD-MM-YYYY or DD/MM/YYYY
-    [day, month, year] = parts;
+    // Day-first formats (DD-MM-YYYY) with fallback for MM-DD-YYYY
+    year = c;
+    if (b > 12 && a <= 12) {
+      month = a;
+      day = b;
+    } else {
+      day = a;
+      month = b;
+    }
   }
 
-  // Zero-pad to two digits
-  month = month.padStart(2, '0');
-  day = day.padStart(2, '0');
+  if (!year || !month || !day) {
+    return { error: `Invalid transaction date format: ${raw}` };
+  }
 
-  return `${year}-${month}-${day}T00:00:00.000+00:00`;
+  const isoYear = year.toString().padStart(4, '0');
+  const isoMonth = month.toString().padStart(2, '0');
+  const isoDay = day.toString().padStart(2, '0');
+
+  const dateObj = new Date(Date.UTC(year, month - 1, day));
+  const valid =
+    dateObj.getUTCFullYear() === year &&
+    dateObj.getUTCMonth() + 1 === month &&
+    dateObj.getUTCDate() === day;
+  if (!valid) {
+    return { error: `Invalid calendar date: ${raw}` };
+  }
+
+  return { value: `${isoYear}-${isoMonth}-${isoDay}T00:00:00.000+00:00` };
 }
 
 /**
@@ -207,7 +243,7 @@ function mapRowToPayload(row, organizationName) {
   }
 
   // Convert TransactionDate to ISO 8601 format required by Oracle
-  const txDate = formatDateToISO(row.TransactionDate);
+  const txDate = row.__formattedTransactionDate || formatDateToISO(row.TransactionDate).value || '';
 
   // Default TransactionUnitOfMeasure to "Each" when not provided
   const uom = row.TransactionUnitOfMeasure?.trim() || 'Each';
@@ -384,10 +420,23 @@ async function processUploadRows(upload, records, organizationName) {
       const embeddedError = extractOracleError(apiResponse.data);
       if (embeddedError) {
         console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (Embedded Error): ${embeddedError} | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 500)}`);
-        return { type: 'failure', rowNumber, rawData: payloadJson, error: embeddedError };
+        return {
+          type: 'failure',
+          rowNumber,
+          rawData: payloadJson,
+          error: embeddedError,
+          responseBody: responseText,
+          responseStatus: apiResponse.status,
+        };
       }
       console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} SUCCESS | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 500)}`);
-      return { type: 'success', rowNumber, rawData: payloadJson };
+      return {
+        type: 'success',
+        rowNumber,
+        rawData: payloadJson,
+        responseBody: responseText,
+        responseStatus: apiResponse.status,
+      };
     } catch (apiErr) {
       const errMsg =
         apiErr.response?.data?.detail ||
@@ -395,10 +444,17 @@ async function processUploadRows(upload, records, organizationName) {
         apiErr.message ||
         'Oracle API error';
       const errorBody = apiErr.response?.data
-        ? (typeof apiErr.response.data === 'object' ? JSON.stringify(apiErr.response.data) : String(apiErr.response.data))
-        : '';
+        ? stringifyResponseBody(apiErr.response.data)
+        : apiErr.response?.statusText || '';
       console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (API): ${errMsg} | Item: ${payload.ItemNumber} | HTTP ${apiErr.response?.status || 'N/A'} | Response: ${errorBody.substring(0, 500)}`);
-      return { type: 'failure', rowNumber, rawData: payloadJson, error: errMsg };
+      return {
+        type: 'failure',
+        rowNumber,
+        rawData: payloadJson,
+        error: errMsg,
+        responseBody: errorBody,
+        responseStatus: apiErr.response?.status,
+      };
     }
   }
 
@@ -418,6 +474,8 @@ async function processUploadRows(upload, records, organizationName) {
           uploadId: upload.id,
           rowNumber: result.rowNumber,
           rawData: result.rawData,
+          responseBody: result.responseBody || null,
+          responseStatus: result.responseStatus ?? null,
         });
         seenPayloads.add(result.rawData);
       } else if (result.type === 'skip-duplicate') {
@@ -434,6 +492,8 @@ async function processUploadRows(upload, records, organizationName) {
           rowNumber: result.rowNumber,
           rawData: result.rawData,
           errorMessage: result.error,
+          responseBody: result.responseBody || null,
+          responseStatus: result.responseStatus ?? null,
         });
       }
     }
@@ -682,18 +742,36 @@ async function retryUpload(req, res, next) {
           const embeddedError = extractOracleError(apiResponse.data);
           if (embeddedError) {
             console.error(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED (Embedded Error): ${embeddedError} | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 500)}`);
-            return { status: 'fail', failure, errMsg: embeddedError };
+            return {
+              status: 'fail',
+              failure,
+              errMsg: embeddedError,
+              responseBody: responseText,
+              responseStatus: apiResponse.status,
+            };
           }
           console.log(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} SUCCESS | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 500)}`);
-          return { status: 'success', failure };
+          return {
+            status: 'success',
+            failure,
+            responseBody: responseText,
+            responseStatus: apiResponse.status,
+          };
         } catch (apiErr) {
           const errMsg =
             apiErr.response?.data?.detail ||
             apiErr.response?.data?.message ||
             apiErr.message ||
             'Oracle API error';
+          const responseText = apiErr.response?.data ? stringifyResponseBody(apiErr.response.data) : apiErr.response?.statusText || '';
           console.error(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED: ${errMsg} | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'}`);
-          return { status: 'fail', failure, errMsg };
+          return {
+            status: 'fail',
+            failure,
+            errMsg,
+            responseBody: responseText,
+            responseStatus: apiErr.response?.status,
+          };
         }
       }));
 
@@ -707,6 +785,8 @@ async function retryUpload(req, res, next) {
               uploadId,
               rowNumber: result.failure.rowNumber,
               rawData: result.failure.rawData,
+              responseBody: result.responseBody || null,
+              responseStatus: result.responseStatus ?? null,
             },
           });
           seenPayloads.add(result.failure.rawData);
@@ -719,7 +799,20 @@ async function retryUpload(req, res, next) {
           retrySuccess++;
         } else {
           retryFail++;
-          stillFailing.push({ ...result.failure, errorMessage: result.errMsg });
+          await prisma.inventoryFailureRecord.update({
+            where: { id: result.failure.id },
+            data: {
+              errorMessage: result.errMsg,
+              responseBody: result.responseBody || null,
+              responseStatus: result.responseStatus ?? null,
+            },
+          });
+          stillFailing.push({
+            ...result.failure,
+            errorMessage: result.errMsg,
+            responseBody: result.responseBody || null,
+            responseStatus: result.responseStatus ?? null,
+          });
         }
       }
     }
