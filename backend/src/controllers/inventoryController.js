@@ -233,6 +233,64 @@ const CONCURRENCY = 10;
 const DB_FLUSH_SIZE = 500;
 
 /**
+ * Attempts to extract an Oracle error message from a successful-looking
+ * response body. Oracle sometimes returns HTTP 2xx with an `error` field
+ * populated instead of throwing an HTTP error status.
+ */
+function extractOracleError(responseBody) {
+  function normalize(val) {
+    if (val === null || val === undefined) return null;
+    if (typeof val === 'string') {
+      const trimmed = val.trim();
+      if (!trimmed || trimmed.toLowerCase() === 'success') return null;
+      return trimmed;
+    }
+    if (Array.isArray(val)) {
+      for (const entry of val) {
+        const found = normalize(entry);
+        if (found) return found;
+      }
+      return null;
+    }
+    if (typeof val === 'object') {
+      const fields = ['error', 'Error', 'ERROR', 'errors', 'Errors', 'ERRORS', 'errorMessage', 'ErrorMessage'];
+      for (const field of fields) {
+        if (Object.prototype.hasOwnProperty.call(val, field)) {
+          const found = normalize(val[field]);
+          if (found) return found;
+        }
+      }
+      return null;
+    }
+    return null;
+  }
+
+  let parsed = responseBody;
+  if (typeof responseBody === 'string') {
+    try {
+      parsed = JSON.parse(responseBody);
+    } catch {
+      parsed = responseBody;
+    }
+  }
+
+  return normalize(parsed);
+}
+
+/**
+ * Converts a response body to a short, printable string for logging.
+ */
+function stringifyResponseBody(body) {
+  if (body === undefined || body === null) return '';
+  if (typeof body === 'string') return body;
+  try {
+    return JSON.stringify(body);
+  } catch {
+    return String(body);
+  }
+}
+
+/**
  * Processes upload rows in the background using concurrent batches.
  * Sends CONCURRENCY rows to the Oracle API in parallel, flushes success/failure
  * records to the database periodically, and updates progress after each batch
@@ -243,6 +301,22 @@ async function processUploadRows(upload, records, organizationName) {
   let failureCount = 0;
   let pendingSuccesses = [];
   let pendingFailures = [];
+  const seenPayloads = new Set();
+
+  // Preload previously successful payloads for this user + organization to
+  // avoid re-processing rows that already succeeded in earlier uploads.
+  const previousSuccesses = await prisma.inventorySuccessRecord.findMany({
+    where: {
+      upload: {
+        userId: upload.userId,
+        organizationName,
+      },
+    },
+    select: { rawData: true },
+  });
+  for (const { rawData } of previousSuccesses) {
+    seenPayloads.add(rawData);
+  }
 
   // Oracle API configuration from environment variables
   const oracleAuth = Buffer.from(
@@ -274,6 +348,11 @@ async function processUploadRows(upload, records, organizationName) {
     }
 
     const payload = mapRowToPayload(row, organizationName);
+    const payloadJson = JSON.stringify(payload);
+
+    if (seenPayloads.has(payloadJson)) {
+      return { type: 'skip-duplicate', rowNumber };
+    }
 
     try {
       const apiResponse = await axios.post(process.env.ORACLE_INVENTORY_API_URL, payload, {
@@ -283,11 +362,14 @@ async function processUploadRows(upload, records, organizationName) {
         },
         timeout: 30000,
       });
-      const responseData = typeof apiResponse.data === 'object'
-        ? JSON.stringify(apiResponse.data)
-        : String(apiResponse.data || '');
-      console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} SUCCESS | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status} | Response: ${responseData.substring(0, 500)}`);
-      return { type: 'success', rowNumber, rawData: JSON.stringify(payload) };
+      const responseText = stringifyResponseBody(apiResponse.data);
+      const embeddedError = extractOracleError(apiResponse.data);
+      if (embeddedError) {
+        console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (Embedded Error): ${embeddedError} | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 500)}`);
+        return { type: 'failure', rowNumber, rawData: payloadJson, error: embeddedError };
+      }
+      console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} SUCCESS | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 500)}`);
+      return { type: 'success', rowNumber, rawData: payloadJson };
     } catch (apiErr) {
       const errMsg =
         apiErr.response?.data?.detail ||
@@ -298,7 +380,7 @@ async function processUploadRows(upload, records, organizationName) {
         ? (typeof apiErr.response.data === 'object' ? JSON.stringify(apiErr.response.data) : String(apiErr.response.data))
         : '';
       console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (API): ${errMsg} | Item: ${payload.ItemNumber} | HTTP ${apiErr.response?.status || 'N/A'} | Response: ${errorBody.substring(0, 500)}`);
-      return { type: 'failure', rowNumber, rawData: JSON.stringify(payload), error: errMsg };
+      return { type: 'failure', rowNumber, rawData: payloadJson, error: errMsg };
     }
   }
 
@@ -319,6 +401,11 @@ async function processUploadRows(upload, records, organizationName) {
           rowNumber: result.rowNumber,
           rawData: result.rawData,
         });
+        seenPayloads.add(result.rawData);
+      } else if (result.type === 'skip-duplicate') {
+        // Count as success for this upload to keep progress accurate,
+        // but do not create another success record.
+        successCount++;
       } else {
         failureCount++;
         pendingFailures.push({
@@ -525,6 +612,22 @@ async function retryUpload(req, res, next) {
       `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
     ).toString('base64');
 
+    // Avoid retrying rows that already succeeded in any upload for this user/org
+    const seenPayloads = new Set();
+    const uploadOrg = upload.organizationName;
+    const previousSuccesses = await prisma.inventorySuccessRecord.findMany({
+      where: {
+        upload: {
+          userId: upload.userId,
+          organizationName: uploadOrg,
+        },
+      },
+      select: { rawData: true },
+    });
+    for (const { rawData } of previousSuccesses) {
+      seenPayloads.add(rawData);
+    }
+
     let retrySuccess = 0;
     let retryFail = 0;
     const stillFailing = [];
@@ -541,6 +644,11 @@ async function retryUpload(req, res, next) {
           return { status: 'skip', failure };
         }
 
+        // Skip if we've already succeeded with this payload
+        if (seenPayloads.has(failure.rawData)) {
+          return { status: 'skip-duplicate', failure };
+        }
+
         try {
           const apiResponse = await axios.post(process.env.ORACLE_INVENTORY_API_URL, rawDataObj, {
             headers: {
@@ -549,7 +657,13 @@ async function retryUpload(req, res, next) {
             },
             timeout: 30000,
           });
-          console.log(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} SUCCESS | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiResponse.status}`);
+          const responseText = stringifyResponseBody(apiResponse.data);
+          const embeddedError = extractOracleError(apiResponse.data);
+          if (embeddedError) {
+            console.error(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED (Embedded Error): ${embeddedError} | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 500)}`);
+            return { status: 'fail', failure, errMsg: embeddedError };
+          }
+          console.log(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} SUCCESS | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 500)}`);
           return { status: 'success', failure };
         } catch (apiErr) {
           const errMsg =
@@ -574,9 +688,14 @@ async function retryUpload(req, res, next) {
               rawData: result.failure.rawData,
             },
           });
+          seenPayloads.add(result.failure.rawData);
         } else if (result.status === 'skip') {
           retryFail++;
           stillFailing.push({ ...result.failure, errorMessage: result.failure.errorMessage });
+        } else if (result.status === 'skip-duplicate') {
+          // Treat as already handled success; remove failure record
+          await prisma.inventoryFailureRecord.delete({ where: { id: result.failure.id } });
+          retrySuccess++;
         } else {
           retryFail++;
           stillFailing.push({ ...result.failure, errorMessage: result.errMsg });
