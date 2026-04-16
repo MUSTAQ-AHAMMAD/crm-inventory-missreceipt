@@ -979,6 +979,82 @@ async function getUploadDetail(req, res, next) {
 }
 
 /**
+ * GET /api/inventory/uploads/:id/debug-log
+ * Returns a merged, paginated view of all success and failure records
+ * including the raw payload sent to Oracle and the response received.
+ * This endpoint is intended for deep debugging when Oracle rejects data.
+ */
+async function getDebugLog(req, res, next) {
+  try {
+    const uploadId = parseInt(req.params.id);
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
+
+    const upload = await prisma.inventoryUpload.findUnique({
+      where: { id: uploadId },
+      include: { user: { select: { email: true } } },
+    });
+    if (!upload) {
+      return res.status(404).json({ error: 'Upload not found.' });
+    }
+    if (req.user.role === 'USER' && upload.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(200, parseInt(req.query.limit) || 100);
+    const offset = (page - 1) * limit;
+
+    const [totalSuccessRecords, totalFailureRecords] = await Promise.all([
+      prisma.inventorySuccessRecord.count({ where: { uploadId } }),
+      prisma.inventoryFailureRecord.count({ where: { uploadId } }),
+    ]);
+    const totalRecords = totalSuccessRecords + totalFailureRecords;
+
+    const rawRecords = await prisma.$queryRaw`
+      SELECT id, rowNumber, rawData, responseBody, responseStatus, NULL as errorMessage, createdAt, 'SUCCESS' as recordType
+      FROM InventorySuccessRecord
+      WHERE uploadId = ${uploadId}
+      UNION ALL
+      SELECT id, rowNumber, rawData, responseBody, responseStatus, errorMessage, createdAt, 'FAILURE' as recordType
+      FROM InventoryFailureRecord
+      WHERE uploadId = ${uploadId}
+      ORDER BY rowNumber ASC, createdAt ASC
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    const parseJson = (val) => {
+      if (val === null || val === undefined) return val;
+      if (typeof val !== 'string') return val;
+      try {
+        return JSON.parse(val);
+      } catch {
+        return val;
+      }
+    };
+
+    const records = rawRecords.map((r) => ({
+      ...r,
+      rawData: parseJson(r.rawData),
+      responseBody: parseJson(r.responseBody),
+    }));
+
+    return res.json({
+      upload,
+      records,
+      totalRecords,
+      totalSuccessRecords,
+      totalFailureRecords,
+      page,
+      limit,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * GET /api/inventory/uploads/:id/successes
  * Returns paginated success records for a specific upload.
  */
@@ -1022,4 +1098,4 @@ async function getSuccessRecords(req, res, next) {
   }
 }
 
-module.exports = { bulkUpload, listUploads, getFailures, retryUpload, downloadTemplate, getUploadProgress, getUploadDetail, getSuccessRecords };
+module.exports = { bulkUpload, listUploads, getFailures, retryUpload, downloadTemplate, getUploadProgress, getUploadDetail, getSuccessRecords, getDebugLog };
