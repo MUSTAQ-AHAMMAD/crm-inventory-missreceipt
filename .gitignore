@@ -3,10 +3,15 @@ node_modules/
 
 # SQLite database file (auto-generated, contains user data)
 # Prisma resolves file:./crm.db relative to backend/prisma/ → backend/prisma/crm.db
-backend/prisma/crm.db
-backend/prisma/crm.db-shm
-backend/prisma/crm.db-wal
-backend/prisma/crm.db-journal
+backend/prisma/*.db
+backend/prisma/*.db-shm
+backend/prisma/*.db-wal
+backend/prisma/*.db-journal
+# Catch nested db paths created by alternate DATABASE_URL configurations
+backend/prisma/**/*.db
+backend/prisma/**/*.db-shm
+backend/prisma/**/*.db-wal
+backend/prisma/**/*.db-journal
 
 # Build artifacts
 frontend/dist/
