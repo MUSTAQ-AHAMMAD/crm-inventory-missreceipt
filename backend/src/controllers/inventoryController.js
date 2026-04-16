@@ -166,6 +166,28 @@ function formatDateToISO(dateStr) {
   const raw = String(dateStr ?? '').trim();
   if (!raw) return { error: 'Empty transaction date' };
 
+  // If already in ISO-like format with a time component, normalize and preserve timezone
+  const isoMatch = raw.match(
+    /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?(Z|[+-]\d{2}:?\d{2})?$/
+  );
+  if (isoMatch) {
+    const [, datePart, hh, mm, ss, millisRaw, tzRaw] = isoMatch;
+    const millis = (millisRaw || '000').padEnd(3, '0').slice(0, 3);
+    const tz =
+      tzRaw === 'Z' || !tzRaw
+        ? '+00:00'
+        : tzRaw.includes(':')
+          ? tzRaw
+          : `${tzRaw.slice(0, 3)}:${tzRaw.slice(3)}`;
+
+    const normalized = `${datePart}T${hh}:${mm}:${ss}.${millis}${tz}`;
+    const parsed = new Date(normalized);
+    if (Number.isNaN(parsed.getTime())) {
+      return { error: `Invalid transaction date format: ${raw}` };
+    }
+    return { value: normalized };
+  }
+
   // Use only the date part before any whitespace or time separator
   const datePart = raw.split(/[T\s]/)[0];
   const sep = datePart.includes('/') ? '/' : '-';
@@ -303,6 +325,14 @@ function extractOracleError(responseBody) {
       return null;
     }
     if (typeof val === 'object') {
+      const errorCode = val.ErrorCode || val.errorCode || val.ERRORCODE;
+      const errorExplanation = val.ErrorExplanation || val.errorExplanation || val.ERROREXPLANATION;
+      if (errorCode || errorExplanation) {
+        const combined = [errorCode, errorExplanation].filter(Boolean).join(': ').trim();
+        if (combined && combined.toLowerCase() !== 'success') {
+          return combined;
+        }
+      }
       const fields = ['error', 'Error', 'ERROR', 'errors', 'Errors', 'ERRORS', 'errorMessage', 'ErrorMessage'];
       for (const field of fields) {
         if (Object.prototype.hasOwnProperty.call(val, field)) {
