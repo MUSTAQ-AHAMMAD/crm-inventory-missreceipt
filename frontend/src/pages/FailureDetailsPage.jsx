@@ -146,6 +146,7 @@ export default function FailureDetailsPage() {
                 <th className="px-4 py-2 text-left">Row #</th>
                 <th className="px-4 py-2 text-left">Item Number</th>
                 <th className="px-4 py-2 text-left">Error Message</th>
+                <th className="px-4 py-2 text-left">Oracle Code</th>
                 <th className="px-4 py-2 text-left">HTTP</th>
                 <th className="px-4 py-2 text-left">Response</th>
                 <th className="px-4 py-2 text-left">Raw Data</th>
@@ -169,8 +170,18 @@ export default function FailureDetailsPage() {
                   <td className="px-4 py-3 text-red-600 text-xs max-w-xs">
                     {f.errorMessage}
                   </td>
+                  <td className="px-4 py-3 text-xs">
+                    {f.oracleErrorCode ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded bg-orange-100 text-orange-700 font-mono font-semibold text-xs">
+                        {f.oracleErrorCode}
+                      </span>
+                    ) : '—'}
+                  </td>
                   <td className="px-4 py-3 text-xs text-gray-600">
                     {f.responseStatus ? `HTTP ${f.responseStatus}` : '—'}
+                    {f.oracleProcessStatus && (
+                      <span className="ml-1 text-orange-600">(PS:{f.oracleProcessStatus})</span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-600 max-w-xs">
                     <details className="cursor-pointer">

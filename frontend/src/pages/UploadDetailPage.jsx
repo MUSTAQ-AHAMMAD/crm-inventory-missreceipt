@@ -324,6 +324,7 @@ function RecordsTable({ records, type }) {
             <th className="px-4 py-2 text-left">HTTP</th>
             <th className="px-4 py-2 text-left">Response</th>
             {type === 'failure' && <th className="px-4 py-2 text-left">Error</th>}
+            {type === 'failure' && <th className="px-4 py-2 text-left">Oracle Code</th>}
             <th className="px-4 py-2 text-left">Data</th>
             <th className="px-4 py-2 text-left">Time</th>
           </tr>
@@ -360,6 +361,15 @@ function RecordsTable({ records, type }) {
               {type === 'failure' && (
                 <td className="px-4 py-3 text-red-600 text-xs max-w-xs">
                   {r.errorMessage}
+                </td>
+              )}
+              {type === 'failure' && (
+                <td className="px-4 py-3 text-xs">
+                  {r.oracleErrorCode ? (
+                    <span className="inline-flex items-center px-2 py-0.5 rounded bg-orange-100 text-orange-700 font-mono font-semibold text-xs">
+                      {r.oracleErrorCode}
+                    </span>
+                  ) : '—'}
                 </td>
               )}
               <td className="px-4 py-3">
@@ -401,6 +411,7 @@ function DebugTable({ records }) {
             <th className="px-4 py-2 text-left">HTTP</th>
             <th className="px-4 py-2 text-left">Response</th>
             <th className="px-4 py-2 text-left">Error</th>
+            <th className="px-4 py-2 text-left">Oracle Code</th>
             <th className="px-4 py-2 text-left">Payload</th>
             <th className="px-4 py-2 text-left">Time</th>
           </tr>
@@ -430,6 +441,13 @@ function DebugTable({ records }) {
               </td>
               <td className="px-4 py-3 text-xs text-red-600 max-w-xs">
                 {r.recordType === 'FAILURE' ? (r.errorMessage || '—') : '—'}
+              </td>
+              <td className="px-4 py-3 text-xs">
+                {r.recordType === 'FAILURE' && r.oracleErrorCode ? (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded bg-orange-100 text-orange-700 font-mono font-semibold text-xs">
+                    {r.oracleErrorCode}
+                  </span>
+                ) : '—'}
               </td>
               <td className="px-4 py-3">
                 <details className="cursor-pointer">
