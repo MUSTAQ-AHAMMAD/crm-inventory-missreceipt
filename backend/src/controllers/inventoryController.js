@@ -559,6 +559,7 @@ async function bulkUpload(req, res, next) {
       columns: true,       // use first row as headers
       skip_empty_lines: true,
       trim: true,
+      bom: true,
     });
 
     if (records.length === 0) {
