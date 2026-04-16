@@ -64,15 +64,17 @@ model InventorySuccessRecord {
 // Stores individual rows that failed during an inventory upload
 // NOTE: rawData is stored as a JSON string (SQLite has no native JSON type)
 model InventoryFailureRecord {
-  id           Int             @id @default(autoincrement())
-  uploadId     Int
-  upload       InventoryUpload @relation(fields: [uploadId], references: [id])
-  rowNumber    Int
-  rawData      String
-  errorMessage String
-  responseBody String?
-  responseStatus Int?
-  createdAt    DateTime        @default(now())
+  id                  Int             @id @default(autoincrement())
+  uploadId            Int
+  upload              InventoryUpload @relation(fields: [uploadId], references: [id])
+  rowNumber           Int
+  rawData             String
+  errorMessage        String
+  responseBody        String?
+  responseStatus      Int?
+  oracleErrorCode     String?   // e.g. "INV_INVALID_ITEM" — Oracle ErrorCode field
+  oracleProcessStatus String?   // e.g. "3" — Oracle ProcessStatus: 1=success, 3=error
+  createdAt           DateTime        @default(now())
 }
 
 // Tracks each miscellaneous receipt CSV upload and its SOAP response

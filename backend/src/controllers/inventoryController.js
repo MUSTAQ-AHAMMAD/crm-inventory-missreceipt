@@ -286,8 +286,50 @@ const DB_FLUSH_SIZE = 500;
  * Attempts to extract an Oracle error message from a successful-looking
  * response body. Oracle sometimes returns HTTP 2xx with an `error` field
  * populated instead of throwing an HTTP error status.
+ *
+ * Oracle-specific: ProcessStatus "3" = error, ErrorCode + ErrorExplanation
+ * carry the actual reason for rejection.
  */
 function extractOracleError(responseBody) {
+  let parsed = responseBody;
+  if (typeof responseBody === 'string') {
+    try {
+      parsed = JSON.parse(responseBody);
+    } catch {
+      parsed = responseBody;
+    }
+  }
+
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    // Oracle-specific: ProcessStatus "3" means the transaction was rejected.
+    // Values: "1" = success, "2" = pending/queued, "3" = error
+    // Normalize to string once to handle both numeric and string responses.
+    const processStatus = parsed.ProcessStatus != null ? String(parsed.ProcessStatus) : null;
+    if (processStatus === '3') {
+      const errorCode = (parsed.ErrorCode || '').toString().trim();
+      const errorExplanation = (parsed.ErrorExplanation || '').toString().trim();
+      if (errorCode && errorExplanation) {
+        return `[${errorCode}] ${errorExplanation}`;
+      }
+      if (errorCode) {
+        return `Oracle error code: ${errorCode}`;
+      }
+      if (errorExplanation) {
+        return errorExplanation;
+      }
+      return `Oracle ProcessStatus=3 (transaction rejected)`;
+    }
+
+    // Also catch non-null ErrorCode regardless of ProcessStatus (belt-and-suspenders)
+    const errorCode = (parsed.ErrorCode || '').toString().trim();
+    const errorExplanation = (parsed.ErrorExplanation || '').toString().trim();
+    if (errorCode) {
+      const suffix = errorExplanation ? ` ${errorExplanation}` : '';
+      return `[${errorCode}]${suffix}`;
+    }
+  }
+
+  // Generic nested error field scanner (existing behaviour preserved)
   function normalize(val) {
     if (val === null || val === undefined) return null;
     if (typeof val === 'string') {
@@ -313,15 +355,6 @@ function extractOracleError(responseBody) {
       return null;
     }
     return null;
-  }
-
-  let parsed = responseBody;
-  if (typeof responseBody === 'string') {
-    try {
-      parsed = JSON.parse(responseBody);
-    } catch {
-      parsed = responseBody;
-    }
   }
 
   return normalize(parsed);
@@ -428,7 +461,13 @@ async function processUploadRows(upload, records, organizationName) {
       );
       const embeddedError = extractOracleError(apiResponse.data);
       if (embeddedError) {
-        console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (Embedded Error): ${embeddedError} | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 500)}`);
+        const oracleErrorCode = (apiResponse.data?.ErrorCode || '').toString().trim() || null;
+        const oracleProcessStatus = apiResponse.data?.ProcessStatus != null
+          ? String(apiResponse.data.ProcessStatus)
+          : null;
+        console.error(
+          `[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (Oracle ProcessStatus=${apiResponse.data?.ProcessStatus} ErrorCode=${apiResponse.data?.ErrorCode || 'N/A'}): ${embeddedError} | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 1000)}`
+        );
         return {
           type: 'failure',
           rowNumber,
@@ -436,6 +475,8 @@ async function processUploadRows(upload, records, organizationName) {
           error: embeddedError,
           responseBody: responseText,
           responseStatus: apiResponse.status,
+          oracleErrorCode,
+          oracleProcessStatus,
         };
       }
       console.log(`[Inventory] Upload #${upload.id} Row ${rowNumber} SUCCESS | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 500)}`);
@@ -504,6 +545,8 @@ async function processUploadRows(upload, records, organizationName) {
           errorMessage: result.error,
           responseBody: result.responseBody || null,
           responseStatus: result.responseStatus ?? null,
+          oracleErrorCode: result.oracleErrorCode || null,
+          oracleProcessStatus: result.oracleProcessStatus || null,
         });
       }
     }
@@ -755,13 +798,19 @@ async function retryUpload(req, res, next) {
           );
           const embeddedError = extractOracleError(apiResponse.data);
           if (embeddedError) {
-            console.error(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED (Embedded Error): ${embeddedError} | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 500)}`);
+            const oracleErrorCode = (apiResponse.data?.ErrorCode || '').toString().trim() || null;
+            const oracleProcessStatus = apiResponse.data?.ProcessStatus != null
+              ? String(apiResponse.data.ProcessStatus)
+              : null;
+            console.error(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED (Oracle ProcessStatus=${apiResponse.data?.ProcessStatus} ErrorCode=${apiResponse.data?.ErrorCode || 'N/A'}): ${embeddedError} | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 1000)}`);
             return {
               status: 'fail',
               failure,
               errMsg: embeddedError,
               responseBody: responseText,
               responseStatus: apiResponse.status,
+              oracleErrorCode,
+              oracleProcessStatus,
             };
           }
           console.log(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} SUCCESS | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 500)}`);
@@ -822,6 +871,8 @@ async function retryUpload(req, res, next) {
               errorMessage: result.errMsg,
               responseBody: result.responseBody || null,
               responseStatus: result.responseStatus ?? null,
+              oracleErrorCode: result.oracleErrorCode || null,
+              oracleProcessStatus: result.oracleProcessStatus || null,
             },
           });
           stillFailing.push({
@@ -1013,11 +1064,15 @@ async function getDebugLog(req, res, next) {
     const totalRecords = totalSuccessRecords + totalFailureRecords;
 
     const rawRecords = await prisma.$queryRaw`
-      SELECT id, rowNumber, rawData, responseBody, responseStatus, NULL as errorMessage, createdAt, 'SUCCESS' as recordType
+      SELECT id, rowNumber, rawData, responseBody, responseStatus,
+             NULL as errorMessage, NULL as oracleErrorCode, NULL as oracleProcessStatus,
+             createdAt, 'SUCCESS' as recordType
       FROM InventorySuccessRecord
       WHERE uploadId = ${uploadId}
       UNION ALL
-      SELECT id, rowNumber, rawData, responseBody, responseStatus, errorMessage, createdAt, 'FAILURE' as recordType
+      SELECT id, rowNumber, rawData, responseBody, responseStatus,
+             errorMessage, oracleErrorCode, oracleProcessStatus,
+             createdAt, 'FAILURE' as recordType
       FROM InventoryFailureRecord
       WHERE uploadId = ${uploadId}
       ORDER BY rowNumber ASC, createdAt ASC
