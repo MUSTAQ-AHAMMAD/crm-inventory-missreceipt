@@ -22,6 +22,7 @@ const {
   getUploadProgress,
   getUploadDetail,
   getSuccessRecords,
+  getDebugLog,
 } = require('../controllers/inventoryController');
 
 const router = express.Router();
@@ -155,6 +156,33 @@ router.get('/uploads/:id/progress', getUploadProgress);
  *         description: Upload details with success and failure records
  */
 router.get('/uploads/:id/detail', getUploadDetail);
+
+/**
+ * @swagger
+ * /inventory/uploads/{id}/debug-log:
+ *   get:
+ *     tags: [Inventory]
+ *     summary: Get a merged, paginated debug log of all success and failure records with Oracle responses
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *     responses:
+ *       200:
+ *         description: Paginated debug records including payloads and Oracle responses
+ */
+router.get('/uploads/:id/debug-log', getDebugLog);
 
 /**
  * @swagger

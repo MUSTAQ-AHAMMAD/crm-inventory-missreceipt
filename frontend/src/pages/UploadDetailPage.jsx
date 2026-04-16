@@ -37,7 +37,7 @@ function formatResponseDetail(body) {
   return JSON.stringify(parsed, null, 2)
 }
 
-const TABS = ['Overview', 'Success Records', 'Failure Records']
+const TABS = ['Overview', 'Success Records', 'Failure Records', 'Debug Log']
 
 export default function UploadDetailPage() {
   const { uploadId } = useParams()
@@ -45,15 +45,23 @@ export default function UploadDetailPage() {
   const [tab, setTab] = useState('Overview')
   const [successPage, setSuccessPage] = useState(1)
   const [failurePage, setFailurePage] = useState(1)
+  const [debugPage, setDebugPage] = useState(1)
   const [retrying, setRetrying] = useState(false)
   const [retryResult, setRetryResult] = useState(null)
   const [error, setError] = useState('')
   const PAGE_SIZE = 50
 
+  const isDebugTab = tab === 'Debug Log'
+
   // Fetch upload detail
   const { data, isLoading, isError, error: queryError } = useQuery({
-    queryKey: ['uploadDetail', uploadId, tab, successPage, failurePage],
+    queryKey: ['uploadDetail', uploadId, tab, successPage, failurePage, debugPage],
     queryFn: () => {
+      if (isDebugTab) {
+        return api.get(`/inventory/uploads/${uploadId}/debug-log`, {
+          params: { page: debugPage, limit: PAGE_SIZE },
+        }).then((r) => r.data)
+      }
       const type = tab === 'Success Records' ? 'success' : tab === 'Failure Records' ? 'failure' : 'all'
       const page = type === 'success' ? successPage : type === 'failure' ? failurePage : 1
       return api.get(`/inventory/uploads/${uploadId}/detail`, {
@@ -102,10 +110,19 @@ export default function UploadDetailPage() {
     </div>
   )
 
-  const { upload, successes = [], failures = [], totalSuccessRecords = 0, totalFailureRecords = 0 } = data || {}
+  const {
+    upload,
+    successes = [],
+    failures = [],
+    records: debugRecords = [],
+    totalSuccessRecords = 0,
+    totalFailureRecords = 0,
+    totalRecords: totalDebugRecords = 0,
+  } = data || {}
 
   const successTotalPages = Math.ceil(totalSuccessRecords / PAGE_SIZE) || 1
   const failureTotalPages = Math.ceil(totalFailureRecords / PAGE_SIZE) || 1
+  const debugTotalPages = Math.ceil(totalDebugRecords / PAGE_SIZE) || 1
 
   return (
     <div className="space-y-6">
@@ -271,6 +288,16 @@ export default function UploadDetailPage() {
           <Pagination page={failurePage} totalPages={failureTotalPages} onPageChange={setFailurePage} />
         </div>
       )}
+
+      {tab === 'Debug Log' && (
+        <div className="bg-white rounded-xl shadow-sm p-6">
+          <h2 className="font-semibold text-gray-700 mb-4">
+            Debug Log ({totalDebugRecords})
+          </h2>
+          <DebugTable records={debugRecords} />
+          <Pagination page={debugPage} totalPages={debugTotalPages} onPageChange={setDebugPage} />
+        </div>
+      )}
     </div>
   )
 }
@@ -354,6 +381,75 @@ function RecordsTable({ records, type }) {
   )
 }
 
+function DebugTable({ records }) {
+  if (!records || records.length === 0) {
+    return (
+      <p className="text-gray-400 text-sm py-4">
+        No debug records found.
+      </p>
+    )
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full text-sm">
+        <thead>
+          <tr className="bg-gray-50 text-gray-500 text-xs uppercase">
+            <th className="px-4 py-2 text-left">Row #</th>
+            <th className="px-4 py-2 text-left">Item</th>
+            <th className="px-4 py-2 text-left">Type</th>
+            <th className="px-4 py-2 text-left">HTTP</th>
+            <th className="px-4 py-2 text-left">Response</th>
+            <th className="px-4 py-2 text-left">Error</th>
+            <th className="px-4 py-2 text-left">Payload</th>
+            <th className="px-4 py-2 text-left">Time</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {records.map((r) => (
+            <tr key={`${r.recordType}-${r.id}`} className="hover:bg-gray-50">
+              <td className="px-4 py-3 text-gray-500">{r.rowNumber}</td>
+              <td className="px-4 py-3 font-mono text-xs text-gray-700">
+                {r.rawData?.ItemNumber || '—'}
+              </td>
+              <td className="px-4 py-3">
+                <RecordTypeBadge type={r.recordType} />
+              </td>
+              <td className="px-4 py-3 text-xs text-gray-600">
+                {r.responseStatus ? `HTTP ${r.responseStatus}` : '—'}
+              </td>
+              <td className="px-4 py-3 text-xs text-gray-600 max-w-xs">
+                <details className="cursor-pointer">
+                  <summary className="text-xs text-blue-600 hover:underline">
+                    {formatResponsePreview(r.responseBody)}
+                  </summary>
+                  <pre className="mt-2 text-xs bg-gray-100 rounded p-2 overflow-x-auto max-w-md">
+                    {formatResponseDetail(r.responseBody)}
+                  </pre>
+                </details>
+              </td>
+              <td className="px-4 py-3 text-xs text-red-600 max-w-xs">
+                {r.recordType === 'FAILURE' ? (r.errorMessage || '—') : '—'}
+              </td>
+              <td className="px-4 py-3">
+                <details className="cursor-pointer">
+                  <summary className="text-xs text-blue-600 hover:underline">View JSON</summary>
+                  <pre className="mt-2 text-xs bg-gray-100 rounded p-2 overflow-x-auto max-w-md">
+                    {JSON.stringify(r.rawData, null, 2)}
+                  </pre>
+                </details>
+              </td>
+              <td className="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">
+                {new Date(r.createdAt).toLocaleString()}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function Pagination({ page, totalPages, onPageChange }) {
   if (totalPages <= 1) return null
   return (
@@ -392,6 +488,22 @@ function StatusBadge({ status }) {
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-gray-100 text-gray-600'}`}>
       {status}
+    </span>
+  )
+}
+
+function RecordTypeBadge({ type }) {
+  const isSuccess = type === 'SUCCESS'
+  const isFailure = type === 'FAILURE'
+  const color = isSuccess
+    ? 'bg-green-100 text-green-700'
+    : isFailure
+      ? 'bg-red-100 text-red-700'
+      : 'bg-gray-100 text-gray-700'
+  const label = type === 'SUCCESS' ? 'Success' : type === 'FAILURE' ? 'Failure' : type || 'Unknown'
+  return (
+    <span className={`px-2 py-0.5 rounded text-xs font-medium ${color}`}>
+      {label}
     </span>
   )
 }
