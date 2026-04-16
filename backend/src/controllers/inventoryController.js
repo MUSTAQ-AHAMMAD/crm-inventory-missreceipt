@@ -303,8 +303,9 @@ function extractOracleError(responseBody) {
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     // Oracle-specific: ProcessStatus "3" means the transaction was rejected.
     // Values: "1" = success, "2" = pending/queued, "3" = error
-    const processStatus = parsed.ProcessStatus;
-    if (processStatus === '3' || processStatus === 3) {
+    // Normalize to string once to handle both numeric and string responses.
+    const processStatus = parsed.ProcessStatus != null ? String(parsed.ProcessStatus) : null;
+    if (processStatus === '3') {
       const errorCode = (parsed.ErrorCode || '').toString().trim();
       const errorExplanation = (parsed.ErrorExplanation || '').toString().trim();
       if (errorCode && errorExplanation) {

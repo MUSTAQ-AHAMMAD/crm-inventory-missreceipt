@@ -7,7 +7,6 @@ backend/prisma/crm.db
 backend/prisma/crm.db-shm
 backend/prisma/crm.db-wal
 backend/prisma/crm.db-journal
-backend/prisma/prisma/
 
 # Build artifacts
 frontend/dist/
