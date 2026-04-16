@@ -330,13 +330,19 @@ function extractOracleError(responseBody) {
 /**
  * Converts a response body to a short, printable string for logging.
  */
-function stringifyResponseBody(body) {
-  if (body === undefined || body === null) return '';
-  if (typeof body === 'string') return body;
+function stringifyResponseBody(body, fallback = '') {
+  if (body === undefined || body === null) return fallback;
+  if (typeof body === 'string') {
+    const trimmed = body.trim();
+    return trimmed ? body : fallback || body;
+  }
   try {
-    return JSON.stringify(body);
+    const json = JSON.stringify(body);
+    if (json === '{}' && fallback) return fallback;
+    return json;
   } catch {
-    return String(body);
+    const asString = String(body);
+    return asString.trim() ? asString : fallback;
   }
 }
 
@@ -416,7 +422,10 @@ async function processUploadRows(upload, records, organizationName) {
         },
         timeout: 30000,
       });
-      const responseText = stringifyResponseBody(apiResponse.data);
+      const responseText = stringifyResponseBody(
+        apiResponse.data,
+        apiResponse.statusText || `HTTP ${apiResponse.status}`
+      );
       const embeddedError = extractOracleError(apiResponse.data);
       if (embeddedError) {
         console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (Embedded Error): ${embeddedError} | Item: ${payload.ItemNumber} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 500)}`);
@@ -443,9 +452,10 @@ async function processUploadRows(upload, records, organizationName) {
         apiErr.response?.data?.message ||
         apiErr.message ||
         'Oracle API error';
-      const errorBody = apiErr.response?.data
-        ? stringifyResponseBody(apiErr.response.data)
-        : apiErr.response?.statusText || '';
+      const errorBody = stringifyResponseBody(
+        apiErr.response?.data,
+        apiErr.response?.statusText || apiErr.message || 'No response body'
+      );
       console.error(`[Inventory] Upload #${upload.id} Row ${rowNumber} FAILED (API): ${errMsg} | Item: ${payload.ItemNumber} | HTTP ${apiErr.response?.status || 'N/A'} | Response: ${errorBody.substring(0, 500)}`);
       return {
         type: 'failure',
@@ -738,7 +748,10 @@ async function retryUpload(req, res, next) {
             },
             timeout: 30000,
           });
-          const responseText = stringifyResponseBody(apiResponse.data);
+          const responseText = stringifyResponseBody(
+            apiResponse.data,
+            apiResponse.statusText || `HTTP ${apiResponse.status}`
+          );
           const embeddedError = extractOracleError(apiResponse.data);
           if (embeddedError) {
             console.error(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED (Embedded Error): ${embeddedError} | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiResponse.status} | Response: ${responseText.substring(0, 500)}`);
@@ -763,7 +776,10 @@ async function retryUpload(req, res, next) {
             apiErr.response?.data?.message ||
             apiErr.message ||
             'Oracle API error';
-          const responseText = apiErr.response?.data ? stringifyResponseBody(apiErr.response.data) : apiErr.response?.statusText || '';
+          const responseText = stringifyResponseBody(
+            apiErr.response?.data,
+            apiErr.response?.statusText || apiErr.message || 'No response body'
+          );
           console.error(`[Inventory Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED: ${errMsg} | Item: ${rawDataObj.ItemNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'}`);
           return {
             status: 'fail',
