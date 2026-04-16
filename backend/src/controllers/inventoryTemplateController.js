@@ -74,6 +74,7 @@ function parseCsv(buffer) {
     columns: true,
     skip_empty_lines: true,
     trim: true,
+    bom: true,
   });
 
   if (!records.length) {

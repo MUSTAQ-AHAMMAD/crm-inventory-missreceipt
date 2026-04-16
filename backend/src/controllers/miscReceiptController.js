@@ -217,6 +217,7 @@ async function previewXml(req, res, next) {
       columns: true,
       skip_empty_lines: true,
       trim: true,
+      bom: true,
     });
 
     if (records.length === 0) {
@@ -261,6 +262,7 @@ async function upload(req, res, next) {
       columns: true,
       skip_empty_lines: true,
       trim: true,
+      bom: true,
     });
 
     if (records.length === 0) {
