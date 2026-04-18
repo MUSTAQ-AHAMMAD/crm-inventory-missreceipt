@@ -333,7 +333,9 @@ function toCsv(rows) {
   const body = rows
     .map((row) => OUTPUT_COLUMNS.map((col) => toCsvValue(row[col])).join(','))
     .join('\n');
-  return `${header}\n${body}\n`;
+  // Add UTF-8 BOM (Byte Order Mark) to ensure proper encoding of Arabic and other Unicode characters
+  const BOM = '\uFEFF';
+  return `${BOM}${header}\n${body}\n`;
 }
 
 async function previewTemplate(req, res, next) {
@@ -371,7 +373,7 @@ async function downloadTemplate(req, res, next) {
     const { converted, skippedRows } = convertRecords(records);
     const csv = toCsv(converted);
 
-    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="inventory_template_generated.csv"');
     res.setHeader('X-Inventory-Template-Skipped-Rows', skippedRows);
     return res.send(csv);

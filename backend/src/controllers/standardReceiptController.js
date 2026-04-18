@@ -375,9 +375,11 @@ function downloadTemplate(_req, res) {
   const header = TEMPLATE_FIELDS.join(',');
   const sample =
     'Visa-BLK-ALAR-00000008,Visa,2026-03-05,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03-05';
-  const csv = `${header}\n${sample}\n`;
+  // Add UTF-8 BOM (Byte Order Mark) to ensure proper encoding of Arabic and other Unicode characters
+  const BOM = '\uFEFF';
+  const csv = `${BOM}${header}\n${sample}\n`;
 
-  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="standard_receipt_template.csv"');
   return res.send(csv);
 }

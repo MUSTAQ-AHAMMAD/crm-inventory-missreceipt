@@ -279,9 +279,12 @@ async function exportReport(req, res, next) {
       filename = 'failures_export.csv';
     }
 
-    res.setHeader('Content-Type', 'text/csv');
+    // Add UTF-8 BOM (Byte Order Mark) to ensure proper encoding of Arabic and other Unicode characters
+    const BOM = '\uFEFF';
+    const csvContent = BOM + csvRows.join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    return res.send(csvRows.join('\n'));
+    return res.send(csvContent);
   } catch (err) {
     next(err);
   }
