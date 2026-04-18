@@ -84,9 +84,9 @@ app.get('/api/health', (_req, res) => {
 app.use(errorHandler);
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
-const server = app.listen(PORT, () => {
-  console.log(`CRM Backend running on http://localhost:${PORT}`);
-  console.log(`Swagger docs available at http://localhost:${PORT}/api/docs`);
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`CRM Backend running on http://0.0.0.0:${PORT}`);
+  console.log(`Swagger docs available at http://0.0.0.0:${PORT}/api/docs`);
 });
 
 server.on('error', (err) => {

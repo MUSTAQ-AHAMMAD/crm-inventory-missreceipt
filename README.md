@@ -390,6 +390,88 @@ Tips:
 
 ---
 
+## 🌐 Server Deployment (Running on Server IP)
+
+The application is now configured to run on `0.0.0.0`, which allows access from any network interface. This means you can access the application using:
+
+- **Localhost**: `http://localhost:3000` and `http://localhost:4000`
+- **Server's Private IP**: `http://YOUR_SERVER_IP:3000` and `http://YOUR_SERVER_IP:4000`
+- **Server's Public IP**: (if applicable and firewall allows)
+
+### Configuration Steps:
+
+1. **Update Backend Environment Variables** (`backend/.env`):
+   ```env
+   # Update FRONTEND_URL to your server's IP address
+   FRONTEND_URL=http://YOUR_SERVER_IP:3000
+   
+   # Or use * to allow all origins (not recommended for production)
+   # FRONTEND_URL=*
+   ```
+
+2. **Update Frontend Environment Variables** (`frontend/.env`):
+   ```env
+   # Update API URL to your server's IP address
+   VITE_API_BASE_URL=http://YOUR_SERVER_IP:4000/api
+   ```
+
+3. **Open Firewall Ports** (if applicable):
+   ```bash
+   # Ubuntu/Debian (using ufw)
+   sudo ufw allow 3000/tcp
+   sudo ufw allow 4000/tcp
+   
+   # CentOS/RHEL (using firewalld)
+   sudo firewall-cmd --permanent --add-port=3000/tcp
+   sudo firewall-cmd --permanent --add-port=4000/tcp
+   sudo firewall-cmd --reload
+   ```
+
+4. **Start the Application**:
+   ```bash
+   # The application now binds to 0.0.0.0 automatically
+   bash start.sh
+   ```
+
+### Production Recommendations:
+
+- Use a reverse proxy (nginx or Apache) for better security and SSL/TLS support
+- Set up HTTPS with SSL certificates (Let's Encrypt)
+- Use PM2 or systemd to run the Node.js processes as services
+- Configure proper firewall rules and security groups
+- Use environment-specific configuration files
+- Consider using a process manager for auto-restart on crashes
+
+### Example nginx Configuration:
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+    
+    # Frontend
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+    }
+    
+    # Backend API
+    location /api {
+        proxy_pass http://localhost:4000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+---
+
 ## 📦 Tech Stack
 
 | Layer | Technology |
