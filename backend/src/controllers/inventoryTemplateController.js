@@ -292,15 +292,21 @@ function convertRecords(records) {
     }
   });
 
-  const converted = Array.from(aggregated.values()).map((row) => ({
-    ...row,
-    TransactionTypeName:
-      row.TransactionQuantity > 0
-        ? 'Vend Sales Issue'
-        : row.TransactionQuantity < 0
+  const converted = Array.from(aggregated.values()).map((row) => {
+    // Invert the quantity sign: positive becomes negative, negative becomes positive
+    const invertedQuantity = -row.TransactionQuantity;
+
+    return {
+      ...row,
+      TransactionQuantity: invertedQuantity,
+      TransactionTypeName:
+        invertedQuantity > 0
           ? 'Vendor RMA'
-          : '',
-  }));
+          : invertedQuantity < 0
+            ? 'Vend Sales Issue'
+            : '',
+    };
+  });
 
   if (!converted.length) {
     throw validationError('No rows to convert after processing CSV.');
