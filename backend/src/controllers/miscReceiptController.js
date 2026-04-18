@@ -509,9 +509,11 @@ function downloadTemplate(_req, res) {
   const header = TEMPLATE_FIELDS.join(',');
   const sample =
     '-100.00,SAR,2024-01-20,2024-01-20,2024-01-20,101,REC001,Misc Activity,123456789';
-  const csv = `${header}\n${sample}\n`;
+  // Add UTF-8 BOM (Byte Order Mark) to ensure proper encoding of Arabic and other Unicode characters
+  const BOM = '\uFEFF';
+  const csv = `${BOM}${header}\n${sample}\n`;
 
-  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="misc_receipt_template.csv"');
   return res.send(csv);
 }
