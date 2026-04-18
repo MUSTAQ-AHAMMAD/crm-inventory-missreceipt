@@ -1,7 +1,11 @@
 ﻿/**
  * Inventory Template Generation controller.
  * Converts Amro inventory export CSV files into the inventory transaction
- * template format with aggregated quantities and derived transaction types.
+ * template format with aggregated quantities (inverted signs) and derived transaction types.
+ *
+ * Quantity Conversion:
+ * - Positive quantities → Negative quantities → "Vend Sales Issue"
+ * - Negative quantities → Positive quantities → "Vendor RMA"
  */
 
 const { parse } = require('csv-parse/sync');
