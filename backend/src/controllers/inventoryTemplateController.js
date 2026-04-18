@@ -296,9 +296,9 @@ function convertRecords(records) {
     ...row,
     TransactionTypeName:
       row.TransactionQuantity > 0
-        ? 'Vend RMA'
+        ? 'Vend Sales Issue'
         : row.TransactionQuantity < 0
-          ? 'Vend Sales Issue'
+          ? 'Vendor RMA'
           : '',
   }));
 
