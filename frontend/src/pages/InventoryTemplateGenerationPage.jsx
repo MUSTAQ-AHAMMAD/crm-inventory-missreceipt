@@ -94,7 +94,7 @@ export default function InventoryTemplateGenerationPage() {
       <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
         <p className="text-sm text-gray-700">
           Upload the Amro inventory export CSV and convert it into the inventory transaction template.
-          Quantities are summed per Branch + Barcode + Order Ref and transaction type is derived from the sign.
+          Quantities are inverted (positive becomes negative, negative becomes positive), summed per Branch + Barcode + Order Ref, and transaction type is derived from the inverted sign.
         </p>
 
         <div className="grid md:grid-cols-2 gap-3">
@@ -112,7 +112,8 @@ export default function InventoryTemplateGenerationPage() {
           <div className="bg-green-50 border border-green-100 rounded-lg p-4">
             <p className="text-sm font-semibold text-green-700 mb-2">Derived values</p>
             <ul className="text-sm text-green-800 space-y-1 list-disc list-inside">
-              <li>TransactionTypeName: Vend Sales Issue when qty &gt; 0, Vendor RMA when qty &lt; 0</li>
+              <li>TransactionQuantity: inverted sign (positive → negative, negative → positive)</li>
+              <li>TransactionTypeName: Vend Sales Issue when inverted qty &lt; 0, Vendor RMA when inverted qty &gt; 0</li>
               <li>TransactionDate: uses Order Ref Date when present, otherwise today (YYYY-MM-DD)</li>
               <li>TransactionUnitOfMeasure: defaults to Each when missing</li>
               <li>Output columns order is fixed:</li>
