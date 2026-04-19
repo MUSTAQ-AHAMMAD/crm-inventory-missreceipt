@@ -95,13 +95,16 @@ model MiscReceiptUpload {
 // Stores rows that failed during a misc receipt upload
 // NOTE: rawData is stored as a JSON string (SQLite has no native JSON type)
 model MiscReceiptFailure {
-  id           Int               @id @default(autoincrement())
-  uploadId     Int
-  upload       MiscReceiptUpload @relation(fields: [uploadId], references: [id])
-  rowNumber    Int
-  rawData      String
-  errorMessage String
-  createdAt    DateTime          @default(now())
+  id              Int               @id @default(autoincrement())
+  uploadId        Int
+  upload          MiscReceiptUpload @relation(fields: [uploadId], references: [id])
+  rowNumber       Int
+  rawData         String
+  errorMessage    String
+  requestPayload  String?           // Full SOAP XML request sent to Oracle
+  responseBody    String?           // Full response body from Oracle
+  responseStatus  Int?              // HTTP status code from Oracle
+  createdAt       DateTime          @default(now())
 }
 
 // Tracks each standard receipt CSV upload and its REST responses
@@ -125,13 +128,16 @@ model StandardReceiptUpload {
 // Stores rows that failed during a standard receipt upload
 // NOTE: rawData is stored as a JSON string (SQLite has no native JSON type)
 model StandardReceiptFailure {
-  id           Int                   @id @default(autoincrement())
-  uploadId     Int
-  upload       StandardReceiptUpload @relation(fields: [uploadId], references: [id])
-  rowNumber    Int
-  rawData      String
-  errorMessage String
-  createdAt    DateTime              @default(now())
+  id              Int                   @id @default(autoincrement())
+  uploadId        Int
+  upload          StandardReceiptUpload @relation(fields: [uploadId], references: [id])
+  rowNumber       Int
+  rawData         String
+  errorMessage    String
+  requestPayload  String?               // Full JSON payload sent to Oracle
+  responseBody    String?               // Full response body from Oracle
+  responseStatus  Int?                  // HTTP status code from Oracle
+  createdAt       DateTime              @default(now())
 }
 
 // Audit log for all user actions within the system

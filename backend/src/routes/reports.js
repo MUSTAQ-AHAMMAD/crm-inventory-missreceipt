@@ -10,7 +10,7 @@
 
 const express = require('express');
 const { authenticate, requireRole } = require('../middleware/auth');
-const { dashboard, failures, activity, exportReport } = require('../controllers/reportsController');
+const { dashboard, failures, activity, exportReport, getUploadDetail } = require('../controllers/reportsController');
 
 const router = express.Router();
 
@@ -94,7 +94,7 @@ router.get('/activity', requireRole('ADMIN', 'MANAGER'), activity);
  *         name: type
  *         schema:
  *           type: string
- *           enum: [failures, activity]
+ *           enum: [failures, activity, standard-failures, misc-failures]
  *       - in: query
  *         name: from
  *         schema:
@@ -110,5 +110,29 @@ router.get('/activity', requireRole('ADMIN', 'MANAGER'), activity);
  *         description: CSV file download
  */
 router.get('/export', requireRole('ADMIN', 'MANAGER'), exportReport);
+
+/**
+ * @swagger
+ * /reports/upload-detail/{type}/{id}:
+ *   get:
+ *     tags: [Reports]
+ *     summary: Get detailed upload information including request/response logs
+ *     parameters:
+ *       - in: path
+ *         name: type
+ *         required: true
+ *         schema:
+ *           type: string
+ *           enum: [standard, misc]
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Detailed upload information
+ */
+router.get('/upload-detail/:type/:id', getUploadDetail);
 
 module.exports = router;

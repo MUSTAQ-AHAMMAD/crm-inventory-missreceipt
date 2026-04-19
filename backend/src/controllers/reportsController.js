@@ -264,6 +264,52 @@ async function exportReport(req, res, next) {
       );
       csvRows.unshift('id,email,actionType,actionDetails,ipAddress,createdAt');
       filename = 'activity_export.csv';
+    } else if (type === 'standard-failures') {
+      // Export standard receipt failures with detailed logs
+      const failures = await prisma.standardReceiptFailure.findMany({
+        where: hasDateFilter ? { createdAt: dateFilter } : {},
+        orderBy: { createdAt: 'desc' },
+        take: 5000,
+        include: { upload: { select: { filename: true } } },
+      });
+      csvRows = failures.map((f) =>
+        [
+          f.id,
+          f.uploadId,
+          `"${f.upload.filename}"`,
+          f.rowNumber,
+          `"${f.errorMessage}"`,
+          f.responseStatus || '',
+          `"${(f.requestPayload || '').replace(/"/g, '""')}"`,
+          `"${(f.responseBody || '').replace(/"/g, '""')}"`,
+          f.createdAt.toISOString()
+        ].join(',')
+      );
+      csvRows.unshift('id,uploadId,filename,rowNumber,errorMessage,responseStatus,requestPayload,responseBody,createdAt');
+      filename = 'standard_receipt_failures_export.csv';
+    } else if (type === 'misc-failures') {
+      // Export misc receipt failures with detailed logs
+      const failures = await prisma.miscReceiptFailure.findMany({
+        where: hasDateFilter ? { createdAt: dateFilter } : {},
+        orderBy: { createdAt: 'desc' },
+        take: 5000,
+        include: { upload: { select: { filename: true } } },
+      });
+      csvRows = failures.map((f) =>
+        [
+          f.id,
+          f.uploadId,
+          `"${f.upload.filename}"`,
+          f.rowNumber,
+          `"${f.errorMessage}"`,
+          f.responseStatus || '',
+          `"${(f.requestPayload || '').replace(/"/g, '""')}"`,
+          `"${(f.responseBody || '').replace(/"/g, '""')}"`,
+          f.createdAt.toISOString()
+        ].join(',')
+      );
+      csvRows.unshift('id,uploadId,filename,rowNumber,errorMessage,responseStatus,requestPayload,responseBody,createdAt');
+      filename = 'misc_receipt_failures_export.csv';
     } else {
       // Default: inventory failures
       const invFails = await prisma.inventoryFailureRecord.findMany({
@@ -290,4 +336,78 @@ async function exportReport(req, res, next) {
   }
 }
 
-module.exports = { dashboard, failures, activity, exportReport };
+/**
+ * GET /api/reports/upload-detail/:type/:id
+ * Returns comprehensive details for a specific upload including request/response logs
+ * @param {string} type - 'standard' or 'misc'
+ * @param {number} id - Upload ID
+ */
+async function getUploadDetail(req, res, next) {
+  try {
+    const { type, id } = req.params;
+    const uploadId = parseInt(id);
+
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
+
+    if (type === 'standard') {
+      const upload = await prisma.standardReceiptUpload.findUnique({
+        where: { id: uploadId },
+        include: {
+          user: { select: { email: true } },
+          failures: {
+            orderBy: { rowNumber: 'asc' }
+          },
+        },
+      });
+
+      if (!upload) {
+        return res.status(404).json({ error: 'Upload not found.' });
+      }
+
+      // Parse rawData and failures
+      const parsedUpload = {
+        ...upload,
+        failures: upload.failures.map((f) => ({
+          ...f,
+          rawData: (() => { try { return JSON.parse(f.rawData); } catch { return f.rawData; } })(),
+          requestPayload: f.requestPayload ? (() => { try { return JSON.parse(f.requestPayload); } catch { return f.requestPayload; } })() : null,
+        })),
+      };
+
+      return res.json(parsedUpload);
+    } else if (type === 'misc') {
+      const upload = await prisma.miscReceiptUpload.findUnique({
+        where: { id: uploadId },
+        include: {
+          user: { select: { email: true } },
+          failures: {
+            orderBy: { rowNumber: 'asc' }
+          },
+        },
+      });
+
+      if (!upload) {
+        return res.status(404).json({ error: 'Upload not found.' });
+      }
+
+      // Parse rawData
+      const parsedUpload = {
+        ...upload,
+        failures: upload.failures.map((f) => ({
+          ...f,
+          rawData: (() => { try { return JSON.parse(f.rawData); } catch { return f.rawData; } })(),
+        })),
+      };
+
+      return res.json(parsedUpload);
+    } else {
+      return res.status(400).json({ error: 'Invalid upload type. Use "standard" or "misc".' });
+    }
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { dashboard, failures, activity, exportReport, getUploadDetail };

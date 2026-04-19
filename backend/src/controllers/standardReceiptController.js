@@ -265,6 +265,9 @@ async function upload(req, res, next) {
               rowNumber,
               rawData: JSON.stringify(row),
               errorMessage: errorDetail,
+              requestPayload: JSON.stringify(row, null, 2),
+              responseBody: snippet(responseText, 2000),
+              responseStatus: response.status,
             });
             if (!firstErrorMessage) {
               firstErrorMessage = `Row ${rowNumber}: ${errorDetail}`;
@@ -295,6 +298,9 @@ async function upload(req, res, next) {
             rowNumber,
             rawData: JSON.stringify(row),
             errorMessage: errorDetail,
+            requestPayload: JSON.stringify(row, null, 2),
+            responseBody: snippet(responseText || apiErr.message, 2000),
+            responseStatus: apiErr.response?.status || null,
           });
           if (!firstErrorMessage) {
             firstErrorMessage = `Row ${rowNumber}: ${errorDetail}`;
