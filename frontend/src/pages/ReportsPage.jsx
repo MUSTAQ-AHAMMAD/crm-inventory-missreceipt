@@ -125,8 +125,8 @@ function UploadHistoryTab({ filters }) {
   const limit = 20
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['uploadHistory', filters, page],
-    queryFn: () => api.get('/inventory/uploads', { params: { page, limit } }).then((r) => r.data),
+    queryKey: ['allUploads', filters, page],
+    queryFn: () => api.get('/reports/all-uploads', { params: { page, limit } }).then((r) => r.data),
   })
 
   if (isLoading) return <Spinner className="py-12" />
@@ -144,6 +144,7 @@ function UploadHistoryTab({ filters }) {
           <thead>
             <tr className="bg-gray-50 text-gray-500 text-xs uppercase">
               <th className="px-4 py-2 text-left">ID</th>
+              <th className="px-4 py-2 text-left">Type</th>
               <th className="px-4 py-2 text-left">CSV File</th>
               <th className="px-4 py-2 text-left">Organization</th>
               <th className="px-4 py-2 text-left">Uploaded By</th>
@@ -158,38 +159,57 @@ function UploadHistoryTab({ filters }) {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {uploads.length === 0 && (
-              <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">No uploads found</td></tr>
+              <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">No uploads found</td></tr>
             )}
             {uploads.map((u) => {
-              const rate = u.totalRecords > 0 ? Math.round((u.successCount / u.totalRecords) * 100) : 0
+              const totalRecords = u.totalRecords || 0
+              const successCount = u.successCount || 0
+              const failureCount = u.failureCount || 0
+              const rate = totalRecords > 0 ? Math.round((successCount / totalRecords) * 100) : 0
+              const uploadType = u.uploadType
+              const status = u.status || u.responseStatus || 'UNKNOWN'
+
+              // Determine the detail page link based on upload type
+              let detailLink = `/uploads/${u.id}`
+              if (uploadType === 'standard') {
+                detailLink = `/receipt-upload/standard/${u.id}`
+              } else if (uploadType === 'misc') {
+                detailLink = `/receipt-upload/misc/${u.id}`
+              }
+
               return (
-                <tr key={u.id} className="hover:bg-gray-50">
+                <tr key={`${uploadType}-${u.id}`} className="hover:bg-gray-50">
                   <td className="px-4 py-3 text-gray-500">#{u.id}</td>
+                  <td className="px-4 py-3">
+                    <UploadTypeBadge type={uploadType} />
+                  </td>
                   <td className="px-4 py-3 font-mono text-xs text-gray-700">{u.filename}</td>
                   <td className="px-4 py-3 text-xs text-gray-600">{u.organizationName || '—'}</td>
                   <td className="px-4 py-3 text-xs text-gray-600">{u.user?.email || '—'}</td>
-                  <td className="px-4 py-3">{u.totalRecords}</td>
-                  <td className="px-4 py-3 text-green-600 font-medium">{u.successCount}</td>
-                  <td className="px-4 py-3 text-red-600 font-medium">{u.failureCount}</td>
+                  <td className="px-4 py-3">{totalRecords || '—'}</td>
+                  <td className="px-4 py-3 text-green-600 font-medium">{successCount || '—'}</td>
+                  <td className="px-4 py-3 text-red-600 font-medium">{failureCount || '—'}</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-16 bg-gray-100 rounded-full h-1.5">
-                        <div
-                          className="h-1.5 rounded-full bg-green-500"
-                          style={{ width: `${rate}%` }}
-                        />
+                    {totalRecords > 0 ? (
+                      <div className="flex items-center gap-2">
+                        <div className="w-16 bg-gray-100 rounded-full h-1.5">
+                          <div
+                            className="h-1.5 rounded-full bg-green-500"
+                            style={{ width: `${rate}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-gray-500">{rate}%</span>
                       </div>
-                      <span className="text-xs text-gray-500">{rate}%</span>
-                    </div>
+                    ) : '—'}
                   </td>
                   <td className="px-4 py-3">
-                    <UploadStatusBadge status={u.status} />
+                    <UploadStatusBadge status={status} />
                   </td>
                   <td className="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">
                     {new Date(u.createdAt).toLocaleString()}
                   </td>
                   <td className="px-4 py-3">
-                    <Link to={`/uploads/${u.id}`} className="text-blue-600 hover:underline text-xs">
+                    <Link to={detailLink} className="text-blue-600 hover:underline text-xs">
                       View details
                     </Link>
                   </td>
@@ -232,10 +252,25 @@ function UploadStatusBadge({ status }) {
     PARTIAL: 'bg-yellow-100 text-yellow-700',
     PROCESSING: 'bg-blue-100 text-blue-700',
     PENDING: 'bg-gray-100 text-gray-600',
+    SUCCESS: 'bg-green-100 text-green-700',
   }
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-gray-100 text-gray-600'}`}>
       {status}
+    </span>
+  )
+}
+
+function UploadTypeBadge({ type }) {
+  const map = {
+    inventory: { label: 'Inventory', class: 'bg-blue-100 text-blue-700' },
+    standard: { label: 'Standard Receipt', class: 'bg-purple-100 text-purple-700' },
+    misc: { label: 'Misc Receipt', class: 'bg-green-100 text-green-700' },
+  }
+  const badge = map[type] || { label: type, class: 'bg-gray-100 text-gray-600' }
+  return (
+    <span className={`px-2 py-0.5 rounded text-xs font-medium ${badge.class}`}>
+      {badge.label}
     </span>
   )
 }

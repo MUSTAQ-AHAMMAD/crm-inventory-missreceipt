@@ -10,7 +10,7 @@
 
 const express = require('express');
 const { authenticate, requireRole } = require('../middleware/auth');
-const { dashboard, failures, activity, exportReport, getUploadDetail } = require('../controllers/reportsController');
+const { dashboard, failures, activity, exportReport, getUploadDetail, getAllUploads } = require('../controllers/reportsController');
 
 const router = express.Router();
 
@@ -134,5 +134,26 @@ router.get('/export', requireRole('ADMIN', 'MANAGER'), exportReport);
  *         description: Detailed upload information
  */
 router.get('/upload-detail/:type/:id', getUploadDetail);
+
+/**
+ * @swagger
+ * /reports/all-uploads:
+ *   get:
+ *     tags: [Reports]
+ *     summary: Get all uploads (inventory, standard, misc) combined
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Combined list of all uploads
+ */
+router.get('/all-uploads', getAllUploads);
 
 module.exports = router;
