@@ -209,9 +209,9 @@ export default function MiscReceiptPage() {
                     </td>
                     <td
                       className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate"
-                      title={u.responseLog || u.responseMessage}
+                      title={u.responseLog || (typeof u.responseMessage === 'object' ? JSON.stringify(u.responseMessage) : u.responseMessage)}
                     >
-                      {u.responseMessage}
+                      {typeof u.responseMessage === 'object' ? JSON.stringify(u.responseMessage) : (u.responseMessage || '—')}
                     </td>
                     <td className="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">
                       {new Date(u.createdAt).toLocaleString()}
