@@ -5,6 +5,7 @@
 
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import api from '../hooks/useApi'
 import FileDropzone from '../components/common/FileDropzone'
 import Spinner from '../components/common/Spinner'
@@ -192,11 +193,12 @@ export default function MiscReceiptPage() {
                   <th className="px-4 py-2 text-left">Status</th>
                   <th className="px-4 py-2 text-left">Response</th>
                   <th className="px-4 py-2 text-left">Date</th>
+                  <th className="px-4 py-2 text-left">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {(!uploadsData?.uploads || uploadsData.uploads.length === 0) && (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No uploads yet</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No uploads yet</td></tr>
                 )}
                 {uploadsData?.uploads?.map((u) => (
                   <tr key={u.id} className="hover:bg-gray-50">
@@ -211,8 +213,16 @@ export default function MiscReceiptPage() {
                     >
                       {u.responseMessage}
                     </td>
-                    <td className="px-4 py-3 text-gray-400 whitespace-nowrap">
-                      {new Date(u.createdAt).toLocaleDateString()}
+                    <td className="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">
+                      {new Date(u.createdAt).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Link
+                        to={`/receipt-upload/misc/${u.id}`}
+                        className="text-blue-600 hover:underline text-xs"
+                      >
+                        View Details
+                      </Link>
                     </td>
                   </tr>
                 ))}
