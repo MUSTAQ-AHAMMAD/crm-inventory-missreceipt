@@ -6,6 +6,8 @@
 
 const { parse } = require('csv-parse/sync');
 const axios = require('axios');
+const pLimit = require('p-limit');
+const pRetry = require('p-retry');
 const prisma = require('../services/prisma');
 
 // Required CSV columns (receipt method is optional if your org needs it)
@@ -31,6 +33,12 @@ const MISC_COMMON_NS =
 const SOAP_ACTION = 'createMiscellaneousReceipt';
 const SOAP_ACTION_HEADER = `"${SOAP_ACTION}"`;
 const REQUIRED_CURRENCY = 'SAR';
+
+// Configuration for parallel processing and retries
+const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 5;
+const MAX_RETRIES = parseInt(process.env.MAX_RETRIES) || 3;
+const RETRY_MIN_TIMEOUT = 1000; // 1 second
+const RETRY_MAX_TIMEOUT = 10000; // 10 seconds
 
 function asText(data) {
   if (data == null) return '';
@@ -307,89 +315,129 @@ async function upload(req, res, next) {
     let firstErrorMessage = '';
     let lastSuccessMessage = '';
     const logContext = `Action=${SOAP_ACTION_HEADER} | Endpoint=${process.env.ORACLE_SOAP_URL}`;
+    const startTime = Date.now();
 
-    // Send each row to the SOAP endpoint
-    for (let i = 0; i < normalizedRecords.length; i++) {
-      const row = normalizedRecords[i];
-      const rowNumber = i + 2;
-      const soapXml = generateSoapEnvelope(row);
-      const requestPreview = snippet(soapXml);
+    // Create a limit function for concurrent requests
+    const limit = pLimit(CONCURRENT_REQUESTS);
 
-      try {
-        const response = await axios.post(process.env.ORACLE_SOAP_URL, soapXml, {
-          headers: {
-            'Content-Type': 'text/xml; charset=utf-8',
-            Accept: 'text/xml',
-            SOAPAction: SOAP_ACTION_HEADER,
-            Authorization: `Basic ${oracleAuth}`,
-          },
-          timeout: 30000,
-          responseType: 'text',
-          validateStatus: () => true, // capture SOAP faults even when HTTP status is 500
-        });
+    // Process all rows with parallel processing and retry logic
+    const processingPromises = normalizedRecords.map((row, i) => {
+      return limit(async () => {
+        const rowNumber = i + 2;
+        const soapXml = generateSoapEnvelope(row);
+        const requestPreview = snippet(soapXml);
 
-        const responseText = asText(response.data);
-        const xmlPayload = extractXmlPayload(responseText);
-        const faultMsg = extractSoapFaultMessage(responseText);
-        const hasHttpError = response.status >= 400;
+        try {
+          // Use p-retry for automatic retries with exponential backoff
+          const response = await pRetry(
+            async () => {
+              const res = await axios.post(process.env.ORACLE_SOAP_URL, soapXml, {
+                headers: {
+                  'Content-Type': 'text/xml; charset=utf-8',
+                  Accept: 'text/xml',
+                  SOAPAction: SOAP_ACTION_HEADER,
+                  Authorization: `Basic ${oracleAuth}`,
+                },
+                timeout: 30000,
+                responseType: 'text',
+                validateStatus: () => true, // capture SOAP faults even when HTTP status is 500
+              });
 
-        if (hasHttpError || faultMsg) {
+              const responseText = asText(res.data);
+              const faultMsg = extractSoapFaultMessage(responseText);
+
+              // Throw error for retryable SOAP faults or server errors
+              if (res.status >= 500 && res.status < 600) {
+                throw new Error(`HTTP ${res.status}: Server error`);
+              }
+              if (faultMsg && faultMsg.includes('timeout')) {
+                throw new Error(`SOAP timeout: ${faultMsg}`);
+              }
+
+              return res;
+            },
+            {
+              retries: MAX_RETRIES,
+              minTimeout: RETRY_MIN_TIMEOUT,
+              maxTimeout: RETRY_MAX_TIMEOUT,
+              onFailedAttempt: (error) => {
+                console.warn(
+                  `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} Retry ${error.attemptNumber}/${MAX_RETRIES}: ${error.message}`
+                );
+              },
+            }
+          );
+
+          const responseText = asText(response.data);
+          const xmlPayload = extractXmlPayload(responseText);
+          const faultMsg = extractSoapFaultMessage(responseText);
+          const hasHttpError = response.status >= 400;
+
+          if (hasHttpError || faultMsg) {
+            failureCount++;
+            const errorDetail =
+              faultMsg ||
+              `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`.trim();
+            const errorSnippet = snippet(errorDetail);
+            failures.push({
+              uploadId: uploadRecord.id,
+              rowNumber,
+              rawData: JSON.stringify(row), // SQLite stores JSON as a string
+              errorMessage: errorSnippet,
+            });
+            if (!firstErrorMessage) {
+              firstErrorMessage = `Row ${rowNumber}: ${errorSnippet}`;
+            }
+            const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (${faultMsg ? 'SOAP fault' : 'HTTP error'}): ${snippet(
+              faultMsg || xmlPayload || responseText
+            )} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status} | ${logContext} | Request: ${requestPreview}`;
+            responseLogs.push(logLine);
+            console.error(logLine);
+          } else {
+            successCount++;
+            const successSnippet = snippet(xmlPayload || responseText) || 'Success';
+            if (!lastSuccessMessage) {
+              lastSuccessMessage = successSnippet || 'Success';
+            }
+            const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SUCCESS | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status} | Response: ${successSnippet || 'Success'} | ${logContext}`;
+            responseLogs.push(logLine);
+            console.log(logLine);
+          }
+        } catch (apiErr) {
           failureCount++;
-          const errorDetail =
+          const responseText = asText(apiErr.response?.data);
+          const faultMsg = extractSoapFaultMessage(responseText);
+          const errMsg =
             faultMsg ||
-            `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`.trim();
-          const errorSnippet = snippet(errorDetail);
+            responseText ||
+            apiErr.message ||
+            'Oracle SOAP API error';
           failures.push({
             uploadId: uploadRecord.id,
             rowNumber,
             rawData: JSON.stringify(row), // SQLite stores JSON as a string
-            errorMessage: errorSnippet,
+            errorMessage: typeof errMsg === 'string' ? snippet(errMsg) : JSON.stringify(errMsg || '').substring(0, 500),
           });
+          const errSnippet =
+            typeof errMsg === 'string'
+              ? snippet(errMsg)
+              : JSON.stringify(errMsg || '').substring(0, 500);
           if (!firstErrorMessage) {
-            firstErrorMessage = `Row ${rowNumber}: ${errorSnippet}`;
+            firstErrorMessage = `Row ${rowNumber}: ${errSnippet}`;
           }
-          const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (${faultMsg ? 'SOAP fault' : 'HTTP error'}): ${snippet(
-            faultMsg || xmlPayload || responseText
-          )} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status} | ${logContext} | Request: ${requestPreview}`;
+          const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (API): ${errSnippet} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'} | ${logContext} | Request: ${requestPreview}`;
           responseLogs.push(logLine);
           console.error(logLine);
-        } else {
-          successCount++;
-          const successSnippet = snippet(xmlPayload || responseText) || 'Success';
-          if (!lastSuccessMessage) {
-            lastSuccessMessage = successSnippet || 'Success';
-          }
-          const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SUCCESS | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status} | Response: ${successSnippet || 'Success'} | ${logContext}`;
-          responseLogs.push(logLine);
-          console.log(logLine);
         }
-      } catch (apiErr) {
-        failureCount++;
-        const responseText = asText(apiErr.response?.data);
-        const faultMsg = extractSoapFaultMessage(responseText);
-        const errMsg =
-          faultMsg ||
-          responseText ||
-          apiErr.message ||
-          'Oracle SOAP API error';
-        failures.push({
-          uploadId: uploadRecord.id,
-          rowNumber,
-          rawData: JSON.stringify(row), // SQLite stores JSON as a string
-          errorMessage: typeof errMsg === 'string' ? snippet(errMsg) : JSON.stringify(errMsg || '').substring(0, 500),
-        });
-        const errSnippet =
-          typeof errMsg === 'string'
-            ? snippet(errMsg)
-            : JSON.stringify(errMsg || '').substring(0, 500);
-        if (!firstErrorMessage) {
-          firstErrorMessage = `Row ${rowNumber}: ${errSnippet}`;
-        }
-        const logLine = `[MiscReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (API): ${errSnippet} | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${apiErr.response?.status || 'N/A'} | ${logContext} | Request: ${requestPreview}`;
-        responseLogs.push(logLine);
-        console.error(logLine);
-      }
-    }
+      });
+    });
+
+    // Wait for all requests to complete
+    await Promise.all(processingPromises);
+
+    const endTime = Date.now();
+    const totalTime = ((endTime - startTime) / 1000).toFixed(2);
+    const avgTimePerRecord = (totalTime / normalizedRecords.length).toFixed(2);
 
     // Persist failures
     if (failures.length > 0) {
@@ -402,8 +450,9 @@ async function upload(req, res, next) {
       firstErrorMessage ||
       lastSuccessMessage ||
       `${successCount} succeeded, ${failureCount} failed`;
+    const performanceLog = `Total time: ${totalTime}s | Avg per record: ${avgTimePerRecord}s | Concurrency: ${CONCURRENT_REQUESTS}`;
     const responseLog =
-      responseLogs.length > 0 ? responseLogs.join('\n') : responseMessage;
+      responseLogs.length > 0 ? responseLogs.join('\n') + '\n\n' + performanceLog : responseMessage + '\n' + performanceLog;
 
     // Update upload record with results
     const updatedUpload = await prisma.miscReceiptUpload.update({
@@ -416,7 +465,7 @@ async function upload(req, res, next) {
     });
 
     console.log(
-      `[MiscReceipt] Upload #${uploadRecord.id} COMPLETE | Total: ${normalizedRecords.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus}`
+      `[MiscReceipt] Upload #${uploadRecord.id} COMPLETE | Total: ${normalizedRecords.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus} | Time: ${totalTime}s | Avg: ${avgTimePerRecord}s/record`
     );
 
     return res.json({
@@ -425,6 +474,10 @@ async function upload(req, res, next) {
       successCount,
       failureCount,
       status: finalStatus,
+      processingTimeSeconds: parseFloat(totalTime),
+      averageTimePerRecord: parseFloat(avgTimePerRecord),
+      concurrency: CONCURRENT_REQUESTS,
+      maxRetries: MAX_RETRIES,
     });
   } catch (err) {
     next(err);

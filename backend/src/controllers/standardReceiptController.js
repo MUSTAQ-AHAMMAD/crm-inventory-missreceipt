@@ -6,6 +6,8 @@
 
 const { parse } = require('csv-parse/sync');
 const axios = require('axios');
+const pLimit = require('p-limit');
+const pRetry = require('p-retry');
 const prisma = require('../services/prisma');
 
 const REQUIRED_FIELDS = [
@@ -22,6 +24,12 @@ const REQUIRED_FIELDS = [
 ];
 
 const TEMPLATE_FIELDS = [...REQUIRED_FIELDS];
+
+// Configuration for parallel processing and retries
+const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 5;
+const MAX_RETRIES = parseInt(process.env.MAX_RETRIES) || 3;
+const RETRY_MIN_TIMEOUT = 1000; // 1 second
+const RETRY_MAX_TIMEOUT = 10000; // 10 seconds
 
 function asText(data) {
   if (data == null) return '';
@@ -204,27 +212,84 @@ async function upload(req, res, next) {
     let firstErrorMessage = '';
     let lastSuccessMessage = '';
     const logContext = `Endpoint=${process.env.ORACLE_STANDARD_RECEIPT_API_URL}`;
+    const startTime = Date.now();
 
-    for (let i = 0; i < normalizedRecords.length; i++) {
-      const row = normalizedRecords[i];
-      const rowNumber = i + 2;
-      const requestPreview = snippet(JSON.stringify(row));
+    // Create a limit function for concurrent requests
+    const limit = pLimit(CONCURRENT_REQUESTS);
 
-      try {
-        const response = await axios.post(process.env.ORACLE_STANDARD_RECEIPT_API_URL, row, {
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'application/json',
-            Authorization: `Basic ${oracleAuth}`,
-          },
-          timeout: 30000,
-          validateStatus: () => true,
-        });
+    // Process all rows with parallel processing and retry logic
+    const processingPromises = normalizedRecords.map((row, i) => {
+      return limit(async () => {
+        const rowNumber = i + 2;
+        const requestPreview = snippet(JSON.stringify(row));
 
-        const responseText = asText(response.data);
-        if (response.status >= 400) {
+        try {
+          // Use p-retry for automatic retries with exponential backoff
+          const response = await pRetry(
+            async () => {
+              const res = await axios.post(process.env.ORACLE_STANDARD_RECEIPT_API_URL, row, {
+                headers: {
+                  'Content-Type': 'application/json',
+                  Accept: 'application/json',
+                  Authorization: `Basic ${oracleAuth}`,
+                },
+                timeout: 30000,
+                validateStatus: () => true,
+              });
+
+              // Throw error for retryable status codes
+              if (res.status >= 500 && res.status < 600) {
+                throw new Error(`HTTP ${res.status}: Server error`);
+              }
+
+              return res;
+            },
+            {
+              retries: MAX_RETRIES,
+              minTimeout: RETRY_MIN_TIMEOUT,
+              maxTimeout: RETRY_MAX_TIMEOUT,
+              onFailedAttempt: (error) => {
+                console.warn(
+                  `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} Retry ${error.attemptNumber}/${MAX_RETRIES}: ${error.message}`
+                );
+              },
+            }
+          );
+
+          const responseText = asText(response.data);
+          if (response.status >= 400) {
+            failureCount++;
+            const errorDetail = snippet(responseText || `HTTP ${response.status}`);
+            failures.push({
+              uploadId: uploadRecord.id,
+              rowNumber,
+              rawData: JSON.stringify(row),
+              errorMessage: errorDetail,
+            });
+            if (!firstErrorMessage) {
+              firstErrorMessage = `Row ${rowNumber}: ${errorDetail}`;
+            }
+            const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED: ${errorDetail} | HTTP ${response.status} | ${logContext} | Request: ${requestPreview}`;
+            responseLogs.push(logLine);
+            console.error(logLine);
+          } else {
+            successCount++;
+            const successSnippet = snippet(responseText || 'Success');
+            if (!lastSuccessMessage) {
+              lastSuccessMessage = successSnippet;
+            }
+            const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SUCCESS | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status} | Response: ${successSnippet} | ${logContext}`;
+            responseLogs.push(logLine);
+            console.log(logLine);
+          }
+        } catch (apiErr) {
           failureCount++;
-          const errorDetail = snippet(responseText || `HTTP ${response.status}`);
+          const responseText = asText(apiErr.response?.data);
+          const errorDetail = snippet(
+            responseText ||
+              apiErr.message ||
+              'Oracle standard receipt API error'
+          );
           failures.push({
             uploadId: uploadRecord.id,
             rowNumber,
@@ -234,41 +299,19 @@ async function upload(req, res, next) {
           if (!firstErrorMessage) {
             firstErrorMessage = `Row ${rowNumber}: ${errorDetail}`;
           }
-          const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED: ${errorDetail} | HTTP ${response.status} | ${logContext} | Request: ${requestPreview}`;
+          const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (API): ${errorDetail} | ${logContext} | Request: ${requestPreview}`;
           responseLogs.push(logLine);
           console.error(logLine);
-        } else {
-          successCount++;
-          const successSnippet = snippet(responseText || 'Success');
-          if (!lastSuccessMessage) {
-            lastSuccessMessage = successSnippet;
-          }
-          const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SUCCESS | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status} | Response: ${successSnippet} | ${logContext}`;
-          responseLogs.push(logLine);
-          console.log(logLine);
         }
-      } catch (apiErr) {
-        failureCount++;
-        const responseText = asText(apiErr.response?.data);
-        const errorDetail = snippet(
-          responseText ||
-            apiErr.message ||
-            'Oracle standard receipt API error'
-        );
-        failures.push({
-          uploadId: uploadRecord.id,
-          rowNumber,
-          rawData: JSON.stringify(row),
-          errorMessage: errorDetail,
-        });
-        if (!firstErrorMessage) {
-          firstErrorMessage = `Row ${rowNumber}: ${errorDetail}`;
-        }
-        const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (API): ${errorDetail} | ${logContext} | Request: ${requestPreview}`;
-        responseLogs.push(logLine);
-        console.error(logLine);
-      }
-    }
+      });
+    });
+
+    // Wait for all requests to complete
+    await Promise.all(processingPromises);
+
+    const endTime = Date.now();
+    const totalTime = ((endTime - startTime) / 1000).toFixed(2);
+    const avgTimePerRecord = (totalTime / normalizedRecords.length).toFixed(2);
 
     if (failures.length > 0) {
       await prisma.standardReceiptFailure.createMany({ data: failures });
@@ -280,8 +323,9 @@ async function upload(req, res, next) {
       firstErrorMessage ||
       lastSuccessMessage ||
       `${successCount} succeeded, ${failureCount} failed`;
+    const performanceLog = `Total time: ${totalTime}s | Avg per record: ${avgTimePerRecord}s | Concurrency: ${CONCURRENT_REQUESTS}`;
     const responseLog =
-      responseLogs.length > 0 ? responseLogs.join('\n') : responseMessage;
+      responseLogs.length > 0 ? responseLogs.join('\n') + '\n\n' + performanceLog : responseMessage + '\n' + performanceLog;
 
     const updatedUpload = await prisma.standardReceiptUpload.update({
       where: { id: uploadRecord.id },
@@ -295,7 +339,7 @@ async function upload(req, res, next) {
     });
 
     console.log(
-      `[StandardReceipt] Upload #${uploadRecord.id} COMPLETE | Total: ${normalizedRecords.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus}`
+      `[StandardReceipt] Upload #${uploadRecord.id} COMPLETE | Total: ${normalizedRecords.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus} | Time: ${totalTime}s | Avg: ${avgTimePerRecord}s/record`
     );
 
     return res.json({
@@ -304,6 +348,10 @@ async function upload(req, res, next) {
       successCount,
       failureCount,
       status: finalStatus,
+      processingTimeSeconds: parseFloat(totalTime),
+      averageTimePerRecord: parseFloat(avgTimePerRecord),
+      concurrency: CONCURRENT_REQUESTS,
+      maxRetries: MAX_RETRIES,
     });
   } catch (err) {
     next(err);

@@ -8,4 +8,7 @@ module.exports = {
     '!src/swagger.js',
   ],
   verbose: true,
+  transformIgnorePatterns: [
+    'node_modules/(?!(p-limit|yocto-queue|p-retry|retry)/)'
+  ],
 };
