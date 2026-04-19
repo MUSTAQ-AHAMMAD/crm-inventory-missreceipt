@@ -4,8 +4,9 @@
  * template format with aggregated quantities (inverted signs) and derived transaction types.
  *
  * Quantity Conversion:
- * - Positive quantities → Negative quantities → "Vend Sales Issue"
- * - Negative quantities → Positive quantities → "Vendor RMA"
+ * - REFUND transactions: Quantity is kept positive (no inversion) → "Vendor RMA"
+ * - Non-REFUND transactions with positive quantities → Negative quantities → "Vend Sales Issue"
+ * - Non-REFUND transactions with negative quantities → Positive quantities → "Vendor RMA"
  */
 
 const { parse } = require('csv-parse/sync');
@@ -53,6 +54,13 @@ const COLUMN_ALIASES = {
     'base uom',
     'uom',
     'unit of measure',
+  ],
+  orderType: [
+    'order lines/picking type/name',
+    'picking type/name',
+    'picking type',
+    'order type',
+    'type',
   ],
 };
 
@@ -270,11 +278,17 @@ function convertRecords(records) {
         REQUIRED_LABELS.quantity
       );
 
+      // Check if this is a refund transaction
+      const orderType = pickOptionalField(row, headerMap, COLUMN_ALIASES.orderType) || '';
+      const isRefund = orderType.toUpperCase().includes('REFUND');
+
       const key = `${subinventory}|||${itemNumber}|||${transactionReference}|||${transactionDate}|||${transactionUnitOfMeasure}`;
       const existing = aggregated.get(key);
 
       if (existing) {
         existing.TransactionQuantity += quantity;
+        // If any row in the aggregation is a refund, mark the entire aggregation as refund
+        existing.isRefund = existing.isRefund || isRefund;
       } else {
         aggregated.set(key, {
           TransactionTypeName: '',
@@ -284,6 +298,7 @@ function convertRecords(records) {
           TransactionQuantity: quantity,
           TransactionReference: transactionReference,
           TransactionUnitOfMeasure: transactionUnitOfMeasure,
+          isRefund: isRefund,
         });
       }
     } catch (err) {
@@ -297,18 +312,23 @@ function convertRecords(records) {
   });
 
   const converted = Array.from(aggregated.values()).map((row) => {
-    // Invert the quantity sign: positive becomes negative, negative becomes positive
-    const invertedQuantity = -row.TransactionQuantity;
+    // For refund transactions, keep the quantity positive (don't invert)
+    // For non-refund transactions, invert the quantity sign: positive becomes negative, negative becomes positive
+    const finalQuantity = row.isRefund ? Math.abs(row.TransactionQuantity) : -row.TransactionQuantity;
 
     return {
-      ...row,
-      TransactionQuantity: invertedQuantity,
       TransactionTypeName:
-        invertedQuantity > 0
+        finalQuantity > 0
           ? 'Vendor RMA'
-          : invertedQuantity < 0
+          : finalQuantity < 0
             ? 'Vend Sales Issue'
             : '',
+      ItemNumber: row.ItemNumber,
+      SubinventoryCode: row.SubinventoryCode,
+      TransactionDate: row.TransactionDate,
+      TransactionQuantity: finalQuantity,
+      TransactionReference: row.TransactionReference,
+      TransactionUnitOfMeasure: row.TransactionUnitOfMeasure,
     };
   });
 
