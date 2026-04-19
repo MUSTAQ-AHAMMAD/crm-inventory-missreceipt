@@ -1,0 +1,4 @@
+ReceiptNumber,ReceiptMethod,ReceiptDate,BusinessUnit,CustomerAccountNumber,CustomerSite,Amount,Currency,RemittanceBankAccountNumber,AccountingDate
+Visa-BLK-ALAR-00000011,,2026-03-05,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03-05
+Visa-BLK-ALAR-00000012,Visa,invalid-date,AlQurashi-KSA,116012,100005,1250.50,SAR,157-95017321-ALARIDAH,2026-03-05
+Visa-BLK-ALAR-00000013,MasterCard,2026-03-05,AlQurashi-KSA,116013,100006,not-a-number,SAR,157-95017321-ALARIDAH,2026-03-05
