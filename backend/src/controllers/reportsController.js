@@ -410,4 +410,61 @@ async function getUploadDetail(req, res, next) {
   }
 }
 
-module.exports = { dashboard, failures, activity, exportReport, getUploadDetail };
+/**
+ * GET /api/reports/all-uploads
+ * Returns all uploads (inventory, standard, misc) combined for the upload history tab
+ */
+async function getAllUploads(req, res, next) {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 20);
+    const skip = (page - 1) * limit;
+
+    // Fetch all three types of uploads in parallel
+    const [inventoryUploads, standardUploads, miscUploads] = await Promise.all([
+      prisma.inventoryUpload.findMany({
+        include: {
+          user: { select: { email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.standardReceiptUpload.findMany({
+        include: {
+          user: { select: { email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.miscReceiptUpload.findMany({
+        include: {
+          user: { select: { email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    // Combine and add type field to each upload
+    const allUploads = [
+      ...inventoryUploads.map(u => ({ ...u, uploadType: 'inventory' })),
+      ...standardUploads.map(u => ({ ...u, uploadType: 'standard' })),
+      ...miscUploads.map(u => ({ ...u, uploadType: 'misc' })),
+    ];
+
+    // Sort by createdAt descending
+    allUploads.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    // Apply pagination
+    const total = allUploads.length;
+    const paginatedUploads = allUploads.slice(skip, skip + limit);
+
+    return res.json({
+      uploads: paginatedUploads,
+      total,
+      page,
+      limit,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { dashboard, failures, activity, exportReport, getUploadDetail, getAllUploads };
