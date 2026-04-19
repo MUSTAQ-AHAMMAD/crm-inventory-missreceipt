@@ -16,6 +16,7 @@ import UserManagementPage from './pages/UserManagementPage'
 import ReportsPage from './pages/ReportsPage'
 import FailureDetailsPage from './pages/FailureDetailsPage'
 import UploadDetailPage from './pages/UploadDetailPage'
+import ReceiptUploadDetailPage from './pages/ReceiptUploadDetailPage'
 
 /** Route guard – redirects unauthenticated users to /login */
 function PrivateRoute({ children }) {
@@ -65,6 +66,7 @@ export default function App() {
             <Route path="reports" element={<ReportsPage />} />
             <Route path="uploads/:uploadId" element={<UploadDetailPage />} />
             <Route path="failures/:uploadId" element={<FailureDetailsPage />} />
+            <Route path="receipt-upload/:type/:uploadId" element={<ReceiptUploadDetailPage />} />
           </Route>
 
           {/* Fallback */}

@@ -384,6 +384,9 @@ async function upload(req, res, next) {
               rowNumber,
               rawData: JSON.stringify(row), // SQLite stores JSON as a string
               errorMessage: errorSnippet,
+              requestPayload: snippet(soapXml, 2000),
+              responseBody: snippet(xmlPayload || responseText, 2000),
+              responseStatus: response.status,
             });
             if (!firstErrorMessage) {
               firstErrorMessage = `Row ${rowNumber}: ${errorSnippet}`;
@@ -417,6 +420,9 @@ async function upload(req, res, next) {
             rowNumber,
             rawData: JSON.stringify(row), // SQLite stores JSON as a string
             errorMessage: typeof errMsg === 'string' ? snippet(errMsg) : JSON.stringify(errMsg || '').substring(0, 500),
+            requestPayload: snippet(soapXml, 2000),
+            responseBody: snippet(responseText || apiErr.message, 2000),
+            responseStatus: apiErr.response?.status || null,
           });
           const errSnippet =
             typeof errMsg === 'string'
