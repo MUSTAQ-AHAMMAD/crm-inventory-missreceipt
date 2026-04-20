@@ -61,6 +61,14 @@ function normalizeDate(raw, fieldName) {
   const dmyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
   if (dmyMatch) return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
 
+  // Check if it's in YYYY/MM/DD format (with forward slashes)
+  const isoSlashMatch = value.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if (isoSlashMatch) return `${isoSlashMatch[1]}-${isoSlashMatch[2]}-${isoSlashMatch[3]}`;
+
+  // Check if it's in DD/MM/YYYY format (with forward slashes)
+  const dmySlashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (dmySlashMatch) return `${dmySlashMatch[3]}-${dmySlashMatch[2]}-${dmySlashMatch[1]}`;
+
   // Check if it's an Excel serial number (numeric value without separators)
   const isNumeric = /^\d+(\.\d+)?$/.test(value);
   if (isNumeric) {
@@ -84,17 +92,21 @@ function normalizeDate(raw, fieldName) {
     return `${yearStr}-${monthStr}-${dayStr}`;
   }
 
-  throw new Error(`${fieldName} must be in YYYY-MM-DD format or DD-MM-YYYY format, or an Excel serial number`);
+  throw new Error(`${fieldName} must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or DD/MM/YYYY format, or an Excel serial number`);
 }
 
 function normalizeAmount(raw) {
   const value = String(raw ?? '').trim();
   if (!value) throw new Error('Amount is required');
-  const numeric = Number(value);
+
+  // Remove thousand separators (commas) to handle formats like "22,614.89"
+  const normalizedValue = value.replace(/,/g, '');
+
+  const numeric = Number(normalizedValue);
   if (!Number.isFinite(numeric)) {
     throw new Error('Amount must be a valid number');
   }
-  return value;
+  return normalizedValue;
 }
 
 function normalizeRow(row) {

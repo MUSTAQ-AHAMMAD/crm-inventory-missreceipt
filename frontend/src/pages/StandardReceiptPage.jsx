@@ -109,7 +109,7 @@ export default function StandardReceiptPage() {
             ))}
           </div>
           <p className="text-xs text-blue-700 mt-2">
-            Dates must be in YYYY-MM-DD (or DD-MM-YYYY will auto-convert). Currency should match Oracle expectation (e.g., SAR).
+            Dates must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or DD/MM/YYYY format (auto-converted). Currency should match Oracle expectation (e.g., SAR).
           </p>
         </div>
 
