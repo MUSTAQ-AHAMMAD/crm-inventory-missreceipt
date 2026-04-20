@@ -98,11 +98,15 @@ function normalizeDate(raw, fieldName) {
 function normalizeAmount(raw) {
   const value = String(raw ?? '').trim();
   if (!value) throw new Error('Amount is required');
-  const numeric = Number(value);
+
+  // Remove thousand separators (commas) to handle formats like "22,614.89"
+  const normalizedValue = value.replace(/,/g, '');
+
+  const numeric = Number(normalizedValue);
   if (!Number.isFinite(numeric)) {
     throw new Error('Amount must be a valid number');
   }
-  return value;
+  return normalizedValue;
 }
 
 function normalizeRow(row) {

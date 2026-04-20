@@ -150,6 +150,10 @@ Visa-002,Visa,,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03
         const dmyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
         if (dmyMatch)
           return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
+        const isoSlashMatch = value.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+        if (isoSlashMatch) return `${isoSlashMatch[1]}-${isoSlashMatch[2]}-${isoSlashMatch[3]}`;
+        const dmySlashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (dmySlashMatch) return `${dmySlashMatch[3]}-${dmySlashMatch[2]}-${dmySlashMatch[1]}`;
         throw new Error(`${fieldName} must be in YYYY-MM-DD format`);
       };
 
@@ -165,10 +169,52 @@ Visa-002,Visa,,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03
         const dmyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
         if (dmyMatch)
           return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
+        const isoSlashMatch = value.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+        if (isoSlashMatch) return `${isoSlashMatch[1]}-${isoSlashMatch[2]}-${isoSlashMatch[3]}`;
+        const dmySlashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (dmySlashMatch) return `${dmySlashMatch[3]}-${dmySlashMatch[2]}-${dmySlashMatch[1]}`;
         throw new Error(`${fieldName} must be in YYYY-MM-DD format`);
       };
 
       expect(normalizeDate('05-03-2026', 'ReceiptDate')).toBe('2026-03-05');
+    });
+
+    test('should convert YYYY/MM/DD to YYYY-MM-DD', () => {
+      const normalizeDate = (raw, fieldName) => {
+        const value = String(raw ?? '').trim();
+        if (!value) throw new Error(`${fieldName} is required`);
+        const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (isoMatch) return value;
+        const dmyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+        if (dmyMatch)
+          return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
+        const isoSlashMatch = value.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+        if (isoSlashMatch) return `${isoSlashMatch[1]}-${isoSlashMatch[2]}-${isoSlashMatch[3]}`;
+        const dmySlashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (dmySlashMatch) return `${dmySlashMatch[3]}-${dmySlashMatch[2]}-${dmySlashMatch[1]}`;
+        throw new Error(`${fieldName} must be in YYYY-MM-DD format`);
+      };
+
+      expect(normalizeDate('2026/02/08', 'ReceiptDate')).toBe('2026-02-08');
+    });
+
+    test('should convert DD/MM/YYYY to YYYY-MM-DD', () => {
+      const normalizeDate = (raw, fieldName) => {
+        const value = String(raw ?? '').trim();
+        if (!value) throw new Error(`${fieldName} is required`);
+        const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (isoMatch) return value;
+        const dmyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+        if (dmyMatch)
+          return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
+        const isoSlashMatch = value.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+        if (isoSlashMatch) return `${isoSlashMatch[1]}-${isoSlashMatch[2]}-${isoSlashMatch[3]}`;
+        const dmySlashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (dmySlashMatch) return `${dmySlashMatch[3]}-${dmySlashMatch[2]}-${dmySlashMatch[1]}`;
+        throw new Error(`${fieldName} must be in YYYY-MM-DD format`);
+      };
+
+      expect(normalizeDate('08/02/2026', 'ReceiptDate')).toBe('2026-02-08');
     });
 
     test('should throw error for invalid date format', () => {
@@ -180,10 +226,14 @@ Visa-002,Visa,,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03
         const dmyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
         if (dmyMatch)
           return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
+        const isoSlashMatch = value.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+        if (isoSlashMatch) return `${isoSlashMatch[1]}-${isoSlashMatch[2]}-${isoSlashMatch[3]}`;
+        const dmySlashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (dmySlashMatch) return `${dmySlashMatch[3]}-${dmySlashMatch[2]}-${dmySlashMatch[1]}`;
         throw new Error(`${fieldName} must be in YYYY-MM-DD format`);
       };
 
-      expect(() => normalizeDate('2026/03/05', 'ReceiptDate')).toThrow(
+      expect(() => normalizeDate('2026.03.05', 'ReceiptDate')).toThrow(
         'ReceiptDate must be in YYYY-MM-DD format'
       );
       expect(() => normalizeDate('', 'ReceiptDate')).toThrow(
@@ -197,11 +247,12 @@ Visa-002,Visa,,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03
       const normalizeAmount = (raw) => {
         const value = String(raw ?? '').trim();
         if (!value) throw new Error('Amount is required');
-        const numeric = Number(value);
+        const normalizedValue = value.replace(/,/g, '');
+        const numeric = Number(normalizedValue);
         if (!Number.isFinite(numeric)) {
           throw new Error('Amount must be a valid number');
         }
-        return value;
+        return normalizedValue;
       };
 
       expect(normalizeAmount('422')).toBe('422');
@@ -209,15 +260,33 @@ Visa-002,Visa,,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03
       expect(normalizeAmount('0.01')).toBe('0.01');
     });
 
+    test('should handle comma-separated thousands', () => {
+      const normalizeAmount = (raw) => {
+        const value = String(raw ?? '').trim();
+        if (!value) throw new Error('Amount is required');
+        const normalizedValue = value.replace(/,/g, '');
+        const numeric = Number(normalizedValue);
+        if (!Number.isFinite(numeric)) {
+          throw new Error('Amount must be a valid number');
+        }
+        return normalizedValue;
+      };
+
+      expect(normalizeAmount('22,614.89')).toBe('22614.89');
+      expect(normalizeAmount('1,000')).toBe('1000');
+      expect(normalizeAmount('1,234,567.89')).toBe('1234567.89');
+    });
+
     test('should reject invalid amounts', () => {
       const normalizeAmount = (raw) => {
         const value = String(raw ?? '').trim();
         if (!value) throw new Error('Amount is required');
-        const numeric = Number(value);
+        const normalizedValue = value.replace(/,/g, '');
+        const numeric = Number(normalizedValue);
         if (!Number.isFinite(numeric)) {
           throw new Error('Amount must be a valid number');
         }
-        return value;
+        return normalizedValue;
       };
 
       expect(() => normalizeAmount('')).toThrow('Amount is required');
@@ -240,17 +309,22 @@ Visa-002,Visa,,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03
         const dmyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
         if (dmyMatch)
           return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
+        const isoSlashMatch = value.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+        if (isoSlashMatch) return `${isoSlashMatch[1]}-${isoSlashMatch[2]}-${isoSlashMatch[3]}`;
+        const dmySlashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (dmySlashMatch) return `${dmySlashMatch[3]}-${dmySlashMatch[2]}-${dmySlashMatch[1]}`;
         throw new Error(`${fieldName} must be in YYYY-MM-DD format`);
       };
 
       const normalizeAmount = (raw) => {
         const value = String(raw ?? '').trim();
         if (!value) throw new Error('Amount is required');
-        const numeric = Number(value);
+        const normalizedValue = value.replace(/,/g, '');
+        const numeric = Number(normalizedValue);
         if (!Number.isFinite(numeric)) {
           throw new Error('Amount must be a valid number');
         }
-        return value;
+        return normalizedValue;
       };
 
       const normalizeRow = (row) => {
