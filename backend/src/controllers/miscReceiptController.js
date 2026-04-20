@@ -208,7 +208,7 @@ function normalizeDate(raw, fieldName) {
     return `${yearStr}-${monthStr}-${dayStr}`;
   }
 
-  throw new Error(`${fieldName} must be in YYYY-MM-DD format or DD-MM-YYYY format, or an Excel serial number`);
+  throw new Error(`${fieldName} must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, DD/MM/YYYY format, or an Excel serial number`);
 }
 
 function normalizeRow(row) {
