@@ -141,14 +141,12 @@ function extractBranchFromRef(ref) {
 }
 
 /**
- * Extracts a clean order reference by taking the first whitespace-delimited
- * token from the reference string.
+ * Cleans an order reference by trimming whitespace.
+ * Preserves the full reference text including Arabic characters.
  */
 function cleanReference(ref) {
   if (!ref) return '';
-  const trimmed = ref.trim();
-  const parts = trimmed.split(/\s+/);
-  return parts[0] || trimmed;
+  return ref.trim();
 }
 
 /**
