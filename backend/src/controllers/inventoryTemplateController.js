@@ -170,27 +170,49 @@ function parseQuantity(raw, rowNumber, label = 'Quantity') {
 function parseDate(raw, rowNumber) {
   if (!raw) throw validationError(`Row ${rowNumber}: Missing TransactionDate`);
   const trimmed = String(raw).trim();
-  const spaceIdx = trimmed.indexOf(' ');
-  const datePart = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
-
-  const sep = datePart.includes('/') ? '/' : datePart.includes('-') ? '-' : null;
-  if (!sep) {
-    throw validationError(`Row ${rowNumber}: Invalid TransactionDate value "${trimmed}"`);
-  }
-  const parts = datePart.split(sep);
-  if (parts.length !== 3) {
-    throw validationError(`Row ${rowNumber}: Invalid TransactionDate value "${trimmed}"`);
-  }
 
   let year, month, day;
-  if (parts[0].length === 4) {
-    [year, month, day] = parts;
+
+  // Check if it's an Excel serial number (numeric value without separators)
+  const isNumeric = /^\d+(\.\d+)?$/.test(trimmed);
+  if (isNumeric) {
+    // Excel serial number: days since 1900-01-01 (with 1900 leap year bug)
+    const excelSerialNumber = parseFloat(trimmed);
+
+    // Excel incorrectly treats 1900 as a leap year, so dates after Feb 28, 1900 are off by 1
+    // Excel serial 1 = 1900-01-01, Serial 60 = 1900-02-29 (doesn't exist), Serial 61 = 1900-03-01
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30)); // Dec 30, 1899
+    const adjustedSerial = excelSerialNumber > 60 ? excelSerialNumber - 1 : excelSerialNumber;
+    const dateFromSerial = new Date(excelEpoch.getTime() + adjustedSerial * 24 * 60 * 60 * 1000);
+
+    year = dateFromSerial.getUTCFullYear();
+    month = dateFromSerial.getUTCMonth() + 1;
+    day = dateFromSerial.getUTCDate();
   } else {
-    [day, month, year] = parts;
+    // Parse formatted date string
+    const spaceIdx = trimmed.indexOf(' ');
+    const datePart = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
+
+    const sep = datePart.includes('/') ? '/' : datePart.includes('-') ? '-' : null;
+    if (!sep) {
+      throw validationError(`Row ${rowNumber}: Invalid TransactionDate value "${trimmed}"`);
+    }
+    const parts = datePart.split(sep);
+    if (parts.length !== 3) {
+      throw validationError(`Row ${rowNumber}: Invalid TransactionDate value "${trimmed}"`);
+    }
+
+    if (parts[0].length === 4) {
+      [year, month, day] = parts;
+    } else {
+      [day, month, year] = parts;
+    }
   }
 
-  month = month.padStart(2, '0');
-  day = day.padStart(2, '0');
+  // Normalize to strings with padding
+  const yearStr = String(year).padStart(4, '0');
+  const monthStr = String(month).padStart(2, '0');
+  const dayStr = String(day).padStart(2, '0');
 
   if (
     !year || !month || !day ||
@@ -210,7 +232,7 @@ function parseDate(raw, rowNumber) {
     throw validationError(`Row ${rowNumber}: TransactionDate "${trimmed}" cannot be in the future. Use today's date or earlier.`);
   }
 
-  return `${year}-${month}-${day}`;
+  return `${yearStr}-${monthStr}-${dayStr}`;
 }
 
 // "ALARIDAH/8371" → "ALARIDAH"
