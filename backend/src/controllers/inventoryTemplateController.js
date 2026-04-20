@@ -4,9 +4,9 @@
  * template format with aggregated quantities (inverted signs) and derived transaction types.
  *
  * Quantity Conversion:
- * - REFUND transactions: Quantity is kept positive (no inversion) → "Vendor RMA"
+ * - REFUND transactions: Quantity is kept positive (no inversion) → "Vend RMA"
  * - Non-REFUND transactions with positive quantities → Negative quantities → "Vend Sales Issue"
- * - Non-REFUND transactions with negative quantities → Positive quantities → "Vendor RMA"
+ * - Non-REFUND transactions with negative quantities → Positive quantities → "Vend RMA"
  */
 
 const { parse } = require('csv-parse/sync');
@@ -319,7 +319,7 @@ function convertRecords(records) {
     return {
       TransactionTypeName:
         finalQuantity > 0
-          ? 'Vendor RMA'
+          ? 'Vend RMA'
           : finalQuantity < 0
             ? 'Vend Sales Issue'
             : '',
