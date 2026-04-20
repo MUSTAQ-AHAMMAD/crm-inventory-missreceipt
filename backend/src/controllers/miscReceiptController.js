@@ -177,6 +177,14 @@ function normalizeDate(raw, fieldName) {
     return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
   }
 
+  // Check if it's in YYYY/MM/DD format (with forward slashes)
+  const isoSlashMatch = value.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if (isoSlashMatch) return `${isoSlashMatch[1]}-${isoSlashMatch[2]}-${isoSlashMatch[3]}`;
+
+  // Check if it's in DD/MM/YYYY format (with forward slashes)
+  const dmySlashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (dmySlashMatch) return `${dmySlashMatch[3]}-${dmySlashMatch[2]}-${dmySlashMatch[1]}`;
+
   // Check if it's an Excel serial number (numeric value without separators)
   const isNumeric = /^\d+(\.\d+)?$/.test(value);
   if (isNumeric) {
@@ -200,7 +208,7 @@ function normalizeDate(raw, fieldName) {
     return `${yearStr}-${monthStr}-${dayStr}`;
   }
 
-  throw new Error(`${fieldName} must be in YYYY-MM-DD format or DD-MM-YYYY format, or an Excel serial number`);
+  throw new Error(`${fieldName} must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, DD/MM/YYYY format, or an Excel serial number`);
 }
 
 function normalizeRow(row) {
