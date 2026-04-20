@@ -201,6 +201,15 @@ function parseDate(raw, rowNumber) {
     throw validationError(`Row ${rowNumber}: Invalid TransactionDate value "${trimmed}"`);
   }
 
+  // Validate that the date is not in the future (Oracle requires dates <= today)
+  const parsedDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  const today = new Date();
+  today.setUTCHours(23, 59, 59, 999); // End of today in UTC
+
+  if (parsedDate > today) {
+    throw validationError(`Row ${rowNumber}: TransactionDate "${trimmed}" cannot be in the future. Use today's date or earlier.`);
+  }
+
   return `${year}-${month}-${day}`;
 }
 
@@ -219,9 +228,9 @@ function extractSubinventoryFromOrderRef(raw, rowNumber) {
 
 function currentDateString() {
   const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(now.getUTCDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
