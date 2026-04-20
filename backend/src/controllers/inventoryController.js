@@ -154,7 +154,7 @@ function cleanReference(ref) {
  * format required by Oracle: YYYY-MM-DDTHH:MM:SS.000+00:00.
  *
  * Supported input formats:
- *   DD-MM-YYYY, DD/MM/YYYY, YYYY-MM-DD, YYYY/MM/DD,
+ *   YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, DD/MM/YYYY,
  *   and any of the above followed by a time component.
  *
  * @param {string} dateStr – raw date string from CSV
@@ -169,12 +169,12 @@ function formatDateToISO(dateStr) {
   const sep = datePart.includes('/') ? '/' : '-';
   const parts = datePart.split(sep);
   if (parts.length !== 3) {
-    return { error: `Invalid transaction date format: ${raw}` };
+    return { error: `Transaction date must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or DD/MM/YYYY format` };
   }
 
   const nums = parts.map((p) => Number(p));
   if (nums.some((n) => !Number.isFinite(n))) {
-    return { error: `Invalid transaction date format: ${raw}` };
+    return { error: `Transaction date must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or DD/MM/YYYY format` };
   }
 
   let [a, b, c] = nums;
@@ -205,7 +205,7 @@ function formatDateToISO(dateStr) {
   }
 
   if (!year || !month || !day) {
-    return { error: `Invalid transaction date format: ${raw}` };
+    return { error: `Transaction date must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or DD/MM/YYYY format` };
   }
 
   const isoYear = year.toString().padStart(4, '0');
