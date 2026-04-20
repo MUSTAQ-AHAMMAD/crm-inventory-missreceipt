@@ -221,6 +221,14 @@ function formatDateToISO(dateStr) {
     return { error: `Invalid calendar date: ${raw}` };
   }
 
+  // Validate that the date is not in the future (Oracle requires dates <= today)
+  const today = new Date();
+  today.setUTCHours(23, 59, 59, 999); // End of today in UTC
+
+  if (dateObj > today) {
+    return { error: `Transaction date "${raw}" cannot be in the future. Use today's date or earlier.` };
+  }
+
   return { value: `${isoYear}-${isoMonth}-${isoDay}T00:00:00.000+00:00` };
 }
 
