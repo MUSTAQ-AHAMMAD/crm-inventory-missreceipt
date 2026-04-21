@@ -120,6 +120,9 @@ export default function MiscReceiptPage() {
               Leave these blank if your Oracle setup defaults the receipt method automatically.
             </p>
           </div>
+          <p className="text-xs text-purple-700 mt-2">
+            Date fields (ReceiptDate, DepositDate, GlDate) must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, DD/MM/YYYY format, or an Excel serial number (auto-converted).
+          </p>
         </div>
 
         <ErrorAlert message={error} onDismiss={() => setError('')} />
