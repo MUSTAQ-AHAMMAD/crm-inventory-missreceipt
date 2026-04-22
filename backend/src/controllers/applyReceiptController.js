@@ -178,7 +178,8 @@ function buildApplyReceiptXml(customerTrxId, receiptId, amount, receiptDate) {
       <typ:ReceiptId>${receiptId}</typ:ReceiptId>
       <typ:CustomerTrxId>${customerTrxId}</typ:CustomerTrxId>
       <typ:AmountApplied>${amount}</typ:AmountApplied>
-      <typ:ReceiptDate>${receiptDate}</typ:ReceiptDate>
+      <typ:ApplicationDate>${receiptDate}</typ:ApplicationDate>
+      <typ:AccountingDate>${receiptDate}</typ:AccountingDate>
     </typ:applyReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
@@ -241,8 +242,8 @@ async function previewPayload(req, res, next) {
           soapTemplate: buildApplyReceiptXml(
             '{CustomerTrxId}',
             '{ReceiptId}',
-            '{Amount}',
-            '{ReceiptDate}'
+            '{AmountApplied}',
+            '{ApplicationDate/AccountingDate}'
           ),
         });
       }
