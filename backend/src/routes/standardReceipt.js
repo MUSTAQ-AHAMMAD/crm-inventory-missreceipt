@@ -12,6 +12,7 @@ const {
   upload,
   listUploads,
   getUpload,
+  getUploadProgress,
   downloadTemplate,
 } = require('../controllers/standardReceiptController');
 
@@ -38,5 +39,6 @@ router.post('/preview', csvUpload.single('file'), previewPayload);
 router.post('/upload', csvUpload.single('file'), upload);
 router.get('/uploads', listUploads);
 router.get('/uploads/:id', getUpload);
+router.get('/uploads/:id/progress', getUploadProgress);
 
 module.exports = router;

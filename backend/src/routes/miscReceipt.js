@@ -17,6 +17,7 @@ const {
   upload,
   listUploads,
   getUpload,
+  getUploadProgress,
   downloadTemplate,
 } = require('../controllers/miscReceiptController');
 
@@ -126,5 +127,23 @@ router.get('/uploads', listUploads);
  *         description: Upload details with XML payload and failures
  */
 router.get('/uploads/:id', getUpload);
+
+/**
+ * @swagger
+ * /misc-receipt/uploads/{id}/progress:
+ *   get:
+ *     tags: [MiscReceipt]
+ *     summary: Get processing progress for a specific misc receipt upload
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Upload progress with status and counts
+ */
+router.get('/uploads/:id/progress', getUploadProgress);
 
 module.exports = router;

@@ -1,9 +1,10 @@
 /**
  * Standard Receipt Upload Page.
  * Provides CSV upload, payload preview, and REST submission to Oracle.
+ * Features real-time progress tracking with detailed API response visibility.
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import api from '../hooks/useApi'
@@ -33,11 +34,38 @@ export default function StandardReceiptPage() {
   const [payloadPreviews, setPayloadPreviews] = useState([])
   const [showPreview, setShowPreview] = useState(false)
   const [error, setError] = useState('')
+  const [activeUploadId, setActiveUploadId] = useState(null)
+  const [uploadProgress, setUploadProgress] = useState(0)
 
   const { data: uploadsData, isLoading } = useQuery({
     queryKey: ['standardUploads'],
     queryFn: () => api.get('/standard-receipt/uploads').then((r) => r.data),
   })
+
+  // Poll for progress when there is an active upload
+  const { data: progressData } = useQuery({
+    queryKey: ['standardReceiptProgress', activeUploadId],
+    queryFn: () => api.get(`/standard-receipt/uploads/${activeUploadId}/progress`).then((r) => r.data),
+    enabled: !!activeUploadId,
+    refetchInterval: activeUploadId ? 1500 : false, // Poll every 1.5 seconds
+  })
+
+  // When progress data indicates completion, finalize
+  useEffect(() => {
+    if (!progressData || !activeUploadId) return
+    const { status } = progressData
+    if (status === 'SUCCESS' || status === 'FAILED' || status === 'PARTIAL') {
+      setResult(progressData)
+      setUploading(false)
+      setActiveUploadId(null)
+      setUploadProgress(0)
+      queryClient.invalidateQueries({ queryKey: ['standardUploads'] })
+    }
+  }, [progressData, activeUploadId, queryClient])
+
+  // Compute progress stats from polling data
+  const processed = progressData ? progressData.successCount + progressData.failureCount : 0
+  const total = progressData ? progressData.totalRecords : 0
 
   const handlePreview = async () => {
     if (!file) { setError('Please select a CSV file.'); return }
