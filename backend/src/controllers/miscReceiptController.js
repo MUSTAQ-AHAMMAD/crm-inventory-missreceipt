@@ -597,6 +597,43 @@ async function getUpload(req, res, next) {
 }
 
 /**
+ * GET /api/misc-receipt/uploads/:id/progress
+ * Returns current processing progress for a specific misc receipt upload
+ */
+async function getUploadProgress(req, res, next) {
+  try {
+    const uploadId = parseInt(req.params.id);
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
+
+    const upload = await prisma.miscReceiptUpload.findUnique({
+      where: { id: uploadId },
+    });
+
+    if (!upload) {
+      return res.status(404).json({ error: 'Upload not found.' });
+    }
+
+    if (req.user.role === 'USER' && upload.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    return res.json({
+      uploadId: upload.id,
+      totalRecords: upload.totalRecords,
+      successCount: upload.successCount,
+      failureCount: upload.failureCount,
+      status: upload.responseStatus,
+      responseMessage: upload.responseMessage,
+      responseLog: upload.responseLog,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * GET /api/misc-receipt/template
  * Returns a downloadable CSV template for misc receipt uploads.
  */
@@ -613,4 +650,4 @@ function downloadTemplate(_req, res) {
   return res.send(csv);
 }
 
-module.exports = { previewXml, upload, listUploads, getUpload, downloadTemplate };
+module.exports = { previewXml, upload, listUploads, getUpload, getUploadProgress, downloadTemplate };

@@ -1,9 +1,10 @@
 /**
  * Standard Receipt Upload Page.
  * Provides CSV upload, payload preview, and REST submission to Oracle.
+ * Features real-time progress tracking with detailed API response visibility.
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import api from '../hooks/useApi'
@@ -33,11 +34,38 @@ export default function StandardReceiptPage() {
   const [payloadPreviews, setPayloadPreviews] = useState([])
   const [showPreview, setShowPreview] = useState(false)
   const [error, setError] = useState('')
+  const [activeUploadId, setActiveUploadId] = useState(null)
+  const [uploadProgress, setUploadProgress] = useState(0)
 
   const { data: uploadsData, isLoading } = useQuery({
     queryKey: ['standardUploads'],
     queryFn: () => api.get('/standard-receipt/uploads').then((r) => r.data),
   })
+
+  // Poll for progress when there is an active upload
+  const { data: progressData } = useQuery({
+    queryKey: ['standardReceiptProgress', activeUploadId],
+    queryFn: () => api.get(`/standard-receipt/uploads/${activeUploadId}/progress`).then((r) => r.data),
+    enabled: !!activeUploadId,
+    refetchInterval: activeUploadId ? 1500 : false, // Poll every 1.5 seconds
+  })
+
+  // When progress data indicates completion, finalize
+  useEffect(() => {
+    if (!progressData || !activeUploadId) return
+    const { status } = progressData
+    if (status === 'SUCCESS' || status === 'FAILED' || status === 'PARTIAL') {
+      setResult(progressData)
+      setUploading(false)
+      setActiveUploadId(null)
+      setUploadProgress(0)
+      queryClient.invalidateQueries({ queryKey: ['standardUploads'] })
+    }
+  }, [progressData, activeUploadId, queryClient])
+
+  // Compute progress stats from polling data
+  const processed = progressData ? progressData.successCount + progressData.failureCount : 0
+  const total = progressData ? progressData.totalRecords : 0
 
   const handlePreview = async () => {
     if (!file) { setError('Please select a CSV file.'); return }
@@ -63,18 +91,31 @@ export default function StandardReceiptPage() {
     setError('')
     setResult(null)
     setUploading(true)
+    setUploadProgress(10)
     const formData = new FormData()
     formData.append('file', file)
     try {
       const res = await api.post('/standard-receipt/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        onUploadProgress: (e) => {
+          setUploadProgress(Math.round((e.loaded / e.total) * 80))
+        },
       })
-      setResult(res.data)
-      queryClient.invalidateQueries({ queryKey: ['standardUploads'] })
+      setUploadProgress(100)
+      // If processing completes immediately, show result. Otherwise start polling
+      if (res.data.status === 'SUCCESS' || res.data.status === 'FAILED' || res.data.status === 'PARTIAL') {
+        setResult(res.data)
+        setUploading(false)
+        setUploadProgress(0)
+        queryClient.invalidateQueries({ queryKey: ['standardUploads'] })
+      } else {
+        // Start polling for progress
+        setActiveUploadId(res.data.uploadId)
+      }
     } catch (err) {
       setError(err.response?.data?.error || 'Upload failed.')
-    } finally {
       setUploading(false)
+      setUploadProgress(0)
     }
   }
 
@@ -118,7 +159,7 @@ export default function StandardReceiptPage() {
         <div className="flex flex-wrap gap-3">
           <button
             onClick={handlePreview}
-            disabled={previewing || !file}
+            disabled={previewing || !file || uploading}
             className="px-5 py-2.5 bg-gray-600 text-white font-semibold rounded-lg hover:bg-gray-700 disabled:opacity-60 transition-colors flex items-center gap-2"
           >
             {previewing ? <Spinner size="sm" /> : '👁️'}
@@ -135,16 +176,103 @@ export default function StandardReceiptPage() {
           </button>
         </div>
 
+        {/* File upload progress bar (before backend processing starts) */}
+        {uploading && uploadProgress > 0 && uploadProgress < 100 && (
+          <div className="w-full bg-gray-100 rounded-full h-2">
+            <div className="bg-blue-600 h-2 rounded-full transition-all" style={{ width: `${uploadProgress}%` }} />
+          </div>
+        )}
+
+        {/* Backend processing progress panel */}
+        {activeUploadId && progressData && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-3">
+            <p className="font-semibold text-blue-700 flex items-center gap-2">
+              <Spinner size="sm" /> Processing Standard Receipt Requests...
+            </p>
+
+            {/* Progress bar */}
+            <div className="w-full bg-gray-100 rounded-full h-3">
+              <div
+                className="h-3 rounded-full transition-all"
+                style={{
+                  width: `${total > 0 ? (processed / total) * 100 : 0}%`,
+                  background: progressData.failureCount > 0
+                    ? 'linear-gradient(90deg, #22c55e, #eab308)'
+                    : '#22c55e'
+                }}
+              />
+            </div>
+
+            {/* Stats */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+              <div className="bg-white rounded p-2 text-center">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Total Records</p>
+                <p className="text-xl font-bold text-gray-800">{progressData.totalRecords || 0}</p>
+              </div>
+              <div className="bg-white rounded p-2 text-center">
+                <p className="text-xs text-green-600 uppercase tracking-wide">Success</p>
+                <p className="text-xl font-bold text-green-600">{progressData.successCount}</p>
+              </div>
+              <div className="bg-white rounded p-2 text-center">
+                <p className="text-xs text-red-600 uppercase tracking-wide">Failed</p>
+                <p className="text-xl font-bold text-red-600">{progressData.failureCount}</p>
+              </div>
+              <div className="bg-white rounded p-2 text-center">
+                <p className="text-xs text-blue-600 uppercase tracking-wide">In Progress</p>
+                <p className="text-xl font-bold text-blue-600">{processed} / {total}</p>
+              </div>
+            </div>
+
+            {/* Response message */}
+            {progressData.responseMessage && (
+              <div className="bg-white rounded-lg p-3 text-sm">
+                <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Response Message</p>
+                <p className="text-gray-700">{progressData.responseMessage}</p>
+              </div>
+            )}
+
+            {/* Response log - expandable */}
+            {progressData.responseLog && (
+              <details className="bg-white rounded-lg p-3">
+                <summary className="text-sm font-medium text-blue-600 hover:underline cursor-pointer">
+                  View Detailed Response Log
+                </summary>
+                <pre className="mt-2 text-xs bg-gray-900 text-green-400 rounded p-3 overflow-x-auto max-h-96 whitespace-pre-wrap">
+                  {progressData.responseLog}
+                </pre>
+              </details>
+            )}
+          </div>
+        )}
+
         {/* Result summary */}
-        {result && (
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-            <p className="font-semibold text-green-700 mb-2">✅ Upload Complete</p>
+        {result && !activeUploadId && (
+          <div className={`border rounded-lg p-4 ${
+            result.status === 'SUCCESS' ? 'bg-green-50 border-green-200' :
+            result.status === 'FAILED' ? 'bg-red-50 border-red-200' :
+            'bg-yellow-50 border-yellow-200'
+          }`}>
+            <p className={`font-semibold mb-2 ${
+              result.status === 'SUCCESS' ? 'text-green-700' :
+              result.status === 'FAILED' ? 'text-red-700' :
+              'text-yellow-700'
+            }`}>
+              {result.status === 'SUCCESS' ? '✅ Upload Complete - All Receipts Sent Successfully' :
+               result.status === 'FAILED' ? '❌ Upload Failed' :
+               '⚠️ Upload Partial - Some Receipts Failed'}
+            </p>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
               <div><span className="text-gray-500">Total:</span> <strong>{result.totalRecords}</strong></div>
               <div><span className="text-gray-500">Success:</span> <strong className="text-green-600">{result.successCount}</strong></div>
               <div><span className="text-gray-500">Failed:</span> <strong className="text-red-600">{result.failureCount}</strong></div>
               <div><span className="text-gray-500">Status:</span> <strong>{result.status}</strong></div>
             </div>
+            {result.responseMessage && (
+              <div className="mt-3 p-2 bg-white rounded text-sm">
+                <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Response Message</p>
+                <p className="text-gray-700">{result.responseMessage}</p>
+              </div>
+            )}
           </div>
         )}
       </div>

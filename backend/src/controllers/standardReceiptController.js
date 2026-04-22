@@ -465,6 +465,43 @@ async function getUpload(req, res, next) {
   }
 }
 
+/**
+ * GET /api/standard-receipt/uploads/:id/progress
+ * Returns current processing progress for a specific standard receipt upload
+ */
+async function getUploadProgress(req, res, next) {
+  try {
+    const uploadId = parseInt(req.params.id);
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
+
+    const upload = await prisma.standardReceiptUpload.findUnique({
+      where: { id: uploadId },
+    });
+
+    if (!upload) {
+      return res.status(404).json({ error: 'Upload not found.' });
+    }
+
+    if (req.user.role === 'USER' && upload.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    return res.json({
+      uploadId: upload.id,
+      totalRecords: upload.totalRecords,
+      successCount: upload.successCount,
+      failureCount: upload.failureCount,
+      status: upload.status,
+      responseMessage: upload.responseMessage,
+      responseLog: upload.responseLog,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 function downloadTemplate(_req, res) {
   const header = TEMPLATE_FIELDS.join(',');
   const sample =
@@ -483,5 +520,6 @@ module.exports = {
   upload,
   listUploads,
   getUpload,
+  getUploadProgress,
   downloadTemplate,
 };

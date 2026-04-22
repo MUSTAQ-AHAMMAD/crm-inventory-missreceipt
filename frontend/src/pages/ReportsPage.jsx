@@ -175,6 +175,8 @@ function UploadHistoryTab({ filters }) {
                 detailLink = `/receipt-upload/standard/${u.id}`
               } else if (uploadType === 'misc') {
                 detailLink = `/receipt-upload/misc/${u.id}`
+              } else if (uploadType === 'apply') {
+                detailLink = `/receipt-upload/apply/${u.id}`
               }
 
               return (
@@ -266,6 +268,7 @@ function UploadTypeBadge({ type }) {
     inventory: { label: 'Inventory', class: 'bg-blue-100 text-blue-700' },
     standard: { label: 'Standard Receipt', class: 'bg-purple-100 text-purple-700' },
     misc: { label: 'Misc Receipt', class: 'bg-green-100 text-green-700' },
+    apply: { label: 'Apply Receipt', class: 'bg-indigo-100 text-indigo-700' },
   }
   const badge = map[type] || { label: type, class: 'bg-gray-100 text-gray-600' }
   return (
