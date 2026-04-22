@@ -12,6 +12,7 @@ import InventoryPage from './pages/InventoryPage'
 import InventoryTemplateGenerationPage from './pages/InventoryTemplateGenerationPage'
 import MiscReceiptPage from './pages/MiscReceiptPage'
 import StandardReceiptPage from './pages/StandardReceiptPage'
+import ApplyReceiptPage from './pages/ApplyReceiptPage'
 import UserManagementPage from './pages/UserManagementPage'
 import ReportsPage from './pages/ReportsPage'
 import FailureDetailsPage from './pages/FailureDetailsPage'
@@ -55,6 +56,7 @@ export default function App() {
             <Route path="inventory-template" element={<InventoryTemplateGenerationPage />} />
             <Route path="misc-receipt" element={<MiscReceiptPage />} />
             <Route path="standard-receipt" element={<StandardReceiptPage />} />
+            <Route path="apply-receipt" element={<ApplyReceiptPage />} />
             <Route
               path="admin/users"
               element={

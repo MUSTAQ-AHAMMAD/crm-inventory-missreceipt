@@ -1,6 +1,6 @@
 /**
  * Receipt Upload Detail Page.
- * Shows comprehensive details for a specific receipt upload (Standard or Misc)
+ * Shows comprehensive details for a specific receipt upload (Standard, Misc, or Apply)
  * including request payloads, API responses, and failure details.
  */
 
@@ -41,7 +41,7 @@ function formatDetail(data) {
 }
 
 export default function ReceiptUploadDetailPage() {
-  const { type, uploadId } = useParams() // type: 'standard' or 'misc'
+  const { type, uploadId } = useParams() // type: 'standard', 'misc', or 'apply'
   const navigate = useNavigate()
   const [expandedRows, setExpandedRows] = useState({})
 
@@ -69,9 +69,11 @@ export default function ReceiptUploadDetailPage() {
   const upload = data
   const isStandard = type === 'standard'
   const isMisc = type === 'misc'
+  const isApply = type === 'apply'
 
-  // For standard receipts
+  // For standard receipts and apply receipts
   const totalRecords = upload.totalRecords || 0
+  const totalReceipts = upload.totalReceipts || 0
   const successCount = upload.successCount || 0
   const failureCount = upload.failureCount || 0
   const status = upload.status || upload.responseStatus
@@ -82,7 +84,7 @@ export default function ReceiptUploadDetailPage() {
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">
-            {isStandard ? 'Standard' : 'Miscellaneous'} Receipt Upload Details
+            {isStandard ? 'Standard' : isApply ? 'Apply' : 'Miscellaneous'} Receipt Upload Details
           </h1>
           <p className="text-sm text-gray-500 mt-1">
             Upload #{upload.id} – <span className="font-mono">{upload.filename}</span>
@@ -103,12 +105,18 @@ export default function ReceiptUploadDetailPage() {
             <p className="text-xs text-gray-500 uppercase tracking-wide">Status</p>
             <p className="mt-1"><StatusBadge status={status} /></p>
           </div>
-          {isStandard && (
+          {(isStandard || isApply) && (
             <>
               <div className="bg-gray-50 rounded-lg p-3 text-center">
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Total Records</p>
                 <p className="text-xl font-bold text-gray-800">{totalRecords}</p>
               </div>
+              {isApply && (
+                <div className="bg-gray-50 rounded-lg p-3 text-center">
+                  <p className="text-xs text-gray-500 uppercase tracking-wide">Total Receipts</p>
+                  <p className="text-xl font-bold text-gray-800">{totalReceipts}</p>
+                </div>
+              )}
               <div className="bg-green-50 rounded-lg p-3 text-center">
                 <p className="text-xs text-green-600 uppercase tracking-wide">Success</p>
                 <p className="text-xl font-bold text-green-600">{successCount}</p>
@@ -165,26 +173,51 @@ export default function ReceiptUploadDetailPage() {
               <thead>
                 <tr className="bg-gray-50 text-gray-500 text-xs uppercase">
                   <th className="px-4 py-2 text-left">Row #</th>
-                  <th className="px-4 py-2 text-left">{isStandard ? 'Receipt #' : 'Receipt #'}</th>
+                  {isApply ? (
+                    <>
+                      <th className="px-4 py-2 text-left">Invoice #</th>
+                      <th className="px-4 py-2 text-left">Receipt #</th>
+                      <th className="px-4 py-2 text-left">Error Step</th>
+                    </>
+                  ) : (
+                    <th className="px-4 py-2 text-left">Receipt #</th>
+                  )}
                   <th className="px-4 py-2 text-left">Error Message</th>
                   <th className="px-4 py-2 text-left">HTTP Status</th>
                   <th className="px-4 py-2 text-left">Request</th>
                   <th className="px-4 py-2 text-left">Response</th>
-                  <th className="px-4 py-2 text-left">Raw Data</th>
+                  {!isApply && <th className="px-4 py-2 text-left">Raw Data</th>}
                   <th className="px-4 py-2 text-left">Timestamp</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {upload.failures.map((f) => {
                   const isExpanded = expandedRows[f.id]
-                  const receiptNumber = f.rawData?.ReceiptNumber || '—'
+                  const receiptNumber = isApply ? f.receiptNumber : (f.rawData?.ReceiptNumber || '—')
+                  const invoiceNumber = isApply ? f.invoiceNumber : null
 
                   return (
                     <tr key={f.id} className="hover:bg-gray-50">
                       <td className="px-4 py-3 text-gray-500 font-medium">{f.rowNumber}</td>
-                      <td className="px-4 py-3 font-mono text-xs text-gray-700">
-                        {receiptNumber}
-                      </td>
+                      {isApply ? (
+                        <>
+                          <td className="px-4 py-3 font-mono text-xs text-gray-700">
+                            {invoiceNumber || '—'}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-xs text-gray-700">
+                            {receiptNumber}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-gray-600">
+                            <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700 text-xs font-medium">
+                              {f.errorStep || '—'}
+                            </span>
+                          </td>
+                        </>
+                      ) : (
+                        <td className="px-4 py-3 font-mono text-xs text-gray-700">
+                          {receiptNumber}
+                        </td>
+                      )}
                       <td className="px-4 py-3 text-red-600 text-xs max-w-xs">
                         <div className="truncate" title={f.errorMessage}>
                           {f.errorMessage}
@@ -207,7 +240,7 @@ export default function ReceiptUploadDetailPage() {
                             onClick={() => toggleRow(`req-${f.id}`)}
                             className="text-blue-600 hover:underline"
                           >
-                            {expandedRows[`req-${f.id}`] ? 'Hide' : 'View'} {isStandard ? 'JSON' : 'XML'}
+                            {expandedRows[`req-${f.id}`] ? 'Hide' : 'View'} {isStandard ? 'JSON' : 'Payload'}
                           </button>
                         ) : '—'}
                         {expandedRows[`req-${f.id}`] && f.requestPayload && (
@@ -231,19 +264,21 @@ export default function ReceiptUploadDetailPage() {
                           </pre>
                         )}
                       </td>
-                      <td className="px-4 py-3">
-                        <button
-                          onClick={() => toggleRow(`data-${f.id}`)}
-                          className="text-blue-600 hover:underline text-xs"
-                        >
-                          {expandedRows[`data-${f.id}`] ? 'Hide' : 'View'} Data
-                        </button>
-                        {expandedRows[`data-${f.id}`] && (
-                          <pre className="mt-2 text-xs bg-gray-100 rounded p-2 overflow-x-auto max-w-md">
-                            {JSON.stringify(f.rawData, null, 2)}
-                          </pre>
-                        )}
-                      </td>
+                      {!isApply && (
+                        <td className="px-4 py-3">
+                          <button
+                            onClick={() => toggleRow(`data-${f.id}`)}
+                            className="text-blue-600 hover:underline text-xs"
+                          >
+                            {expandedRows[`data-${f.id}`] ? 'Hide' : 'View'} Data
+                          </button>
+                          {expandedRows[`data-${f.id}`] && (
+                            <pre className="mt-2 text-xs bg-gray-100 rounded p-2 overflow-x-auto max-w-md">
+                              {JSON.stringify(f.rawData, null, 2)}
+                            </pre>
+                          )}
+                        </td>
+                      )}
                       <td className="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">
                         {new Date(f.createdAt).toLocaleString()}
                       </td>
