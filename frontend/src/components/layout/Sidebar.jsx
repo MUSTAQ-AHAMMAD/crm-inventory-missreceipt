@@ -12,6 +12,7 @@ const NAV_ITEMS = [
   { to: '/inventory-template', label: 'Inventory Template Generation', icon: '🧩' },
   { to: '/misc-receipt', label: 'Misc Receipt', icon: '🧾' },
   { to: '/standard-receipt', label: 'Standard Receipt', icon: '💳' },
+  { to: '/apply-receipt', label: 'Apply Receipt', icon: '🔗' },
   { to: '/reports', label: 'Reports', icon: '📈' },
   { to: '/failures/0', label: 'Logs & Failures', icon: '⚠️' },
 ]

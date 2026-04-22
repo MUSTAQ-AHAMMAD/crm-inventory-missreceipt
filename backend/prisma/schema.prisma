@@ -28,6 +28,7 @@ model User {
   inventoryUploads   InventoryUpload[]
   miscReceiptUploads MiscReceiptUpload[]
   standardReceiptUploads StandardReceiptUpload[]
+  applyReceiptUploads ApplyReceiptUpload[]
   activityLogs       ActivityLog[]
 }
 
@@ -138,6 +139,43 @@ model StandardReceiptFailure {
   responseBody    String?               // Full response body from Oracle
   responseStatus  Int?                  // HTTP status code from Oracle
   createdAt       DateTime              @default(now())
+}
+
+// Tracks each apply receipt CSV upload and its processing results
+model ApplyReceiptUpload {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  user            User     @relation(fields: [userId], references: [id])
+  filename        String
+  totalRecords    Int      @default(0)
+  totalReceipts   Int      @default(0)
+  successCount    Int      @default(0)
+  failureCount    Int      @default(0)
+  status          String   @default("PROCESSING")
+  responseMessage String?
+  responseLog     String?
+  createdAt       DateTime @default(now())
+
+  failures ApplyReceiptFailure[]
+}
+
+// Stores rows that failed during an apply receipt upload
+// NOTE: rawData is stored as a JSON string (SQLite has no native JSON type)
+model ApplyReceiptFailure {
+  id                 Int                @id @default(autoincrement())
+  uploadId           Int
+  upload             ApplyReceiptUpload @relation(fields: [uploadId], references: [id])
+  rowNumber          Int
+  invoiceNumber      String
+  receiptNumber      String
+  errorMessage       String
+  errorStep          String             // "INVOICE_LOOKUP", "RECEIPT_LOOKUP", "APPLY_RECEIPT"
+  requestPayload     String?            // REST query or SOAP XML
+  responseBody       String?
+  responseStatus     Int?
+  customerTrxId      String?            // Captured even if apply fails
+  receiptId          String?            // Captured even if apply fails
+  createdAt          DateTime           @default(now())
 }
 
 // Audit log for all user actions within the system

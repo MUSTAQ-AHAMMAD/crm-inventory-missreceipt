@@ -15,6 +15,7 @@ const inventoryRoutes = require('./routes/inventory');
 const inventoryTemplateRoutes = require('./routes/inventoryTemplate');
 const miscReceiptRoutes = require('./routes/miscReceipt');
 const standardReceiptRoutes = require('./routes/standardReceipt');
+const applyReceiptRoutes = require('./routes/applyReceipt');
 const adminRoutes = require('./routes/admin');
 const reportsRoutes = require('./routes/reports');
 
@@ -72,6 +73,7 @@ app.use('/api/inventory', inventoryRoutes);
 app.use('/api/inventory-template', inventoryTemplateRoutes);
 app.use('/api/misc-receipt', miscReceiptRoutes);
 app.use('/api/standard-receipt', standardReceiptRoutes);
+app.use('/api/apply-receipt', applyReceiptRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportsRoutes);
 
