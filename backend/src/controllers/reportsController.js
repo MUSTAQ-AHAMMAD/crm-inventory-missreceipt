@@ -339,7 +339,7 @@ async function exportReport(req, res, next) {
 /**
  * GET /api/reports/upload-detail/:type/:id
  * Returns comprehensive details for a specific upload including request/response logs
- * @param {string} type - 'standard' or 'misc'
+ * @param {string} type - 'standard', 'misc', or 'apply'
  * @param {number} id - Upload ID
  */
 async function getUploadDetail(req, res, next) {
@@ -402,8 +402,25 @@ async function getUploadDetail(req, res, next) {
       };
 
       return res.json(parsedUpload);
+    } else if (type === 'apply') {
+      const upload = await prisma.applyReceiptUpload.findUnique({
+        where: { id: uploadId },
+        include: {
+          user: { select: { email: true } },
+          failures: {
+            orderBy: { rowNumber: 'asc' }
+          },
+        },
+      });
+
+      if (!upload) {
+        return res.status(404).json({ error: 'Upload not found.' });
+      }
+
+      // Return the upload with failures (no rawData parsing needed for apply receipts)
+      return res.json(upload);
     } else {
-      return res.status(400).json({ error: 'Invalid upload type. Use "standard" or "misc".' });
+      return res.status(400).json({ error: 'Invalid upload type. Use "standard", "misc", or "apply".' });
     }
   } catch (err) {
     next(err);
