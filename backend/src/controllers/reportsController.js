@@ -429,7 +429,7 @@ async function getUploadDetail(req, res, next) {
 
 /**
  * GET /api/reports/all-uploads
- * Returns all uploads (inventory, standard, misc) combined for the upload history tab
+ * Returns all uploads (inventory, standard, misc, apply) combined for the upload history tab
  */
 async function getAllUploads(req, res, next) {
   try {
@@ -437,8 +437,8 @@ async function getAllUploads(req, res, next) {
     const limit = Math.min(100, parseInt(req.query.limit) || 20);
     const skip = (page - 1) * limit;
 
-    // Fetch all three types of uploads in parallel
-    const [inventoryUploads, standardUploads, miscUploads] = await Promise.all([
+    // Fetch all four types of uploads in parallel
+    const [inventoryUploads, standardUploads, miscUploads, applyUploads] = await Promise.all([
       prisma.inventoryUpload.findMany({
         include: {
           user: { select: { email: true } },
@@ -457,6 +457,12 @@ async function getAllUploads(req, res, next) {
         },
         orderBy: { createdAt: 'desc' },
       }),
+      prisma.applyReceiptUpload.findMany({
+        include: {
+          user: { select: { email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
     ]);
 
     // Combine and add type field to each upload
@@ -464,6 +470,7 @@ async function getAllUploads(req, res, next) {
       ...inventoryUploads.map(u => ({ ...u, uploadType: 'inventory' })),
       ...standardUploads.map(u => ({ ...u, uploadType: 'standard' })),
       ...miscUploads.map(u => ({ ...u, uploadType: 'misc' })),
+      ...applyUploads.map(u => ({ ...u, uploadType: 'apply' })),
     ];
 
     // Sort by createdAt descending

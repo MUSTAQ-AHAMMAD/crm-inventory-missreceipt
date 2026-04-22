@@ -136,10 +136,31 @@ export default function ReceiptUploadDetailPage() {
           <p className="text-xs text-gray-400 mt-3">Uploaded by: {upload.user.email}</p>
         )}
 
+        {/* Progress bar for apply receipts */}
+        {(isStandard || isApply) && totalRecords > 0 && (
+          <div className="mt-4">
+            <div className="flex justify-between text-xs text-gray-500 mb-1">
+              <span>Success Rate</span>
+              <span>{Math.round((successCount / totalRecords) * 100)}%</span>
+            </div>
+            <div className="w-full bg-gray-100 rounded-full h-2.5">
+              <div
+                className="h-2.5 rounded-full"
+                style={{
+                  width: `${(successCount / totalRecords) * 100}%`,
+                  background: failureCount > 0
+                    ? 'linear-gradient(90deg, #22c55e, #eab308)'
+                    : '#22c55e',
+                }}
+              />
+            </div>
+          </div>
+        )}
+
         {/* Response message and log */}
         {upload.responseMessage && (
-          <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-            <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Response Message</p>
+          <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
+            <p className="text-xs text-blue-600 uppercase tracking-wide mb-1 font-medium">Response Message</p>
             {typeof upload.responseMessage === 'object' ? (
               <pre className="text-xs text-gray-700 whitespace-pre-wrap">
                 {JSON.stringify(upload.responseMessage, null, 2)}
