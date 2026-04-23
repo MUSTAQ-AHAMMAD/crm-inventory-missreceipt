@@ -24,6 +24,8 @@ const RETRY_MAX_TIMEOUT = 10000; // 10 seconds
 // SOAP namespaces for StandardReceiptService
 const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
 const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/standardReceiptService/types/';
+const SOAP_ACTION = 'applyReceipt';
+const SOAP_ACTION_HEADER = `"${SOAP_ACTION}"`;
 
 function asText(data) {
   if (data == null) return '';
@@ -195,7 +197,7 @@ async function applyReceiptSoap(customerTrxId, receiptId, amount, receiptDate, o
   const response = await axios.post(url, soapXml, {
     headers: {
       'Content-Type': 'text/xml; charset=utf-8',
-      SOAPAction: 'applyReceipt',
+      SOAPAction: SOAP_ACTION_HEADER,
       Authorization: `Basic ${oracleAuth}`,
     },
     timeout: 30000,
