@@ -197,10 +197,12 @@ async function applyReceiptSoap(customerTrxId, receiptId, amount, receiptDate, o
   const response = await axios.post(url, soapXml, {
     headers: {
       'Content-Type': 'text/xml; charset=utf-8',
+      Accept: 'text/xml',
       SOAPAction: SOAP_ACTION_HEADER,
       Authorization: `Basic ${oracleAuth}`,
     },
     timeout: 30000,
+    responseType: 'text',
     validateStatus: () => true, // Don't throw on non-2xx
   });
 
