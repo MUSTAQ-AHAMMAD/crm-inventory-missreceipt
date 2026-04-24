@@ -4,6 +4,7 @@
  */
 
 const prisma = require('../services/prisma');
+const { csvEscape } = require('../utils/csv');
 
 /**
  * GET /api/reports/dashboard
@@ -237,7 +238,7 @@ async function activity(req, res, next) {
 }
 
 /**
- * GET /api/reports/export?type=failures|activity&format=csv
+ * GET /api/reports/export?type=failures|activity|standard-failures|misc-failures&format=csv
  * Exports report data as a CSV file.
  */
 async function exportReport(req, res, next) {
@@ -260,9 +261,16 @@ async function exportReport(req, res, next) {
         include: { user: { select: { email: true } } },
       });
       csvRows = logs.map((l) =>
-        [l.id, l.user.email, l.actionType, `"${l.actionDetails}"`, l.ipAddress || '', l.createdAt.toISOString()].join(',')
+        [
+          csvEscape(l.id),
+          csvEscape(l.user?.email || ''),
+          csvEscape(l.actionType),
+          csvEscape(l.actionDetails),
+          csvEscape(l.ipAddress || ''),
+          csvEscape(l.createdAt.toISOString()),
+        ].join(',')
       );
-      csvRows.unshift('id,email,actionType,actionDetails,ipAddress,createdAt');
+      csvRows.unshift(['id', 'email', 'actionType', 'actionDetails', 'ipAddress', 'createdAt'].map(csvEscape).join(','));
       filename = 'activity_export.csv';
     } else if (type === 'standard-failures') {
       // Export standard receipt failures with detailed logs
@@ -274,18 +282,22 @@ async function exportReport(req, res, next) {
       });
       csvRows = failures.map((f) =>
         [
-          f.id,
-          f.uploadId,
-          `"${f.upload.filename}"`,
-          f.rowNumber,
-          `"${f.errorMessage}"`,
-          f.responseStatus || '',
-          `"${(f.requestPayload || '').replace(/"/g, '""')}"`,
-          `"${(f.responseBody || '').replace(/"/g, '""')}"`,
-          f.createdAt.toISOString()
+          csvEscape(f.id),
+          csvEscape(f.uploadId),
+          csvEscape(f.upload?.filename || ''),
+          csvEscape(f.rowNumber),
+          csvEscape(f.errorMessage || ''),
+          csvEscape(f.responseStatus ?? ''),
+          csvEscape(f.requestPayload || ''),
+          csvEscape(f.responseBody || ''),
+          csvEscape(f.createdAt.toISOString()),
         ].join(',')
       );
-      csvRows.unshift('id,uploadId,filename,rowNumber,errorMessage,responseStatus,requestPayload,responseBody,createdAt');
+      csvRows.unshift(
+        ['id', 'uploadId', 'filename', 'rowNumber', 'errorMessage', 'responseStatus', 'requestPayload', 'responseBody', 'createdAt']
+          .map(csvEscape)
+          .join(',')
+      );
       filename = 'standard_receipt_failures_export.csv';
     } else if (type === 'misc-failures') {
       // Export misc receipt failures with detailed logs
@@ -297,18 +309,22 @@ async function exportReport(req, res, next) {
       });
       csvRows = failures.map((f) =>
         [
-          f.id,
-          f.uploadId,
-          `"${f.upload.filename}"`,
-          f.rowNumber,
-          `"${f.errorMessage}"`,
-          f.responseStatus || '',
-          `"${(f.requestPayload || '').replace(/"/g, '""')}"`,
-          `"${(f.responseBody || '').replace(/"/g, '""')}"`,
-          f.createdAt.toISOString()
+          csvEscape(f.id),
+          csvEscape(f.uploadId),
+          csvEscape(f.upload?.filename || ''),
+          csvEscape(f.rowNumber),
+          csvEscape(f.errorMessage || ''),
+          csvEscape(f.responseStatus ?? ''),
+          csvEscape(f.requestPayload || ''),
+          csvEscape(f.responseBody || ''),
+          csvEscape(f.createdAt.toISOString()),
         ].join(',')
       );
-      csvRows.unshift('id,uploadId,filename,rowNumber,errorMessage,responseStatus,requestPayload,responseBody,createdAt');
+      csvRows.unshift(
+        ['id', 'uploadId', 'filename', 'rowNumber', 'errorMessage', 'responseStatus', 'requestPayload', 'responseBody', 'createdAt']
+          .map(csvEscape)
+          .join(',')
+      );
       filename = 'misc_receipt_failures_export.csv';
     } else {
       // Default: inventory failures
@@ -316,12 +332,65 @@ async function exportReport(req, res, next) {
         where: hasDateFilter ? { createdAt: dateFilter } : {},
         orderBy: { createdAt: 'desc' },
         take: 5000,
-        include: { upload: { select: { filename: true } } },
+        include: { upload: { select: { filename: true, organizationName: true } } },
       });
-      csvRows = invFails.map((f) =>
-        [f.id, f.uploadId, `"${f.upload.filename}"`, f.rowNumber, `"${f.errorMessage}"`, f.createdAt.toISOString()].join(',')
+
+      // Parse rawData so the original CSV columns can be flattened into the export.
+      const parsed = invFails.map((f) => {
+        let rawData = {};
+        try {
+          const obj = JSON.parse(f.rawData);
+          if (obj && typeof obj === 'object' && !Array.isArray(obj)) rawData = obj;
+        } catch {
+          // ignore — rawData will remain empty
+        }
+        return { ...f, rawData };
+      });
+
+      // Collect the union of rawData keys across all failures (preserving first-seen order)
+      const rawDataKeys = [];
+      const seenKeys = new Set();
+      for (const f of parsed) {
+        for (const key of Object.keys(f.rawData || {})) {
+          if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            rawDataKeys.push(key);
+          }
+        }
+      }
+
+      const header = [
+        'id',
+        'uploadId',
+        'filename',
+        'organizationName',
+        'rowNumber',
+        ...rawDataKeys,
+        'errorMessage',
+        'oracleErrorCode',
+        'oracleProcessStatus',
+        'httpStatus',
+        'responseBody',
+        'createdAt',
+      ];
+
+      csvRows = parsed.map((f) =>
+        [
+          csvEscape(f.id),
+          csvEscape(f.uploadId),
+          csvEscape(f.upload?.filename || ''),
+          csvEscape(f.upload?.organizationName || ''),
+          csvEscape(f.rowNumber),
+          ...rawDataKeys.map((k) => csvEscape(f.rawData?.[k] ?? '')),
+          csvEscape(f.errorMessage || ''),
+          csvEscape(f.oracleErrorCode || ''),
+          csvEscape(f.oracleProcessStatus || ''),
+          csvEscape(f.responseStatus ?? ''),
+          csvEscape(f.responseBody || ''),
+          csvEscape(f.createdAt.toISOString()),
+        ].join(',')
       );
-      csvRows.unshift('id,uploadId,filename,rowNumber,errorMessage,createdAt');
+      csvRows.unshift(header.map(csvEscape).join(','));
       filename = 'failures_export.csv';
     }
 

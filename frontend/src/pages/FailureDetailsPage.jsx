@@ -8,6 +8,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import api from '../hooks/useApi'
+import useExportInventoryFailures from '../hooks/useExportInventoryFailures'
 import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 
@@ -65,6 +66,10 @@ export default function FailureDetailsPage() {
     }
   }
 
+  const { exporting, error: exportError, exportFailures, clearError: clearExportError } =
+    useExportInventoryFailures()
+  const handleExportFailures = () => exportFailures(uploadId)
+
   if (uploadId === '0') {
     return (
       <div className="space-y-6">
@@ -103,6 +108,17 @@ export default function FailureDetailsPage() {
           </Link>
           {failures?.length > 0 && (
             <button
+              onClick={handleExportFailures}
+              disabled={exporting}
+              className="px-4 py-2 text-sm bg-gray-700 text-white rounded-lg hover:bg-gray-800 disabled:opacity-60 flex items-center gap-2"
+              title="Download all failed rows as CSV (includes original CSV columns plus error details)"
+            >
+              {exporting ? <Spinner size="sm" /> : '📥'}
+              {exporting ? 'Exporting…' : 'Export Failures CSV'}
+            </button>
+          )}
+          {failures?.length > 0 && (
+            <button
               onClick={handleRetry}
               disabled={retrying}
               className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2"
@@ -115,6 +131,7 @@ export default function FailureDetailsPage() {
       </div>
 
       <ErrorAlert message={error} onDismiss={() => setError('')} />
+      <ErrorAlert message={exportError} onDismiss={clearExportError} />
 
       {/* Upload summary */}
       {upload && (

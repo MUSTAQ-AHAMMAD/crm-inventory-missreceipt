@@ -23,6 +23,7 @@ const {
   getUploadDetail,
   getSuccessRecords,
   getDebugLog,
+  exportFailures,
 } = require('../controllers/inventoryController');
 
 const router = express.Router();
@@ -227,6 +228,24 @@ router.get('/uploads/:id/successes', getSuccessRecords);
  *         description: Upload details with failure records
  */
 router.get('/uploads/:id/failures', getFailures);
+
+/**
+ * @swagger
+ * /inventory/uploads/{id}/failures/export:
+ *   get:
+ *     tags: [Inventory]
+ *     summary: Export all failure records for a specific upload as a CSV file
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: CSV file download containing all failed rows with error details
+ */
+router.get('/uploads/:id/failures/export', exportFailures);
 
 /**
  * @swagger

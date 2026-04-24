@@ -6,6 +6,7 @@
 const { parse } = require('csv-parse/sync');
 const axios = require('axios');
 const prisma = require('../services/prisma');
+const { csvEscape } = require('../utils/csv');
 
 // Prefix used to tag validation failure messages so retry logic can identify them
 const VALIDATION_ERROR_PREFIX = 'Validation: ';
@@ -1161,4 +1162,103 @@ async function getSuccessRecords(req, res, next) {
   }
 }
 
-module.exports = { bulkUpload, listUploads, getFailures, retryUpload, downloadTemplate, getUploadProgress, getUploadDetail, getSuccessRecords, getDebugLog };
+/**
+ * GET /api/inventory/uploads/:id/failures/export
+ * Exports all failure records for a specific inventory upload as a CSV file.
+ * Includes every original CSV column (from rawData) plus error details so that
+ * users can inspect, correct, and re-upload the failed rows.
+ */
+async function exportFailures(req, res, next) {
+  try {
+    const uploadId = parseInt(req.params.id);
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
+
+    const upload = await prisma.inventoryUpload.findUnique({ where: { id: uploadId } });
+    if (!upload) {
+      return res.status(404).json({ error: 'Upload not found.' });
+    }
+    if (req.user.role === 'USER' && upload.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    const failures = await prisma.inventoryFailureRecord.findMany({
+      where: { uploadId },
+      orderBy: { rowNumber: 'asc' },
+    });
+
+    // Parse rawData JSON strings so we can flatten the original CSV columns
+    const parsedFailures = failures.map((f) => {
+      let rawData = {};
+      try {
+        const parsed = JSON.parse(f.rawData);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          rawData = parsed;
+        }
+      } catch {
+        // Leave rawData empty; the original string will still be included in a column below
+      }
+      return { ...f, rawData };
+    });
+
+    // Determine the union of all rawData keys so every original CSV column is preserved.
+    // Preserve insertion order from the first row, then append any new keys from later rows.
+    const rawDataKeys = [];
+    const seenKeys = new Set();
+    for (const f of parsedFailures) {
+      for (const key of Object.keys(f.rawData || {})) {
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          rawDataKeys.push(key);
+        }
+      }
+    }
+
+    // Build header row: metadata first, then original CSV columns, then error/diagnostic info
+    const header = [
+      'RowNumber',
+      'OrganizationName',
+      ...rawDataKeys,
+      'ErrorMessage',
+      'OracleErrorCode',
+      'OracleProcessStatus',
+      'HttpStatus',
+      'ResponseBody',
+      'CreatedAt',
+    ];
+
+    const rows = parsedFailures.map((f) => {
+      const cells = [
+        csvEscape(f.rowNumber),
+        csvEscape(upload.organizationName || ''),
+        ...rawDataKeys.map((k) => csvEscape(f.rawData?.[k] ?? '')),
+        csvEscape(f.errorMessage || ''),
+        csvEscape(f.oracleErrorCode || ''),
+        csvEscape(f.oracleProcessStatus || ''),
+        csvEscape(f.responseStatus ?? ''),
+        csvEscape(f.responseBody || ''),
+        csvEscape(f.createdAt instanceof Date ? f.createdAt.toISOString() : f.createdAt),
+      ];
+      return cells.join(',');
+    });
+
+    const csvLines = [header.map(csvEscape).join(','), ...rows];
+    // Prepend UTF-8 BOM so Excel correctly displays non-ASCII characters (e.g. Arabic)
+    const csvContent = '\uFEFF' + csvLines.join('\n');
+
+    // Sanitize filename to avoid header-injection / invalid characters
+    const safeBase = (upload.filename || `upload_${uploadId}`)
+      .replace(/\.csv$/i, '')
+      .replace(/[^A-Za-z0-9._-]/g, '_');
+    const filename = `failures_upload_${uploadId}_${safeBase}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    return res.send(csvContent);
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { bulkUpload, listUploads, getFailures, retryUpload, downloadTemplate, getUploadProgress, getUploadDetail, getSuccessRecords, getDebugLog, exportFailures };
