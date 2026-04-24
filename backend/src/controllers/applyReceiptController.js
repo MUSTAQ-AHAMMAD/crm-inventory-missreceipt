@@ -21,9 +21,13 @@ const MAX_RETRIES = parseInt(process.env.MAX_RETRIES) || 3;
 const RETRY_MIN_TIMEOUT = 1000; // 1 second
 const RETRY_MAX_TIMEOUT = 10000; // 10 seconds
 
-// SOAP namespaces for StandardReceiptService
+// SOAP namespaces for StandardReceiptService.
+// The types namespace must match Oracle Fusion's package path for the service
+// (oracle.apps.financials.receivables.receipts.standardReceipts.standardReceiptService).
+// Omitting the `standardReceipts/` segment causes Oracle's SOA layer to return
+// an "Unknown method" SOAP fault because <typ:applyReceipt> cannot be dispatched.
 const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
-const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/standardReceiptService/types/';
+const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/standardReceipts/standardReceiptService/types/';
 const SOAP_ACTION = 'applyReceipt';
 const SOAP_ACTION_HEADER = `"${SOAP_ACTION}"`;
 
