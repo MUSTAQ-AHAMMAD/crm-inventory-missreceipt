@@ -1251,7 +1251,7 @@ async function exportFailures(req, res, next) {
     const safeBase = (upload.filename || `upload_${uploadId}`)
       .replace(/\.csv$/i, '')
       .replace(/[^A-Za-z0-9._-]/g, '_');
-    const filename = `failures_${safeBase}_upload_${uploadId}.csv`;
+    const filename = `failures_upload_${uploadId}_${safeBase}.csv`;
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
