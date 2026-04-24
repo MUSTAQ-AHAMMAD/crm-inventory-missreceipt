@@ -28,6 +28,8 @@ const TEMPLATE_FIELDS = [...REQUIRED_FIELDS];
 
 // SOAP namespaces and action for Oracle MiscellaneousReceiptService
 const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
+const SOAP_TYPES_NS =
+  'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/';
 const MISC_COMMON_NS =
   'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
 const SOAP_ACTION = 'createMiscellaneousReceipt';
@@ -115,7 +117,7 @@ function generateSoapEnvelope(row) {
     : '';
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:com="${MISC_COMMON_NS}">
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${SOAP_TYPES_NS}" xmlns:com="${MISC_COMMON_NS}">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:createMiscellaneousReceipt>
