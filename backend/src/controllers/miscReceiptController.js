@@ -367,6 +367,12 @@ async function upload(req, res, next) {
           // Use p-retry for automatic retries with exponential backoff
           const response = await pRetry(
             async () => {
+              // Log the complete SOAP request for diagnostic purposes
+              console.log(`[MiscReceipt] Sending SOAP request for Upload #${uploadRecord.id} Row ${rowNumber}:`);
+              console.log(`  Receipt Number: ${row.ReceiptNumber}`);
+              console.log(`  Endpoint: ${process.env.ORACLE_SOAP_URL}`);
+              console.log(`  Full SOAP XML:\n${soapXml}`);
+
               const res = await axios.post(process.env.ORACLE_SOAP_URL, soapXml, {
                 headers: {
                   'Content-Type': 'text/xml; charset=utf-8',
@@ -386,6 +392,16 @@ async function upload(req, res, next) {
               // the SOAP faultstring (or a response snippet) in the message so the real
               // cause is preserved through pRetry and shown to the user.
               if (res.status >= 500 && res.status < 600) {
+                // Enhanced diagnostic logging for 500 errors
+                console.error(`[MiscReceipt] HTTP 500 Diagnostic Info:`);
+                console.error(`  Upload ID: ${uploadRecord.id}, Row: ${rowNumber}`);
+                console.error(`  Receipt Number: ${row.ReceiptNumber || 'N/A'}`);
+                console.error(`  HTTP Status: ${res.status} ${res.statusText || ''}`);
+                console.error(`  Response Headers:`, JSON.stringify(res.headers, null, 2));
+                console.error(`  Raw Response (first 1000 chars):`, responseText.substring(0, 1000));
+                console.error(`  Extracted Fault Message:`, faultMsg || 'NONE');
+                console.error(`  Request Preview:`, requestPreview);
+
                 const detail =
                   faultMsg ||
                   snippet(extractXmlPayload(responseText) || responseText) ||
