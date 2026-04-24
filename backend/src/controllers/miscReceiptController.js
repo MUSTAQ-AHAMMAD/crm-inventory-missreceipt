@@ -1,13 +1,12 @@
 /**
- * Miscellaneous Receipt controller.
- * Transforms CSV rows into SOAP XML envelopes and sends them to Oracle's
- * MiscellaneousReceiptService SOAP endpoint.
+ * Miscellaneous Receipt controller with WS-Security for Oracle Fusion
  */
 
 const { parse } = require('csv-parse/sync');
 const axios = require('axios');
 const pLimit = require('p-limit');
 const prisma = require('../services/prisma');
+const { createHash, randomBytes } = require('crypto');
 
 // Required CSV columns
 const REQUIRED_FIELDS = [
@@ -22,21 +21,18 @@ const REQUIRED_FIELDS = [
   'BankAccountNumber',
 ];
 
-// Template fields
 const TEMPLATE_FIELDS = [...REQUIRED_FIELDS];
 
-// SOAP namespaces - CRITICAL: Must match WSDL exactly
+// SOAP namespaces
 const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
 const SOAP_COMMON_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
+const SOAP_SEC_NS = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd';
+const SOAP_WSU_NS = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd';
 const REQUIRED_CURRENCY = 'SAR';
 
-// Configuration
 const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 3;
 const MAX_RETRIES = parseInt(process.env.MAX_RETRIES) || 3;
 
-/**
- * Escapes special XML characters
- */
 function escapeXml(value) {
   if (value == null) return '';
   return String(value)
@@ -48,54 +44,58 @@ function escapeXml(value) {
 }
 
 /**
- * Ensures amount is negative (Oracle requires negative amounts for bank charges)
+ * Generate WS-Security UsernameToken header for Oracle Fusion
  */
-function ensureNegativeAmount(rawAmount) {
-  const trimmed = String(rawAmount ?? '').trim();
-  if (trimmed === '') {
-    throw new Error('Amount is required');
-  }
-  const numeric = Number(trimmed);
-  if (!Number.isFinite(numeric)) {
-    throw new Error('Amount must be a valid number');
-  }
-  const negativeValue = numeric > 0 ? -numeric : numeric;
-  return negativeValue.toString();
+function generateWsSecurityHeader(username, password) {
+  const nonce = randomBytes(16).toString('base64');
+  const created = new Date().toISOString();
+  
+  // Create password digest: SHA1(nonce + created + password)
+  const nonceDecoded = Buffer.from(nonce, 'base64');
+  const createdStr = created;
+  const passwordStr = password;
+  
+  const digestInput = Buffer.concat([nonceDecoded, Buffer.from(createdStr, 'utf8'), Buffer.from(passwordStr, 'utf8')]);
+  const passwordDigest = createHash('sha1').update(digestInput).digest('base64');
+
+  return `
+    <wsse:Security xmlns:wsse="${SOAP_SEC_NS}" xmlns:wsu="${SOAP_WSU_NS}" soapenv:mustUnderstand="1">
+      <wsse:UsernameToken wsu:Id="UsernameToken-${Date.now()}">
+        <wsse:Username>${escapeXml(username)}</wsse:Username>
+        <wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">${passwordDigest}</wsse:Password>
+        <wsse:Nonce EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary">${nonce}</wsse:Nonce>
+        <wsu:Created>${created}</wsu:Created>
+      </wsse:UsernameToken>
+    </wsse:Security>`;
 }
 
-/**
- * Normalizes date to YYYY-MM-DD format
- */
+function ensureNegativeAmount(rawAmount) {
+  const trimmed = String(rawAmount ?? '').trim();
+  if (trimmed === '') throw new Error('Amount is required');
+  const numeric = Number(trimmed);
+  if (!Number.isFinite(numeric)) throw new Error('Amount must be a valid number');
+  return (numeric > 0 ? -numeric : numeric).toString();
+}
+
 function normalizeDate(raw, fieldName) {
   const value = String(raw ?? '').trim();
-  if (!value) {
-    throw new Error(`${fieldName} is required`);
-  }
+  if (!value) throw new Error(`${fieldName} is required`);
 
-  // Already in YYYY-MM-DD format
   const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (isoMatch) return value;
 
-  // DD-MM-YYYY format
   const dmyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (dmyMatch) {
-    return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
-  }
+  if (dmyMatch) return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
 
-  // YYYY/MM/DD format
   const isoSlashMatch = value.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
   if (isoSlashMatch) return `${isoSlashMatch[1]}-${isoSlashMatch[2]}-${isoSlashMatch[3]}`;
 
-  // DD/MM/YYYY format
   const dmySlashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (dmySlashMatch) return `${dmySlashMatch[3]}-${dmySlashMatch[2]}-${dmySlashMatch[1]}`;
 
   throw new Error(`${fieldName} must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or DD/MM/YYYY format`);
 }
 
-/**
- * Normalizes a single CSV row
- */
 function normalizeRow(row) {
   return {
     Amount: ensureNegativeAmount(row.Amount),
@@ -111,9 +111,6 @@ function normalizeRow(row) {
   };
 }
 
-/**
- * Validates CSV records
- */
 function validateCsv(records) {
   const headers = Object.keys(records[0] || {}).map((h) => h.trim());
   const missingHeaders = REQUIRED_FIELDS.filter((field) => !headers.includes(field));
@@ -136,17 +133,23 @@ function validateCsv(records) {
 }
 
 /**
- * Generates the CORRECT SOAP XML envelope for Oracle Fusion
- * Uses the commonService namespace as specified in the WSDL
+ * Generates SOAP envelope with WS-Security headers
  */
-function generateSoapEnvelope(row) {
+function generateSoapEnvelope(row, username, password) {
   const receiptMethodNameTag = row.ReceiptMethodName
     ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
     : '';
 
+  const wsseHeader = generateWsSecurityHeader(username, password);
+
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:com="${SOAP_COMMON_NS}">
-  <soapenv:Header/>
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" 
+                  xmlns:com="${SOAP_COMMON_NS}"
+                  xmlns:wsse="${SOAP_SEC_NS}"
+                  xmlns:wsu="${SOAP_WSU_NS}">
+  <soapenv:Header>
+    ${wsseHeader}
+  </soapenv:Header>
   <soapenv:Body>
     <com:createMiscellaneousReceipt>
       <com:miscellaneousReceipt>
@@ -166,7 +169,7 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
 }
 
 /**
- * Sends SOAP request to Oracle with retry logic
+ * Sends SOAP request to Oracle with WS-Security
  */
 async function sendSoapRequest(soapXml, receiptNumber, rowNumber, uploadId) {
   const endpoint = process.env.ORACLE_SOAP_URL;
@@ -174,10 +177,8 @@ async function sendSoapRequest(soapXml, receiptNumber, rowNumber, uploadId) {
   const password = process.env.ORACLE_PASSWORD;
 
   if (!endpoint || !username || !password) {
-    throw new Error('Oracle SOAP configuration missing. Check ORACLE_SOAP_URL, ORACLE_USERNAME, ORACLE_PASSWORD');
+    throw new Error('Oracle SOAP configuration missing');
   }
-
-  const auth = Buffer.from(`${username}:${password}`).toString('base64');
 
   let lastError = null;
 
@@ -189,30 +190,36 @@ async function sendSoapRequest(soapXml, receiptNumber, rowNumber, uploadId) {
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',
           'SOAPAction': '',
-          'Authorization': `Basic ${auth}`,
           'Accept': 'text/xml, application/xml',
         },
         timeout: 30000,
-        // Keep response as text to parse XML
         transformResponse: [(data) => data],
       });
 
-      // Check for SOAP fault in response
-      if (response.data && response.data.includes('<env:Fault>')) {
-        const faultMatch = response.data.match(/<faultstring>(.*?)<\/faultstring>/);
-        const faultMessage = faultMatch ? faultMatch[1] : 'SOAP Fault occurred';
-        throw new Error(faultMessage);
-      }
+      // Log full response for debugging
+      console.log(`Response for ${receiptNumber}:`, response.data.substring(0, 500));
 
-      // Check for success response
+      // Check for success
       if (response.data && response.data.includes('createMiscellaneousReceiptResponse')) {
-        console.log(`✅ Success for ${receiptNumber}`);
         return { success: true, data: response.data, status: response.status };
       }
 
-      // If we get here but no clear success indicator, check status
+      // Check for SOAP fault
+      if (response.data && response.data.includes('Fault')) {
+        const faultMatch = response.data.match(/<faultstring>(.*?)<\/faultstring>/);
+        const faultCodeMatch = response.data.match(/<faultcode>(.*?)<\/faultcode>/);
+        const faultMessage = faultMatch ? faultMatch[1] : 'SOAP Fault occurred';
+        const faultCode = faultCodeMatch ? faultCodeMatch[1] : '';
+        
+        // If it's an authentication error, don't retry
+        if (faultCode.includes('InvalidSecurity') || faultMessage.includes('authentication')) {
+          throw new Error(`Authentication failed: ${faultMessage}`);
+        }
+        
+        throw new Error(faultMessage);
+      }
+
       if (response.status === 200 || response.status === 201) {
-        console.log(`✅ Success (HTTP ${response.status}) for ${receiptNumber}`);
         return { success: true, data: response.data, status: response.status };
       }
 
@@ -226,8 +233,7 @@ async function sendSoapRequest(soapXml, receiptNumber, rowNumber, uploadId) {
 
       console.error(`[Attempt ${attempt}/${MAX_RETRIES}] Failed for ${receiptNumber}: ${friendlyError}`);
 
-      if (attempt < MAX_RETRIES) {
-        // Exponential backoff
+      if (attempt < MAX_RETRIES && !friendlyError.includes('authentication')) {
         const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
         console.log(`Waiting ${delay}ms before retry...`);
         await new Promise(resolve => setTimeout(resolve, delay));
@@ -240,7 +246,6 @@ async function sendSoapRequest(soapXml, receiptNumber, rowNumber, uploadId) {
 
 /**
  * POST /api/misc-receipt/preview
- * Preview SOAP XML without sending to Oracle
  */
 async function previewXml(req, res, next) {
   try {
@@ -265,10 +270,13 @@ async function previewXml(req, res, next) {
     }
 
     const normalizedRecords = records.map(row => normalizeRow(row));
+    const username = process.env.ORACLE_USERNAME;
+    const password = process.env.ORACLE_PASSWORD;
+    
     const previews = normalizedRecords.map((row, i) => ({
       rowNumber: i + 2,
       receiptNumber: row.ReceiptNumber,
-      xml: generateSoapEnvelope(row),
+      xml: generateSoapEnvelope(row, username, password),
     }));
 
     return res.json({ totalRows: normalizedRecords.length, previews });
@@ -279,7 +287,6 @@ async function previewXml(req, res, next) {
 
 /**
  * POST /api/misc-receipt/upload
- * Upload CSV and send to Oracle
  */
 async function upload(req, res, next) {
   try {
@@ -310,12 +317,14 @@ async function upload(req, res, next) {
       return res.status(400).json({ error: err.message });
     }
 
-    // Create upload record
+    const username = process.env.ORACLE_USERNAME;
+    const password = process.env.ORACLE_PASSWORD;
+
     const uploadRecord = await prisma.miscReceiptUpload.create({
       data: {
         userId: req.user.id,
         filename: req.file.originalname,
-        xmlPayload: normalizedRecords.map(generateSoapEnvelope).join('\n\n'),
+        xmlPayload: normalizedRecords.map(row => generateSoapEnvelope(row, username, password)).join('\n\n'),
         responseStatus: 'PROCESSING',
         responseLog: '',
       },
@@ -327,23 +336,21 @@ async function upload(req, res, next) {
     const responseLogs = [];
     const startTime = Date.now();
 
-    // Process with concurrency limit
     const limit = pLimit(CONCURRENT_REQUESTS);
     const processingPromises = normalizedRecords.map((row, i) => {
       return limit(async () => {
         const rowNumber = i + 2;
-        const soapXml = generateSoapEnvelope(row);
+        const soapXml = generateSoapEnvelope(row, username, password);
 
         try {
           console.log(`\n📤 Processing Row ${rowNumber}: ${row.ReceiptNumber}`);
-          console.log(`XML: ${soapXml.substring(0, 200)}...`);
-
+          
           const result = await sendSoapRequest(soapXml, row.ReceiptNumber, rowNumber, uploadRecord.id);
 
           successCount++;
-          const logLine = `[SUCCESS] Row ${rowNumber}: ${row.ReceiptNumber} | Status: ${result.status}`;
+          const logLine = `[SUCCESS] Row ${rowNumber}: ${row.ReceiptNumber}`;
           responseLogs.push(logLine);
-          console.log(logLine);
+          console.log(`✅ ${logLine}`);
 
         } catch (error) {
           failureCount++;
@@ -361,7 +368,7 @@ async function upload(req, res, next) {
 
           const logLine = `[FAILED] Row ${rowNumber}: ${row.ReceiptNumber} | Error: ${errorMessage}`;
           responseLogs.push(logLine);
-          console.error(logLine);
+          console.error(`❌ ${logLine}`);
         }
       });
     });
@@ -371,7 +378,6 @@ async function upload(req, res, next) {
     const endTime = Date.now();
     const totalTime = ((endTime - startTime) / 1000).toFixed(2);
 
-    // Save failures to database
     if (failures.length > 0) {
       await prisma.miscReceiptFailure.createMany({ data: failures });
     }
@@ -406,7 +412,6 @@ async function upload(req, res, next) {
 
 /**
  * GET /api/misc-receipt/uploads
- * List all uploads
  */
 async function listUploads(req, res, next) {
   try {
@@ -435,7 +440,6 @@ async function listUploads(req, res, next) {
 
 /**
  * GET /api/misc-receipt/uploads/:id
- * Get specific upload details
  */
 async function getUpload(req, res, next) {
   try {
@@ -459,7 +463,6 @@ async function getUpload(req, res, next) {
       return res.status(403).json({ error: 'Access denied.' });
     }
 
-    // Parse rawData JSON strings
     const parsedRecord = {
       ...uploadRecord,
       failures: uploadRecord.failures.map((f) => ({
@@ -476,7 +479,6 @@ async function getUpload(req, res, next) {
 
 /**
  * GET /api/misc-receipt/uploads/:id/progress
- * Get upload progress
  */
 async function getUploadProgress(req, res, next) {
   try {
@@ -509,7 +511,6 @@ async function getUploadProgress(req, res, next) {
 
 /**
  * GET /api/misc-receipt/template
- * Download CSV template
  */
 function downloadTemplate(_req, res) {
   const header = TEMPLATE_FIELDS.join(',');
