@@ -8,6 +8,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import api from '../hooks/useApi'
+import useExportInventoryFailures from '../hooks/useExportInventoryFailures'
 import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 
@@ -65,31 +66,9 @@ export default function FailureDetailsPage() {
     }
   }
 
-  const [exporting, setExporting] = useState(false)
-  const handleExportFailures = async () => {
-    setError('')
-    setExporting(true)
-    try {
-      const res = await api.get(`/inventory/uploads/${uploadId}/failures/export`, {
-        responseType: 'blob',
-      })
-      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' })
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      const disposition = res.headers?.['content-disposition'] || ''
-      const match = /filename="?([^";]+)"?/i.exec(disposition)
-      link.setAttribute('download', match?.[1] || `failures_upload_${uploadId}.csv`)
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      window.URL.revokeObjectURL(url)
-    } catch (err) {
-      setError(err.response?.data?.error || 'Failed to export failures CSV.')
-    } finally {
-      setExporting(false)
-    }
-  }
+  const { exporting, error: exportError, exportFailures, clearError: clearExportError } =
+    useExportInventoryFailures()
+  const handleExportFailures = () => exportFailures(uploadId)
 
   if (uploadId === '0') {
     return (
@@ -152,6 +131,7 @@ export default function FailureDetailsPage() {
       </div>
 
       <ErrorAlert message={error} onDismiss={() => setError('')} />
+      <ErrorAlert message={exportError} onDismiss={clearExportError} />
 
       {/* Upload summary */}
       {upload && (

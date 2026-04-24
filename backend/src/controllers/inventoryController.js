@@ -6,6 +6,7 @@
 const { parse } = require('csv-parse/sync');
 const axios = require('axios');
 const prisma = require('../services/prisma');
+const { csvEscape } = require('../utils/csv');
 
 // Prefix used to tag validation failure messages so retry logic can identify them
 const VALIDATION_ERROR_PREFIX = 'Validation: ';
@@ -1159,17 +1160,6 @@ async function getSuccessRecords(req, res, next) {
   } catch (err) {
     next(err);
   }
-}
-
-/**
- * Escapes a single value for inclusion in a CSV field.
- * Wraps the value in double quotes and escapes embedded quotes by doubling them.
- * Also normalizes newlines so they don't break the CSV row structure.
- */
-function csvEscape(value) {
-  if (value === null || value === undefined) return '""';
-  const str = String(value).replace(/"/g, '""').replace(/\r?\n/g, ' ');
-  return `"${str}"`;
 }
 
 /**
