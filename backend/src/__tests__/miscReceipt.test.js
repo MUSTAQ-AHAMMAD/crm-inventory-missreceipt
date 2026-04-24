@@ -313,8 +313,8 @@ describe('Misc Receipt Controller', () => {
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/" xmlns:com="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/">
   <soapenv:Header/>
   <soapenv:Body>
-    <typ:createMiscellaneousReceipt>
-      <typ:miscellaneousReceipt>
+    <com:createMiscellaneousReceipt>
+      <com:miscellaneousReceipt>
         <com:Amount>${escapeXml(row.Amount)}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
@@ -324,8 +324,8 @@ describe('Misc Receipt Controller', () => {
 ${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
         <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
         <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
-      </typ:miscellaneousReceipt>
-    </typ:createMiscellaneousReceipt>
+      </com:miscellaneousReceipt>
+    </com:createMiscellaneousReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
       };
@@ -346,7 +346,7 @@ ${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>
 
       expect(xml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
       expect(xml).toContain('<soapenv:Envelope');
-      expect(xml).toContain('<typ:createMiscellaneousReceipt>');
+      expect(xml).toContain('<com:createMiscellaneousReceipt>');
       expect(xml).toContain('<com:Amount>-100.00</com:Amount>');
       expect(xml).toContain('<com:CurrencyCode>SAR</com:CurrencyCode>');
       expect(xml).toContain('<com:ReceiptNumber>REC001</com:ReceiptNumber>');
@@ -393,8 +393,8 @@ ${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/" xmlns:com="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/">
   <soapenv:Header/>
   <soapenv:Body>
-    <typ:createMiscellaneousReceipt>
-      <typ:miscellaneousReceipt>
+    <com:createMiscellaneousReceipt>
+      <com:miscellaneousReceipt>
         <com:Amount>${escapeXml(row.Amount)}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
@@ -404,8 +404,8 @@ ${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>
 ${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
         <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
         <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
-      </typ:miscellaneousReceipt>
-    </typ:createMiscellaneousReceipt>
+      </com:miscellaneousReceipt>
+    </com:createMiscellaneousReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
       };
