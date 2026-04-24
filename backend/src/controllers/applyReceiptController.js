@@ -134,6 +134,7 @@ async function lookupInvoice(invoiceNumber, oracleAuth) {
 
   return {
     customerTrxId: String(items[0].CustomerTransactionId),
+    transactionDate: items[0].TransactionDate ? String(items[0].TransactionDate) : null,
     data: items[0],
   };
 }
@@ -169,9 +170,11 @@ async function lookupReceipt(receiptNumber, oracleAuth) {
 }
 
 /**
- * Builds SOAP XML envelope for applyReceipt operation
+ * Builds SOAP XML envelope for applyReceipt operation.
+ * `transactionDate` is the invoice TransactionDate from the first lookup API
+ * and is used for both ApplicationDate and AccountingDate.
  */
-function buildApplyReceiptXml(customerTrxId, receiptId, amount, receiptDate) {
+function buildApplyReceiptXml(customerTrxId, receiptId, amount, transactionDate) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${SOAP_TYPES_NS}">
   <soapenv:Header/>
@@ -180,8 +183,8 @@ function buildApplyReceiptXml(customerTrxId, receiptId, amount, receiptDate) {
       <typ:ReceiptId>${receiptId}</typ:ReceiptId>
       <typ:CustomerTrxId>${customerTrxId}</typ:CustomerTrxId>
       <typ:AmountApplied>${amount}</typ:AmountApplied>
-      <typ:ApplicationDate>${receiptDate}</typ:ApplicationDate>
-      <typ:AccountingDate>${receiptDate}</typ:AccountingDate>
+      <typ:ApplicationDate>${transactionDate}</typ:ApplicationDate>
+      <typ:AccountingDate>${transactionDate}</typ:AccountingDate>
     </typ:applyReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
@@ -190,8 +193,8 @@ function buildApplyReceiptXml(customerTrxId, receiptId, amount, receiptDate) {
 /**
  * Sends SOAP request to apply receipt
  */
-async function applyReceiptSoap(customerTrxId, receiptId, amount, receiptDate, oracleAuth) {
-  const soapXml = buildApplyReceiptXml(customerTrxId, receiptId, amount, receiptDate);
+async function applyReceiptSoap(customerTrxId, receiptId, amount, transactionDate, oracleAuth) {
+  const soapXml = buildApplyReceiptXml(customerTrxId, receiptId, amount, transactionDate);
   const url = process.env.ORACLE_APPLY_RECEIPT_SOAP_URL;
 
   const response = await axios.post(url, soapXml, {
@@ -337,6 +340,7 @@ async function upload(req, res, next) {
 
         // Step 1: Look up invoice to get CustomerTrxId
         let customerTrxId = null;
+        let transactionDate = null;
         try {
           const invoiceResult = await pRetry(
             async () => lookupInvoice(invoiceNumber, oracleAuth),
@@ -347,9 +351,10 @@ async function upload(req, res, next) {
             }
           );
           customerTrxId = invoiceResult.customerTrxId;
+          transactionDate = invoiceResult.transactionDate;
 
           responseLogs.push(
-            `[ApplyReceipt] Upload #${uploadRecord.id} Row ${rowNumber} Invoice lookup SUCCESS | Invoice: ${invoiceNumber} | CustomerTrxId: ${customerTrxId}`
+            `[ApplyReceipt] Upload #${uploadRecord.id} Row ${rowNumber} Invoice lookup SUCCESS | Invoice: ${invoiceNumber} | CustomerTrxId: ${customerTrxId} | TransactionDate: ${transactionDate || 'N/A'}`
           );
         } catch (invoiceErr) {
           // Invoice lookup failed - all receipts for this row fail
@@ -386,6 +391,10 @@ async function upload(req, res, next) {
           let receiptId = null;
           let amount = null;
           let receiptDate = null;
+          // ApplicationDate/AccountingDate must come from the invoice
+          // TransactionDate (first lookup API). Fall back to the receipt
+          // date only if the invoice did not return a TransactionDate.
+          let applicationDate = transactionDate;
 
           try {
             // Look up receipt details
@@ -401,6 +410,9 @@ async function upload(req, res, next) {
             receiptId = receiptResult.receiptId;
             amount = receiptResult.amount;
             receiptDate = receiptResult.receiptDate;
+            if (!applicationDate) {
+              applicationDate = receiptDate;
+            }
 
             responseLogs.push(
               `[ApplyReceipt] Upload #${uploadRecord.id} Row ${rowNumber} Receipt lookup SUCCESS | Receipt: ${receiptNum} | ReceiptId: ${receiptId} | Amount: ${amount}`
@@ -408,7 +420,7 @@ async function upload(req, res, next) {
 
             // Apply the receipt via SOAP
             const applyResponse = await pRetry(
-              async () => applyReceiptSoap(customerTrxId, receiptId, amount, receiptDate, oracleAuth),
+              async () => applyReceiptSoap(customerTrxId, receiptId, amount, applicationDate, oracleAuth),
               {
                 retries: MAX_RETRIES,
                 minTimeout: RETRY_MIN_TIMEOUT,
@@ -429,7 +441,7 @@ async function upload(req, res, next) {
                 receiptNumber: receiptNum,
                 errorMessage: faultMsg,
                 errorStep: 'APPLY_RECEIPT',
-                requestPayload: buildApplyReceiptXml(customerTrxId, receiptId, amount, receiptDate),
+                requestPayload: buildApplyReceiptXml(customerTrxId, receiptId, amount, applicationDate),
                 responseBody: snippet(responseText, 2000),
                 responseStatus: applyResponse.status,
                 customerTrxId,
@@ -466,7 +478,7 @@ async function upload(req, res, next) {
               errorMessage: errorMsg,
               errorStep,
               requestPayload: receiptId
-                ? buildApplyReceiptXml(customerTrxId, receiptId, amount, receiptDate)
+                ? buildApplyReceiptXml(customerTrxId, receiptId, amount, applicationDate)
                 : `GET ${process.env.ORACLE_STANDARD_RECEIPTS_LOOKUP_API_URL}?q=ReceiptNumber="${receiptNum}"`,
               responseBody: snippet(asText(err.response?.data), 2000),
               responseStatus: err.response?.status || null,
