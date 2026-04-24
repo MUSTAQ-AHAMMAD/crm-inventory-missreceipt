@@ -1,12 +1,12 @@
 /**
- * Miscellaneous Receipt controller with WS-Security for Oracle Fusion
+ * Miscellaneous Receipt controller - Simplified for Oracle Fusion
+ * Uses Basic Authentication (not WS-Security)
  */
 
 const { parse } = require('csv-parse/sync');
 const axios = require('axios');
 const pLimit = require('p-limit');
 const prisma = require('../services/prisma');
-const { createHash, randomBytes } = require('crypto');
 
 // Required CSV columns
 const REQUIRED_FIELDS = [
@@ -23,11 +23,9 @@ const REQUIRED_FIELDS = [
 
 const TEMPLATE_FIELDS = [...REQUIRED_FIELDS];
 
-// SOAP namespaces
+// SOAP namespaces - MATCHES WSDL EXACTLY
 const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
 const SOAP_COMMON_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
-const SOAP_SEC_NS = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd';
-const SOAP_WSU_NS = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd';
 const REQUIRED_CURRENCY = 'SAR';
 
 const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 3;
@@ -41,32 +39,6 @@ function escapeXml(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
-}
-
-/**
- * Generate WS-Security UsernameToken header for Oracle Fusion
- */
-function generateWsSecurityHeader(username, password) {
-  const nonce = randomBytes(16).toString('base64');
-  const created = new Date().toISOString();
-  
-  // Create password digest: SHA1(nonce + created + password)
-  const nonceDecoded = Buffer.from(nonce, 'base64');
-  const createdStr = created;
-  const passwordStr = password;
-  
-  const digestInput = Buffer.concat([nonceDecoded, Buffer.from(createdStr, 'utf8'), Buffer.from(passwordStr, 'utf8')]);
-  const passwordDigest = createHash('sha1').update(digestInput).digest('base64');
-
-  return `
-    <wsse:Security xmlns:wsse="${SOAP_SEC_NS}" xmlns:wsu="${SOAP_WSU_NS}" soapenv:mustUnderstand="1">
-      <wsse:UsernameToken wsu:Id="UsernameToken-${Date.now()}">
-        <wsse:Username>${escapeXml(username)}</wsse:Username>
-        <wsse:Password Type="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest">${passwordDigest}</wsse:Password>
-        <wsse:Nonce EncodingType="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary">${nonce}</wsse:Nonce>
-        <wsu:Created>${created}</wsu:Created>
-      </wsse:UsernameToken>
-    </wsse:Security>`;
 }
 
 function ensureNegativeAmount(rawAmount) {
@@ -133,23 +105,16 @@ function validateCsv(records) {
 }
 
 /**
- * Generates SOAP envelope with WS-Security headers
+ * Generates SOAP envelope WITHOUT WS-Security (using simple Basic Auth)
  */
-function generateSoapEnvelope(row, username, password) {
+function generateSoapEnvelope(row) {
   const receiptMethodNameTag = row.ReceiptMethodName
     ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
     : '';
 
-  const wsseHeader = generateWsSecurityHeader(username, password);
-
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" 
-                  xmlns:com="${SOAP_COMMON_NS}"
-                  xmlns:wsse="${SOAP_SEC_NS}"
-                  xmlns:wsu="${SOAP_WSU_NS}">
-  <soapenv:Header>
-    ${wsseHeader}
-  </soapenv:Header>
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:com="${SOAP_COMMON_NS}">
+  <soapenv:Header/>
   <soapenv:Body>
     <com:createMiscellaneousReceipt>
       <com:miscellaneousReceipt>
@@ -169,18 +134,18 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
 }
 
 /**
- * Sends SOAP request to Oracle with WS-Security
+ * Sends SOAP request with Basic Authentication only
  */
-async function sendSoapRequest(soapXml, receiptNumber, rowNumber, uploadId) {
+async function sendSoapRequest(soapXml, receiptNumber) {
   const endpoint = process.env.ORACLE_SOAP_URL;
   const username = process.env.ORACLE_USERNAME;
   const password = process.env.ORACLE_PASSWORD;
 
   if (!endpoint || !username || !password) {
-    throw new Error('Oracle SOAP configuration missing');
+    throw new Error('Oracle SOAP configuration missing. Check ORACLE_SOAP_URL, ORACLE_USERNAME, ORACLE_PASSWORD');
   }
 
-  let lastError = null;
+  const auth = Buffer.from(`${username}:${password}`).toString('base64');
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
@@ -190,58 +155,52 @@ async function sendSoapRequest(soapXml, receiptNumber, rowNumber, uploadId) {
         headers: {
           'Content-Type': 'text/xml; charset=utf-8',
           'SOAPAction': '',
+          'Authorization': `Basic ${auth}`,
           'Accept': 'text/xml, application/xml',
         },
         timeout: 30000,
         transformResponse: [(data) => data],
       });
 
-      // Log full response for debugging
-      console.log(`Response for ${receiptNumber}:`, response.data.substring(0, 500));
-
-      // Check for success
-      if (response.data && response.data.includes('createMiscellaneousReceiptResponse')) {
-        return { success: true, data: response.data, status: response.status };
-      }
+      console.log(`Response status: ${response.status}`);
+      console.log(`Response preview: ${response.data.substring(0, 300)}`);
 
       // Check for SOAP fault
-      if (response.data && response.data.includes('Fault')) {
+      if (response.data && response.data.includes('<env:Fault>')) {
         const faultMatch = response.data.match(/<faultstring>(.*?)<\/faultstring>/);
-        const faultCodeMatch = response.data.match(/<faultcode>(.*?)<\/faultcode>/);
         const faultMessage = faultMatch ? faultMatch[1] : 'SOAP Fault occurred';
-        const faultCode = faultCodeMatch ? faultCodeMatch[1] : '';
-        
-        // If it's an authentication error, don't retry
-        if (faultCode.includes('InvalidSecurity') || faultMessage.includes('authentication')) {
-          throw new Error(`Authentication failed: ${faultMessage}`);
-        }
-        
         throw new Error(faultMessage);
       }
 
+      // Check for success response
+      if (response.data && response.data.includes('createMiscellaneousReceiptResponse')) {
+        console.log(`✅ Success for ${receiptNumber}`);
+        return { success: true, data: response.data, status: response.status };
+      }
+
       if (response.status === 200 || response.status === 201) {
+        console.log(`✅ Success (HTTP ${response.status}) for ${receiptNumber}`);
         return { success: true, data: response.data, status: response.status };
       }
 
       throw new Error(`Unexpected response: HTTP ${response.status}`);
 
     } catch (error) {
-      lastError = error;
       const errorMessage = error.response?.data || error.message;
       const faultMatch = String(errorMessage).match(/<faultstring>(.*?)<\/faultstring>/);
       const friendlyError = faultMatch ? faultMatch[1] : error.message;
 
       console.error(`[Attempt ${attempt}/${MAX_RETRIES}] Failed for ${receiptNumber}: ${friendlyError}`);
 
-      if (attempt < MAX_RETRIES && !friendlyError.includes('authentication')) {
+      if (attempt < MAX_RETRIES) {
         const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
         console.log(`Waiting ${delay}ms before retry...`);
         await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        throw new Error(friendlyError);
       }
     }
   }
-
-  throw lastError || new Error('Request failed after all retries');
 }
 
 /**
@@ -270,13 +229,10 @@ async function previewXml(req, res, next) {
     }
 
     const normalizedRecords = records.map(row => normalizeRow(row));
-    const username = process.env.ORACLE_USERNAME;
-    const password = process.env.ORACLE_PASSWORD;
-    
     const previews = normalizedRecords.map((row, i) => ({
       rowNumber: i + 2,
       receiptNumber: row.ReceiptNumber,
-      xml: generateSoapEnvelope(row, username, password),
+      xml: generateSoapEnvelope(row),
     }));
 
     return res.json({ totalRows: normalizedRecords.length, previews });
@@ -317,14 +273,12 @@ async function upload(req, res, next) {
       return res.status(400).json({ error: err.message });
     }
 
-    const username = process.env.ORACLE_USERNAME;
-    const password = process.env.ORACLE_PASSWORD;
-
+    // Create upload record
     const uploadRecord = await prisma.miscReceiptUpload.create({
       data: {
         userId: req.user.id,
         filename: req.file.originalname,
-        xmlPayload: normalizedRecords.map(row => generateSoapEnvelope(row, username, password)).join('\n\n'),
+        xmlPayload: normalizedRecords.map(generateSoapEnvelope).join('\n\n'),
         responseStatus: 'PROCESSING',
         responseLog: '',
       },
@@ -340,12 +294,12 @@ async function upload(req, res, next) {
     const processingPromises = normalizedRecords.map((row, i) => {
       return limit(async () => {
         const rowNumber = i + 2;
-        const soapXml = generateSoapEnvelope(row, username, password);
+        const soapXml = generateSoapEnvelope(row);
 
         try {
           console.log(`\n📤 Processing Row ${rowNumber}: ${row.ReceiptNumber}`);
           
-          const result = await sendSoapRequest(soapXml, row.ReceiptNumber, rowNumber, uploadRecord.id);
+          const result = await sendSoapRequest(soapXml, row.ReceiptNumber);
 
           successCount++;
           const logLine = `[SUCCESS] Row ${rowNumber}: ${row.ReceiptNumber}`;
