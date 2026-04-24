@@ -118,8 +118,8 @@ function generateSoapEnvelope(row) {
 <soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:com="${MISC_COMMON_NS}">
   <soapenv:Header/>
   <soapenv:Body>
-    <com:createMiscellaneousReceipt>
-      <com:miscellaneousReceipt>
+    <typ:createMiscellaneousReceipt>
+      <typ:miscellaneousReceipt>
         <com:Amount>${escapeXml(row.Amount)}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
@@ -129,8 +129,8 @@ function generateSoapEnvelope(row) {
 ${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
         <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
         <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
-      </com:miscellaneousReceipt>
-    </com:createMiscellaneousReceipt>
+      </typ:miscellaneousReceipt>
+    </typ:createMiscellaneousReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
 }
