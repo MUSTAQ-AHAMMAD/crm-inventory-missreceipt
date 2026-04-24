@@ -382,9 +382,27 @@ async function upload(req, res, next) {
               const responseText = asText(res.data);
               const faultMsg = extractSoapFaultMessage(responseText);
 
-              // Throw error for retryable SOAP faults or server errors
+              // Throw error for retryable SOAP faults or server errors. Always include
+              // the SOAP faultstring (or a response snippet) in the message so the real
+              // cause is preserved through pRetry and shown to the user.
               if (res.status >= 500 && res.status < 600) {
-                throw new Error(`HTTP ${res.status}: Server error`);
+                const detail =
+                  faultMsg ||
+                  snippet(extractXmlPayload(responseText) || responseText) ||
+                  'Server error';
+                const err = new Error(`HTTP ${res.status}: ${detail}`);
+                // Detect non-transient faults wrapped in 5xx responses (Oracle returns
+                // 500 for security/credential failures). Retrying these only delays
+                // surfacing a real configuration problem, so abort the retry loop.
+                const isNonTransientFault =
+                  faultMsg &&
+                  /InvalidSecurity|FailedAuthentication|InvalidCredentials|invalid credentials/i.test(
+                    faultMsg
+                  );
+                if (isNonTransientFault) {
+                  throw new pRetry.AbortError(err);
+                }
+                throw err;
               }
               if (faultMsg && faultMsg.includes('timeout')) {
                 throw new Error(`SOAP timeout: ${faultMsg}`);
