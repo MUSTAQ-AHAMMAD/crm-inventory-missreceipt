@@ -28,13 +28,11 @@ const REQUIRED_FIELDS = [
 const TEMPLATE_FIELDS = [...REQUIRED_FIELDS];
 
 // SOAP namespaces and action for Oracle MiscellaneousReceiptService
+// FIXED: Removed com namespace, using only typ namespace
 const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
 const SOAP_TYPES_NS =
   'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/';
-const MISC_COMMON_NS =
-  'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
-const SOAP_ACTION = 'createMiscellaneousReceipt';
-const SOAP_ACTION_HEADER = `"${SOAP_ACTION}"`;
+const SOAP_ACTION = '';  // Empty string - Oracle Fusion requires this
 const REQUIRED_CURRENCY = 'SAR';
 
 // Configuration for parallel processing and retries
@@ -124,35 +122,37 @@ function validateCsv(records) {
 
 /**
  * Generates a SOAP XML envelope for a single miscellaneous receipt row.
+ * FIXED: Using correct 'typ:' namespace for all elements
  *
  * @param {Object} row - CSV row data
  * @returns {string} SOAP XML string
  */
 function generateSoapEnvelope(row) {
   const receiptMethodIdTag = row.ReceiptMethodId
-    ? `        <com:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</com:ReceiptMethodId>\n`
+    ? `        <typ:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</typ:ReceiptMethodId>\n`
     : '';
   const receiptMethodNameTag = row.ReceiptMethodName
-    ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
+    ? `        <typ:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</typ:ReceiptMethodName>\n`
     : '';
 
+  // CRITICAL FIX: Operation and all elements must use 'typ:' namespace, not 'com:'
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${SOAP_TYPES_NS}" xmlns:com="${MISC_COMMON_NS}">
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${SOAP_TYPES_NS}">
   <soapenv:Header/>
   <soapenv:Body>
-    <com:createMiscellaneousReceipt>
-      <com:MiscellaneousReceipt>
-        <com:Amount>${escapeXml(row.Amount)}</com:Amount>
-        <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
-        <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
-        <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
-        <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
-        <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
-${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
-        <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
-        <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
-      </com:MiscellaneousReceipt>
-    </com:createMiscellaneousReceipt>
+    <typ:createMiscellaneousReceipt>
+      <typ:miscellaneousReceipt>
+        <typ:Amount>${escapeXml(row.Amount)}</typ:Amount>
+        <typ:CurrencyCode>${escapeXml(row.CurrencyCode)}</typ:CurrencyCode>
+        <typ:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</typ:ReceiptNumber>
+        <typ:ReceiptDate>${escapeXml(row.ReceiptDate)}</typ:ReceiptDate>
+        <typ:DepositDate>${escapeXml(row.DepositDate)}</typ:DepositDate>
+        <typ:GlDate>${escapeXml(row.GlDate)}</typ:GlDate>
+${receiptMethodIdTag}${receiptMethodNameTag}        <typ:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</typ:ReceivableActivityName>
+        <typ:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</typ:BankAccountNumber>
+        <typ:OrgId>${escapeXml(row.OrgId)}</typ:OrgId>
+      </typ:miscellaneousReceipt>
+    </typ:createMiscellaneousReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
 }
@@ -370,7 +370,7 @@ async function upload(req, res, next) {
     const responseLogs = [];
     let firstErrorMessage = '';
     let lastSuccessMessage = '';
-    const logContext = `Action=${SOAP_ACTION_HEADER} | Endpoint=${process.env.ORACLE_SOAP_URL}`;
+    const logContext = `Action=${SOAP_ACTION || 'empty'} | Endpoint=${process.env.ORACLE_SOAP_URL}`;
     const startTime = Date.now();
 
     // Create a limit function for concurrent requests
@@ -388,6 +388,7 @@ async function upload(req, res, next) {
           console.log(`[MiscReceipt] Sending SOAP request for Upload #${uploadRecord.id} Row ${rowNumber}:`);
           console.log(`  Receipt Number: ${row.ReceiptNumber}`);
           console.log(`  Endpoint: ${process.env.ORACLE_SOAP_URL}`);
+          console.log(`  SOAPAction: "${SOAP_ACTION}"`);
           console.log(`  Full SOAP XML:\n${soapXml}`);
 
           // Use the new SOAP client with WSDL auto-discovery and MTOM support
@@ -405,7 +406,7 @@ async function upload(req, res, next) {
             failures.push({
               uploadId: uploadRecord.id,
               rowNumber,
-              rawData: JSON.stringify(row), // SQLite stores JSON as a string
+              rawData: JSON.stringify(row),
               errorMessage: errorSnippet,
               requestPayload: snippet(soapXml, 2000),
               responseBody: snippet(xmlPayload || responseText, 2000),
@@ -435,7 +436,7 @@ async function upload(req, res, next) {
           failures.push({
             uploadId: uploadRecord.id,
             rowNumber,
-            rawData: JSON.stringify(row), // SQLite stores JSON as a string
+            rawData: JSON.stringify(row),
             errorMessage: typeof errMsg === 'string' ? snippet(errMsg) : JSON.stringify(errMsg || '').substring(0, 500),
             requestPayload: snippet(soapXml, 2000),
             responseBody: snippet(apiErr.message, 2000),
