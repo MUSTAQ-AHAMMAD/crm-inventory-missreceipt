@@ -85,6 +85,33 @@ export default function UploadDetailPage() {
     }
   }
 
+  const [exporting, setExporting] = useState(false)
+  const handleExportFailures = async () => {
+    setError('')
+    setExporting(true)
+    try {
+      const res = await api.get(`/inventory/uploads/${uploadId}/failures/export`, {
+        responseType: 'blob',
+      })
+      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      // Try to use the filename suggested by the server (Content-Disposition header)
+      const disposition = res.headers?.['content-disposition'] || ''
+      const match = /filename="?([^";]+)"?/i.exec(disposition)
+      link.setAttribute('download', match?.[1] || `failures_upload_${uploadId}.csv`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to export failures CSV.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   if (!uploadId || uploadId === '0') {
     return (
       <div className="space-y-6">
@@ -141,14 +168,25 @@ export default function UploadDetailPage() {
             ← Back to Uploads
           </Link>
           {(upload?.failureCount > 0 && upload?.status !== 'PROCESSING') && (
-            <button
-              onClick={handleRetry}
-              disabled={retrying}
-              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2"
-            >
-              {retrying ? <Spinner size="sm" /> : '🔄'}
-              Retry All Failures
-            </button>
+            <>
+              <button
+                onClick={handleExportFailures}
+                disabled={exporting}
+                className="px-4 py-2 text-sm bg-gray-700 text-white rounded-lg hover:bg-gray-800 disabled:opacity-60 flex items-center gap-2"
+                title="Download all failed rows as CSV (includes original CSV columns plus error details)"
+              >
+                {exporting ? <Spinner size="sm" /> : '📥'}
+                {exporting ? 'Exporting…' : 'Export Failures CSV'}
+              </button>
+              <button
+                onClick={handleRetry}
+                disabled={retrying}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2"
+              >
+                {retrying ? <Spinner size="sm" /> : '🔄'}
+                Retry All Failures
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -281,9 +319,21 @@ export default function UploadDetailPage() {
 
       {tab === 'Failure Records' && (
         <div className="bg-white rounded-xl shadow-sm p-6">
-          <h2 className="font-semibold text-gray-700 mb-4">
-            Failure Records ({totalFailureRecords})
-          </h2>
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            <h2 className="font-semibold text-gray-700">
+              Failure Records ({totalFailureRecords})
+            </h2>
+            {totalFailureRecords > 0 && (
+              <button
+                onClick={handleExportFailures}
+                disabled={exporting}
+                className="px-3 py-1.5 text-xs bg-gray-700 text-white rounded-lg hover:bg-gray-800 disabled:opacity-60 flex items-center gap-1.5"
+              >
+                {exporting ? <Spinner size="sm" /> : '📥'}
+                {exporting ? 'Exporting…' : 'Export Failures CSV'}
+              </button>
+            )}
+          </div>
           <RecordsTable records={failures} type="failure" />
           <Pagination page={failurePage} totalPages={failureTotalPages} onPageChange={setFailurePage} />
         </div>

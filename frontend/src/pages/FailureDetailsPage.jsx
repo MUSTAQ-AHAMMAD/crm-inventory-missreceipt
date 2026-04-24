@@ -65,6 +65,32 @@ export default function FailureDetailsPage() {
     }
   }
 
+  const [exporting, setExporting] = useState(false)
+  const handleExportFailures = async () => {
+    setError('')
+    setExporting(true)
+    try {
+      const res = await api.get(`/inventory/uploads/${uploadId}/failures/export`, {
+        responseType: 'blob',
+      })
+      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      const disposition = res.headers?.['content-disposition'] || ''
+      const match = /filename="?([^";]+)"?/i.exec(disposition)
+      link.setAttribute('download', match?.[1] || `failures_upload_${uploadId}.csv`)
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to export failures CSV.')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   if (uploadId === '0') {
     return (
       <div className="space-y-6">
@@ -101,6 +127,17 @@ export default function FailureDetailsPage() {
           <Link to="/inventory" className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
             ← Back
           </Link>
+          {failures?.length > 0 && (
+            <button
+              onClick={handleExportFailures}
+              disabled={exporting}
+              className="px-4 py-2 text-sm bg-gray-700 text-white rounded-lg hover:bg-gray-800 disabled:opacity-60 flex items-center gap-2"
+              title="Download all failed rows as CSV (includes original CSV columns plus error details)"
+            >
+              {exporting ? <Spinner size="sm" /> : '📥'}
+              {exporting ? 'Exporting…' : 'Export Failures CSV'}
+            </button>
+          )}
           {failures?.length > 0 && (
             <button
               onClick={handleRetry}
