@@ -36,38 +36,34 @@ The deprecation warning will no longer appear when starting the backend server. 
 ```
 
 **Root Cause:**
-Oracle Fusion SOAP services using document/literal binding style require an **empty SOAPAction header** (`SOAPAction: ""`), not the operation name (`SOAPAction: "createMiscellaneousReceipt"`).
+Oracle Fusion SOAP services require a **proper SOAPAction header** matching the operation name (`SOAPAction: "createMiscellaneousReceipt"`), not an empty string (`SOAPAction: ""`).
 
-According to the SOAP 1.1 specification and Oracle Fusion implementation:
-- **Document/Literal style**: The operation is determined by the XML structure in the SOAP Body, not by the SOAPAction header
-- **RPC/Literal style**: The SOAPAction header specifies the operation name
-
-Oracle's MiscellaneousReceiptService uses document/literal style, which requires:
-- Empty SOAPAction: `SOAPAction: ""`
-- Operation identification from XML: `<com:createMiscellaneousReceipt>` in the SOAP Body
+When the SOAPAction header is empty, Oracle's SOA layer cannot properly route the request to the correct service method, resulting in "Unknown method" errors even though the operation name is present in the SOAP Body.
 
 **Solution:**
-Changed the SOAPAction from the operation name to an empty string in `backend/src/controllers/miscReceiptController.js`:
+Changed the SOAPAction from an empty string to the operation name in `backend/src/controllers/miscReceiptController.js`:
 
 **Before:**
-```javascript
-const SOAP_ACTION = 'createMiscellaneousReceipt';
-```
-
-**After:**
 ```javascript
 // Use empty SOAPAction for document/literal style (Oracle Fusion requirement)
 // Oracle Fusion SOAP services with document/literal binding style require empty SOAPAction
 const SOAP_ACTION = '';
 ```
 
+**After:**
+```javascript
+// Use SOAPAction matching the operation name (Oracle Fusion requirement)
+// Oracle requires the SOAPAction header to match the operation being invoked
+const SOAP_ACTION = 'createMiscellaneousReceipt';
+```
+
 **Files Modified:**
 - `backend/src/controllers/miscReceiptController.js` (lines 153-155)
 
 **How It Works:**
-1. The SOAP client sends the request with `SOAPAction: ""`
-2. Oracle's SOA layer inspects the SOAP Body to identify the operation
-3. The operation `<com:createMiscellaneousReceipt>` in the Body is recognized
+1. The SOAP client sends the request with `SOAPAction: "createMiscellaneousReceipt"`
+2. Oracle's SOA layer uses the SOAPAction header to route the request to the correct service method
+3. The operation `<com:createMiscellaneousReceipt>` in the Body matches the SOAPAction
 4. Oracle dispatches to the correct service method
 5. The request is processed successfully
 
