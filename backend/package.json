@@ -16,7 +16,9 @@
     "test:wsdl": "node scripts/test-wsdl.js",
     "test:receipt": "node scripts/test-single-receipt.js",
     "discover:methods": "node scripts/discover-methods.js",
-    "discover:methods:verbose": "node scripts/discover-methods.js --verbose"
+    "discover:methods:verbose": "node scripts/discover-methods.js --verbose",
+    "db:verify": "node scripts/verify-database-integrity.js",
+    "db:verify:fix": "node scripts/verify-database-integrity.js --fix"
   },
   "dependencies": {
     "@prisma/client": "^5.7.0",
