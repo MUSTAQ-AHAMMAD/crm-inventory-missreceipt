@@ -438,8 +438,12 @@ class OracleSoapClient {
       throw new Error('Service URL is not configured');
     }
 
-    // Log request XML in debug mode
-    this.debugLog(`${requestId} Request XML:`, this.truncateXml(soapXml));
+    // Always log the request XML for debugging (truncated in normal mode, full in debug mode)
+    if (this.debugMode) {
+      console.log(`[OracleSoapClient] ${requestId} Full Request XML:`, soapXml);
+    } else {
+      console.log(`[OracleSoapClient] ${requestId} Request XML (truncated):`, this.truncateXml(soapXml, 500));
+    }
 
     return pRetry(
       async () => {
@@ -485,9 +489,18 @@ class OracleSoapClient {
 
           // Check for HTTP errors (5xx)
           if (response.status >= 500) {
-            console.error(`[OracleSoapClient] ${requestId} HTTP ${response.status} error:`, this.truncateXml(xmlResponse, 500));
+            // Log FULL response XML for 500 errors (don't truncate)
+            console.error(`[OracleSoapClient] ${requestId} HTTP ${response.status} error`);
+            console.error(`[OracleSoapClient] ${requestId} Full Response XML:`, xmlResponse);
 
             const errorMessage = fault ? fault.message : `HTTP ${response.status} error`;
+
+            if (fault) {
+              console.error(`[OracleSoapClient] ${requestId} SOAP Fault Details:`);
+              console.error(`  Code: ${fault.code}`);
+              console.error(`  Message: ${fault.message}`);
+              console.error(`  Detail: ${fault.detail}`);
+            }
 
             // Check for non-retryable errors
             if (fault && /InvalidSecurity|FailedAuthentication|InvalidCredentials|invalid credentials|unauthorized/i.test(fault.message)) {
