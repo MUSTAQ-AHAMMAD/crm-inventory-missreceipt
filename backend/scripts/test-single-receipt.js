@@ -15,7 +15,6 @@ const { createOracleSoapClient } = require('../src/services/OracleSoapClient');
 // SOAP namespaces
 const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
 const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/';
-const SOAP_COMMON_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
 
 function escapeXml(value) {
   if (value == null) return '';
@@ -29,21 +28,19 @@ function escapeXml(value) {
 
 function generateSoapEnvelope(data) {
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${SOAP_TYPES_NS}" xmlns:com="${SOAP_COMMON_NS}">
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${SOAP_TYPES_NS}">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:createMiscellaneousReceipt>
-      <com:MiscellaneousReceipt>
-        <com:Amount>${escapeXml(data.Amount)}</com:Amount>
-        <com:CurrencyCode>${escapeXml(data.CurrencyCode)}</com:CurrencyCode>
-        <com:ReceiptNumber>${escapeXml(data.ReceiptNumber)}</com:ReceiptNumber>
-        <com:ReceiptDate>${escapeXml(data.ReceiptDate)}</com:ReceiptDate>
-        <com:DepositDate>${escapeXml(data.DepositDate)}</com:DepositDate>
-        <com:GlDate>${escapeXml(data.GlDate)}</com:GlDate>
-        <com:ReceivableActivityName>${escapeXml(data.ReceivableActivityName)}</com:ReceivableActivityName>
-        <com:BankAccountNumber>${escapeXml(data.BankAccountNumber)}</com:BankAccountNumber>
-        <com:OrgId>${escapeXml(data.OrgId)}</com:OrgId>
-      </com:MiscellaneousReceipt>
+      <typ:Amount>${escapeXml(data.Amount)}</typ:Amount>
+      <typ:CurrencyCode>${escapeXml(data.CurrencyCode)}</typ:CurrencyCode>
+      <typ:ReceiptNumber>${escapeXml(data.ReceiptNumber)}</typ:ReceiptNumber>
+      <typ:ReceiptDate>${escapeXml(data.ReceiptDate)}</typ:ReceiptDate>
+      <typ:DepositDate>${escapeXml(data.DepositDate)}</typ:DepositDate>
+      <typ:GlDate>${escapeXml(data.GlDate)}</typ:GlDate>
+      <typ:ReceivableActivityName>${escapeXml(data.ReceivableActivityName)}</typ:ReceivableActivityName>
+      <typ:BankAccountNumber>${escapeXml(data.BankAccountNumber)}</typ:BankAccountNumber>
+      <typ:OrgId>${escapeXml(data.OrgId)}</typ:OrgId>
     </typ:createMiscellaneousReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
