@@ -1,7 +1,7 @@
 /**
  * Apply Receipt controller.
  * Processes CSV with invoice numbers and receipt numbers, looks up IDs from Oracle REST APIs,
- * then applies receipts via SOAP StandardReceiptService.
+ * then applies receipts via SOAP StandardReceiptService using OracleSoapClient.
  */
 
 const { parse } = require('csv-parse/sync');
@@ -9,6 +9,7 @@ const axios = require('axios');
 const pLimit = require('p-limit');
 const pRetry = require('p-retry');
 const prisma = require('../services/prisma');
+const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
 // CSV column names - InvoiceNumber plus up to 4 receipt numbers
 const REQUIRED_FIELDS = ['InvoiceNumber'];
@@ -22,12 +23,9 @@ const RETRY_MIN_TIMEOUT = 1000; // 1 second
 const RETRY_MAX_TIMEOUT = 10000; // 10 seconds
 
 // SOAP namespaces for StandardReceiptService.
-// The types namespace must match Oracle Fusion's package path for the service
-// (oracle.apps.financials.receivables.receipts.standardReceipts.standardReceiptService).
-// Omitting the `standardReceipts/` segment causes Oracle's SOA layer to return
-// an "Unknown method" SOAP fault because <typ:applyReceipt> cannot be dispatched.
+// Fixed namespace - removed the extra 'standardReceipts/' segment that was causing "Unknown method" errors
 const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
-const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/standardReceipts/standardReceiptService/types/';
+const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/standardReceiptService/types/';
 const SOAP_ACTION = 'applyReceipt';
 const SOAP_ACTION_HEADER = `"${SOAP_ACTION}"`;
 
@@ -195,25 +193,38 @@ function buildApplyReceiptXml(customerTrxId, receiptId, amount, transactionDate)
 }
 
 /**
- * Sends SOAP request to apply receipt
+ * Sends SOAP request to apply receipt using OracleSoapClient
  */
-async function applyReceiptSoap(customerTrxId, receiptId, amount, transactionDate, oracleAuth) {
+async function applyReceiptSoap(customerTrxId, receiptId, amount, transactionDate) {
   const soapXml = buildApplyReceiptXml(customerTrxId, receiptId, amount, transactionDate);
   const url = process.env.ORACLE_APPLY_RECEIPT_SOAP_URL;
 
-  const response = await axios.post(url, soapXml, {
-    headers: {
-      'Content-Type': 'text/xml; charset=utf-8',
-      Accept: 'text/xml',
-      SOAPAction: SOAP_ACTION_HEADER,
-      Authorization: `Basic ${oracleAuth}`,
-    },
-    timeout: 30000,
-    responseType: 'text',
-    validateStatus: () => true, // Don't throw on non-2xx
-  });
+  if (!url) {
+    throw new Error('ORACLE_APPLY_RECEIPT_SOAP_URL not configured in .env');
+  }
 
-  return response;
+  try {
+    console.log(`[ApplyReceipt] Sending SOAP request to ${url}`);
+    console.log(`[ApplyReceipt] CustomerTrxId: ${customerTrxId}, ReceiptId: ${receiptId}, Amount: ${amount}`);
+
+    // Create SOAP client with automatic authentication and error handling
+    const soapClient = createOracleSoapClient(url);
+
+    const response = await soapClient.callWithCustomEnvelope(soapXml, SOAP_ACTION);
+
+    console.log(`[ApplyReceipt] SOAP request successful - HTTP ${response.status}`);
+
+    // Convert OracleSoapClient response to expected format
+    return {
+      status: response.status,
+      statusText: response.statusText,
+      data: response.data,
+    };
+
+  } catch (error) {
+    console.error(`[ApplyReceipt] SOAP request failed: ${error.message}`);
+    throw error;
+  }
 }
 
 /**
@@ -424,7 +435,7 @@ async function upload(req, res, next) {
 
             // Apply the receipt via SOAP
             const applyResponse = await pRetry(
-              async () => applyReceiptSoap(customerTrxId, receiptId, amount, applicationDate, oracleAuth),
+              async () => applyReceiptSoap(customerTrxId, receiptId, amount, applicationDate),
               {
                 retries: MAX_RETRIES,
                 minTimeout: RETRY_MIN_TIMEOUT,

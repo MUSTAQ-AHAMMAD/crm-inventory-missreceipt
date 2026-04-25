@@ -1,12 +1,12 @@
 /**
- * Miscellaneous Receipt controller - Simplified for Oracle Fusion
- * Uses Basic Authentication (not WS-Security)
+ * Miscellaneous Receipt controller - Uses OracleSoapClient for Oracle Fusion
+ * Handles SOAP requests with proper authentication and error handling
  */
 
 const { parse } = require('csv-parse/sync');
-const axios = require('axios');
 const pLimit = require('p-limit');
 const prisma = require('../services/prisma');
+const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
 // Required CSV columns
 const REQUIRED_FIELDS = [
@@ -134,72 +134,32 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
 }
 
 /**
- * Sends SOAP request with Basic Authentication only
+ * Sends SOAP request using OracleSoapClient with proper authentication and error handling
  */
 async function sendSoapRequest(soapXml, receiptNumber) {
   const endpoint = process.env.ORACLE_SOAP_URL;
-  const username = process.env.ORACLE_USERNAME;
-  const password = process.env.ORACLE_PASSWORD;
 
-  if (!endpoint || !username || !password) {
-    throw new Error('Oracle SOAP configuration missing. Check ORACLE_SOAP_URL, ORACLE_USERNAME, ORACLE_PASSWORD');
+  if (!endpoint) {
+    throw new Error('Oracle SOAP configuration missing. Check ORACLE_SOAP_URL in .env');
   }
 
-  const auth = Buffer.from(`${username}:${password}`).toString('base64');
+  try {
+    console.log(`\n[MiscReceipt] Sending SOAP request for ${receiptNumber}`);
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      console.log(`[Attempt ${attempt}/${MAX_RETRIES}] Sending request for ${receiptNumber}`);
+    // Create SOAP client with automatic WSDL discovery
+    const soapClient = createOracleSoapClient(endpoint);
 
-      const response = await axios.post(endpoint, soapXml, {
-        headers: {
-          'Content-Type': 'text/xml; charset=utf-8',
-          'SOAPAction': '',
-          'Authorization': `Basic ${auth}`,
-          'Accept': 'text/xml, application/xml',
-        },
-        timeout: 30000,
-        transformResponse: [(data) => data],
-      });
+    // Use SOAPAction for createMiscellaneousReceipt operation
+    const SOAP_ACTION = 'createMiscellaneousReceipt';
 
-      console.log(`Response status: ${response.status}`);
-      console.log(`Response preview: ${response.data.substring(0, 300)}`);
+    const response = await soapClient.callWithCustomEnvelope(soapXml, SOAP_ACTION);
 
-      // Check for SOAP fault
-      if (response.data && response.data.includes('<env:Fault>')) {
-        const faultMatch = response.data.match(/<faultstring>(.*?)<\/faultstring>/);
-        const faultMessage = faultMatch ? faultMatch[1] : 'SOAP Fault occurred';
-        throw new Error(faultMessage);
-      }
+    console.log(`✅ Success for ${receiptNumber} - HTTP ${response.status}`);
+    return { success: true, data: response.data, status: response.status };
 
-      // Check for success response
-      if (response.data && response.data.includes('createMiscellaneousReceiptResponse')) {
-        console.log(`✅ Success for ${receiptNumber}`);
-        return { success: true, data: response.data, status: response.status };
-      }
-
-      if (response.status === 200 || response.status === 201) {
-        console.log(`✅ Success (HTTP ${response.status}) for ${receiptNumber}`);
-        return { success: true, data: response.data, status: response.status };
-      }
-
-      throw new Error(`Unexpected response: HTTP ${response.status}`);
-
-    } catch (error) {
-      const errorMessage = error.response?.data || error.message;
-      const faultMatch = String(errorMessage).match(/<faultstring>(.*?)<\/faultstring>/);
-      const friendlyError = faultMatch ? faultMatch[1] : error.message;
-
-      console.error(`[Attempt ${attempt}/${MAX_RETRIES}] Failed for ${receiptNumber}: ${friendlyError}`);
-
-      if (attempt < MAX_RETRIES) {
-        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
-        console.log(`Waiting ${delay}ms before retry...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      } else {
-        throw new Error(friendlyError);
-      }
-    }
+  } catch (error) {
+    console.error(`❌ Failed for ${receiptNumber}: ${error.message}`);
+    throw error;
   }
 }
 
