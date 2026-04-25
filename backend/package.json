@@ -14,6 +14,7 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "test:wsdl": "node scripts/test-wsdl.js",
+    "test:receipt": "node scripts/test-single-receipt.js",
     "discover:methods": "node scripts/discover-methods.js",
     "discover:methods:verbose": "node scripts/discover-methods.js --verbose"
   },
