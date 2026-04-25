@@ -107,11 +107,23 @@ function validateCsv(records) {
 
 /**
  * Generates SOAP envelope WITHOUT WS-Security (using simple Basic Auth)
+ * Ensures proper XML declaration and namespace declarations
  */
 function generateSoapEnvelope(row) {
   const receiptMethodNameTag = row.ReceiptMethodName
     ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
     : '';
+
+  // Validate all required fields are present
+  const requiredFields = ['Amount', 'CurrencyCode', 'ReceiptNumber', 'ReceiptDate',
+                          'DepositDate', 'GlDate', 'ReceivableActivityName',
+                          'BankAccountNumber', 'OrgId'];
+
+  for (const field of requiredFields) {
+    if (row[field] === undefined || row[field] === null || row[field] === '') {
+      throw new Error(`Missing required field: ${field}`);
+    }
+  }
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${SOAP_TYPES_NS}" xmlns:com="${SOAP_COMMON_NS}">

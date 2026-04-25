@@ -175,18 +175,34 @@ async function lookupReceipt(receiptNumber, oracleAuth) {
  * Builds SOAP XML envelope for applyReceipt operation.
  * `transactionDate` is the invoice TransactionDate from the first lookup API
  * and is used for both ApplicationDate and AccountingDate.
+ * Includes proper XML declaration and validation.
  */
 function buildApplyReceiptXml(customerTrxId, receiptId, amount, transactionDate) {
+  // Validate inputs
+  if (!customerTrxId || !receiptId || !amount || !transactionDate) {
+    throw new Error('Missing required parameters for applyReceipt SOAP call');
+  }
+
+  // Escape special XML characters
+  const escapeXml = (str) => {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  };
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${SOAP_TYPES_NS}">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:applyReceipt>
-      <typ:ReceiptId>${receiptId}</typ:ReceiptId>
-      <typ:CustomerTrxId>${customerTrxId}</typ:CustomerTrxId>
-      <typ:AmountApplied>${amount}</typ:AmountApplied>
-      <typ:ApplicationDate>${transactionDate}</typ:ApplicationDate>
-      <typ:AccountingDate>${transactionDate}</typ:AccountingDate>
+      <typ:ReceiptId>${escapeXml(receiptId)}</typ:ReceiptId>
+      <typ:CustomerTrxId>${escapeXml(customerTrxId)}</typ:CustomerTrxId>
+      <typ:AmountApplied>${escapeXml(amount)}</typ:AmountApplied>
+      <typ:ApplicationDate>${escapeXml(transactionDate)}</typ:ApplicationDate>
+      <typ:AccountingDate>${escapeXml(transactionDate)}</typ:AccountingDate>
     </typ:applyReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
