@@ -461,4 +461,34 @@ class OracleSoapClient {
   }
 }
 
+/**
+ * Factory function to create OracleSoapClient instances with environment configuration
+ */
+function createOracleSoapClient(serviceUrl, wsdlUrl) {
+  const username = process.env.ORACLE_USERNAME;
+  const password = process.env.ORACLE_PASSWORD;
+  const maxRetries = parseInt(process.env.MAX_RETRIES) || 3;
+
+  if (!username || !password) {
+    throw new Error('Oracle credentials not configured. Set ORACLE_USERNAME and ORACLE_PASSWORD in .env');
+  }
+
+  if (!serviceUrl) {
+    throw new Error('Oracle service URL is required');
+  }
+
+  // If WSDL URL not provided, try to construct it from service URL
+  const finalWsdlUrl = wsdlUrl || `${serviceUrl}?WSDL`;
+
+  return new OracleSoapClient({
+    wsdlUrl: finalWsdlUrl,
+    serviceUrl,
+    username,
+    password,
+    maxRetries,
+    requestTimeout: 30000,
+  });
+}
+
 module.exports = OracleSoapClient;
+module.exports.createOracleSoapClient = createOracleSoapClient;
