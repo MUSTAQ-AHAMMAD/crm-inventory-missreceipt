@@ -302,9 +302,6 @@ describe('Misc Receipt Controller', () => {
       };
 
       const generateSoapEnvelope = (row) => {
-        const receiptMethodIdTag = row.ReceiptMethodId
-          ? `        <com:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</com:ReceiptMethodId>\n`
-          : '';
         const receiptMethodNameTag = row.ReceiptMethodName
           ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
           : '';
@@ -313,7 +310,7 @@ describe('Misc Receipt Controller', () => {
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/" xmlns:com="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/">
   <soapenv:Header/>
   <soapenv:Body>
-    <com:createMiscellaneousReceipt>
+    <typ:createMiscellaneousReceipt>
       <com:MiscellaneousReceipt>
         <com:Amount>${escapeXml(row.Amount)}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
@@ -321,11 +318,11 @@ describe('Misc Receipt Controller', () => {
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
         <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
         <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
-${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
+${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
         <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
         <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
       </com:MiscellaneousReceipt>
-    </com:createMiscellaneousReceipt>
+    </typ:createMiscellaneousReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
       };
@@ -346,7 +343,7 @@ ${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>
 
       expect(xml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
       expect(xml).toContain('<soapenv:Envelope');
-      expect(xml).toContain('<com:createMiscellaneousReceipt>');
+      expect(xml).toContain('<typ:createMiscellaneousReceipt>');
       expect(xml).toContain('<com:Amount>-100.00</com:Amount>');
       expect(xml).toContain('<com:CurrencyCode>SAR</com:CurrencyCode>');
       expect(xml).toContain('<com:ReceiptNumber>REC001</com:ReceiptNumber>');
@@ -382,9 +379,6 @@ ${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>
       };
 
       const generateSoapEnvelope = (row) => {
-        const receiptMethodIdTag = row.ReceiptMethodId
-          ? `        <com:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</com:ReceiptMethodId>\n`
-          : '';
         const receiptMethodNameTag = row.ReceiptMethodName
           ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
           : '';
@@ -393,7 +387,7 @@ ${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/" xmlns:com="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/">
   <soapenv:Header/>
   <soapenv:Body>
-    <com:createMiscellaneousReceipt>
+    <typ:createMiscellaneousReceipt>
       <com:MiscellaneousReceipt>
         <com:Amount>${escapeXml(row.Amount)}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
@@ -401,11 +395,11 @@ ${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
         <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
         <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
-${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
+${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
         <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
         <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
       </com:MiscellaneousReceipt>
-    </com:createMiscellaneousReceipt>
+    </typ:createMiscellaneousReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
       };
@@ -417,7 +411,6 @@ ${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>
         ReceiptDate: '2024-01-20',
         DepositDate: '2024-01-20',
         GlDate: '2024-01-20',
-        ReceiptMethodId: '12345',
         ReceiptMethodName: 'Credit Card',
         ReceivableActivityName: 'Misc Activity',
         BankAccountNumber: '123456789',
@@ -426,7 +419,6 @@ ${receiptMethodIdTag}${receiptMethodNameTag}        <com:ReceivableActivityName>
 
       const xml = generateSoapEnvelope(rowWithReceiptMethod);
 
-      expect(xml).toContain('<com:ReceiptMethodId>12345</com:ReceiptMethodId>');
       expect(xml).toContain(
         '<com:ReceiptMethodName>Credit Card</com:ReceiptMethodName>'
       );

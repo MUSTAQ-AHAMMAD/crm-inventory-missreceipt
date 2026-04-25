@@ -11,19 +11,12 @@ Endpoint: https://ehxk.fa.em2.oraclecloud.com/fscmService/MiscellaneousReceiptSe
 ```
 
 ## Root Cause
-The SOAP XML request was using the incorrect namespace prefix for the method element. The code was generating:
+The SOAP XML request had two issues:
 
-```xml
-<soapenv:Body>
-  <typ:createMiscellaneousReceipt>
-    <typ:miscellaneousReceipt>
-      <!-- receipt data -->
-    </typ:miscellaneousReceipt>
-  </typ:createMiscellaneousReceipt>
-</soapenv:Body>
-```
+1. **Incorrect namespace prefix**: Using `com:` instead of `typ:` for the operation element
+2. **Incorrect casing**: Using lowercase `miscellaneousReceipt` instead of PascalCase `MiscellaneousReceipt` for the wrapper element
 
-However, Oracle's MiscellaneousReceiptService expects the method to use the **common service namespace** (`com:`) instead of the types namespace (`typ:`):
+The code was initially generating:
 
 ```xml
 <soapenv:Body>
@@ -35,21 +28,32 @@ However, Oracle's MiscellaneousReceiptService expects the method to use the **co
 </soapenv:Body>
 ```
 
+However, Oracle's MiscellaneousReceiptService expects:
+
+```xml
+<soapenv:Body>
+  <typ:createMiscellaneousReceipt>
+    <com:MiscellaneousReceipt>
+      <!-- receipt data -->
+    </com:MiscellaneousReceipt>
+  </typ:createMiscellaneousReceipt>
+</soapenv:Body>
+```
+
 ## Why This Matters
 Oracle Fusion's SOAP services are strict about namespace usage:
-- The **types namespace** (`typ:`) is used for operation parameters and request/response structures
-- The **common/service namespace** (`com:`) is used for the actual SOAP operation method itself
+- The **types namespace** (`typ:`) is used for SOAP operation definitions (method signatures)
+- The **common/service namespace** (`com:`) is used for data structures and parameters
+- Type/class names must use **PascalCase** following Java naming conventions
 
-Using the wrong namespace causes Oracle's SOA layer to fail to dispatch the method, resulting in the "Unknown method" SOAP fault with HTTP 500 status.
-
-This pattern is consistent with other Oracle SOAP services in the codebase. For example, in `applyReceiptController.js`, the `applyReceipt` method correctly uses the `typ:` namespace because that service's structure differs from the MiscellaneousReceiptService.
+Using the wrong namespace or casing causes Oracle's SOA layer to fail to dispatch the method, resulting in the "Unknown method" SOAP fault with HTTP 500 status.
 
 ## Solution
-Updated `backend/src/controllers/miscReceiptController.js` to use the correct namespace prefix:
+Updated `backend/src/controllers/miscReceiptController.js` to use the correct namespace prefix and casing:
 
 **Changed:**
-- Method element: `<typ:createMiscellaneousReceipt>` → `<com:createMiscellaneousReceipt>`
-- Wrapper element: `<typ:miscellaneousReceipt>` → `<com:miscellaneousReceipt>`
+- Operation element: `<com:createMiscellaneousReceipt>` → `<typ:createMiscellaneousReceipt>`
+- Wrapper element: `<com:miscellaneousReceipt>` → `<com:MiscellaneousReceipt>`
 
 **Namespaces remain unchanged:**
 ```javascript
@@ -68,8 +72,8 @@ const MISC_COMMON_NS = 'http://xmlns.oracle.com/apps/financials/receivables/rece
   xmlns:com="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/">
   <soapenv:Header/>
   <soapenv:Body>
-    <com:createMiscellaneousReceipt>
-      <com:miscellaneousReceipt>
+    <typ:createMiscellaneousReceipt>
+      <com:MiscellaneousReceipt>
         <com:Amount>-100.00</com:Amount>
         <com:CurrencyCode>SAR</com:CurrencyCode>
         <com:ReceiptNumber>REC001</com:ReceiptNumber>
@@ -79,17 +83,17 @@ const MISC_COMMON_NS = 'http://xmlns.oracle.com/apps/financials/receivables/rece
         <com:ReceivableActivityName>Misc Activity</com:ReceivableActivityName>
         <com:BankAccountNumber>123456789</com:BankAccountNumber>
         <com:OrgId>101</com:OrgId>
-      </com:miscellaneousReceipt>
-    </com:createMiscellaneousReceipt>
+      </com:MiscellaneousReceipt>
+    </typ:createMiscellaneousReceipt>
   </soapenv:Body>
 </soapenv:Envelope>
 ```
 
 ### Key Points:
-1. **Method element** uses `com:` namespace: `<com:createMiscellaneousReceipt>`
-2. **Wrapper element** uses `com:` namespace: `<com:miscellaneousReceipt>`
-3. **Data elements** use `com:` namespace: `<com:Amount>`, `<com:CurrencyCode>`, etc.
-4. Both `typ` and `com` namespaces are declared in the envelope but only `com` is actively used in the body
+1. **Operation element** uses `typ:` namespace: `<typ:createMiscellaneousReceipt>`
+2. **Wrapper element** uses `com:` namespace with PascalCase: `<com:MiscellaneousReceipt>`
+3. **Data elements** use `com:` namespace with PascalCase: `<com:Amount>`, `<com:CurrencyCode>`, etc.
+4. Both `typ` and `com` namespaces are declared and used appropriately per Oracle Fusion standards
 
 ## Testing
 All tests passed after the fix:
@@ -97,6 +101,12 @@ All tests passed after the fix:
 Test Suites: 1 passed, 1 total
 Tests:       17 passed, 17 total
 ```
+
+## Related Fixes
+This document has been updated to reflect the final correct implementation. The fix involved multiple iterations:
+1. **SOAP_NAMESPACE_FIX.md** - Corrected operation namespace from `com:` to `typ:`
+2. **SOAP_PASCALCASE_FIX.md** - Corrected wrapper element from `miscellaneousReceipt` to `MiscellaneousReceipt`
+3. Both fixes were necessary to achieve full Oracle Fusion SOAP compliance
 
 Updated test expectations in `backend/src/__tests__/miscReceipt.test.js` to reflect the corrected SOAP structure.
 
