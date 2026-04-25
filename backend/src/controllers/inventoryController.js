@@ -12,6 +12,54 @@ const { csvEscape } = require('../utils/csv');
 const VALIDATION_ERROR_PREFIX = 'Validation: ';
 const MISSING_BARCODE_ERROR = 'Empty item number (barcode)';
 
+// Maximum allowed size for rawData field (1MB to prevent database bloat)
+const MAX_RAW_DATA_SIZE = 1024 * 1024;
+
+/**
+ * Sanitizes and validates a string before storing it in the database.
+ * Prevents database corruption from invalid UTF-8, oversized data, or null bytes.
+ * @param {string} data - The data to sanitize
+ * @param {number} maxLength - Maximum allowed length (default: 1MB)
+ * @returns {string} Sanitized data safe for database storage
+ */
+function sanitizeForDatabase(data, maxLength = MAX_RAW_DATA_SIZE) {
+  if (!data) return '';
+
+  // Convert to string if not already
+  let sanitized = String(data);
+
+  // Remove null bytes which can corrupt SQLite
+  sanitized = sanitized.replace(/\0/g, '');
+
+  // Remove other problematic control characters except newlines, tabs, and carriage returns
+  sanitized = sanitized.replace(/[\x01-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, '');
+
+  // Truncate if exceeds max length
+  if (sanitized.length > maxLength) {
+    console.warn(`[Data Sanitization] Truncating data from ${sanitized.length} to ${maxLength} bytes`);
+    sanitized = sanitized.substring(0, maxLength);
+    // Ensure we didn't cut in the middle of a multi-byte UTF-8 sequence
+    try {
+      // Try to encode/decode to validate UTF-8
+      Buffer.from(sanitized, 'utf8').toString('utf8');
+    } catch (err) {
+      // If invalid, truncate further to be safe
+      sanitized = sanitized.substring(0, maxLength - 10);
+    }
+  }
+
+  // Final validation: ensure it's valid UTF-8
+  try {
+    const buffer = Buffer.from(sanitized, 'utf8');
+    sanitized = buffer.toString('utf8');
+  } catch (err) {
+    console.error('[Data Sanitization] Invalid UTF-8 detected, replacing with safe string');
+    sanitized = '[Invalid UTF-8 data removed]';
+  }
+
+  return sanitized;
+}
+
 // Required CSV column names mapped to Oracle REST API fields
 // OrganizationName is now provided via a form field, not the CSV
 const REQUIRED_FIELDS = [
@@ -430,12 +478,60 @@ async function processUploadRows(upload, records, organizationName) {
   /** Flush accumulated success/failure records to the database. */
   async function flushRecords() {
     if (pendingSuccesses.length > 0) {
-      await prisma.inventorySuccessRecord.createMany({ data: pendingSuccesses });
-      pendingSuccesses = [];
+      try {
+        await prisma.inventorySuccessRecord.createMany({ data: pendingSuccesses });
+        pendingSuccesses = [];
+      } catch (error) {
+        console.error(
+          `[Inventory] Upload #${upload.id} ERROR: Failed to save ${pendingSuccesses.length} success records: ${error.message}`
+        );
+        // Try saving records one by one to identify which record is problematic
+        const failedRecords = [];
+        for (const record of pendingSuccesses) {
+          try {
+            await prisma.inventorySuccessRecord.create({ data: record });
+          } catch (individualError) {
+            console.error(
+              `[Inventory] Upload #${upload.id} ERROR: Failed to save success record for row ${record.rowNumber}: ${individualError.message}`
+            );
+            failedRecords.push(record.rowNumber);
+          }
+        }
+        pendingSuccesses = [];
+        if (failedRecords.length > 0) {
+          console.error(
+            `[Inventory] Upload #${upload.id} WARNING: Could not save success records for rows: ${failedRecords.join(', ')}`
+          );
+        }
+      }
     }
     if (pendingFailures.length > 0) {
-      await prisma.inventoryFailureRecord.createMany({ data: pendingFailures });
-      pendingFailures = [];
+      try {
+        await prisma.inventoryFailureRecord.createMany({ data: pendingFailures });
+        pendingFailures = [];
+      } catch (error) {
+        console.error(
+          `[Inventory] Upload #${upload.id} ERROR: Failed to save ${pendingFailures.length} failure records: ${error.message}`
+        );
+        // Try saving records one by one to identify which record is problematic
+        const failedRecords = [];
+        for (const record of pendingFailures) {
+          try {
+            await prisma.inventoryFailureRecord.create({ data: record });
+          } catch (individualError) {
+            console.error(
+              `[Inventory] Upload #${upload.id} ERROR: Failed to save failure record for row ${record.rowNumber}: ${individualError.message}`
+            );
+            failedRecords.push(record.rowNumber);
+          }
+        }
+        pendingFailures = [];
+        if (failedRecords.length > 0) {
+          console.error(
+            `[Inventory] Upload #${upload.id} WARNING: Could not save failure records for rows: ${failedRecords.join(', ')}`
+          );
+        }
+      }
     }
   }
 
@@ -539,8 +635,8 @@ async function processUploadRows(upload, records, organizationName) {
         pendingSuccesses.push({
           uploadId: upload.id,
           rowNumber: result.rowNumber,
-          rawData: result.rawData,
-          responseBody: result.responseBody || null,
+          rawData: sanitizeForDatabase(result.rawData),
+          responseBody: sanitizeForDatabase(result.responseBody, 50000) || null,
           responseStatus: result.responseStatus ?? null,
         });
         seenPayloads.add(result.rawData);
@@ -556,9 +652,9 @@ async function processUploadRows(upload, records, organizationName) {
         pendingFailures.push({
           uploadId: upload.id,
           rowNumber: result.rowNumber,
-          rawData: result.rawData,
-          errorMessage: result.error,
-          responseBody: result.responseBody || null,
+          rawData: sanitizeForDatabase(result.rawData),
+          errorMessage: sanitizeForDatabase(result.error, 10000),
+          responseBody: sanitizeForDatabase(result.responseBody, 50000) || null,
           responseStatus: result.responseStatus ?? null,
           oracleErrorCode: result.oracleErrorCode || null,
           oracleProcessStatus: result.oracleProcessStatus || null,
@@ -872,8 +968,8 @@ async function retryUpload(req, res, next) {
             data: {
               uploadId,
               rowNumber: result.failure.rowNumber,
-              rawData: result.failure.rawData,
-              responseBody: result.responseBody || null,
+              rawData: sanitizeForDatabase(result.failure.rawData),
+              responseBody: sanitizeForDatabase(result.responseBody, 50000) || null,
               responseStatus: result.responseStatus ?? null,
             },
           });
@@ -890,8 +986,8 @@ async function retryUpload(req, res, next) {
           await prisma.inventoryFailureRecord.update({
             where: { id: result.failure.id },
             data: {
-              errorMessage: result.errMsg,
-              responseBody: result.responseBody || null,
+              errorMessage: sanitizeForDatabase(result.errMsg, 10000),
+              responseBody: sanitizeForDatabase(result.responseBody, 50000) || null,
               responseStatus: result.responseStatus ?? null,
               oracleErrorCode: result.oracleErrorCode || null,
               oracleProcessStatus: result.oracleProcessStatus || null,
