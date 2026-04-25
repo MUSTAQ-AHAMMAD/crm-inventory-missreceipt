@@ -401,17 +401,25 @@ async function processUploadRows(upload, records, organizationName) {
 
   // Preload previously successful payloads for this user + organization to
   // avoid re-processing rows that already succeeded in earlier uploads.
-  const previousSuccesses = await prisma.inventorySuccessRecord.findMany({
-    where: {
-      upload: {
-        userId: upload.userId,
-        organizationName,
+  try {
+    const previousSuccesses = await prisma.inventorySuccessRecord.findMany({
+      where: {
+        upload: {
+          userId: upload.userId,
+          organizationName,
+        },
       },
-    },
-    select: { rawData: true },
-  });
-  for (const { rawData } of previousSuccesses) {
-    seenPayloads.add(rawData);
+      select: { rawData: true },
+    });
+    for (const { rawData } of previousSuccesses) {
+      seenPayloads.add(rawData);
+    }
+  } catch (error) {
+    console.error(
+      `[Inventory] Upload #${upload.id} WARNING: Could not load previous success records: ${error.message}. Proceeding without deduplication cache.`
+    );
+    // Continue processing without deduplication - this may result in some duplicate
+    // API calls but ensures the upload can complete even if there's database corruption
   }
 
   // Oracle API configuration from environment variables
@@ -757,17 +765,24 @@ async function retryUpload(req, res, next) {
     // Avoid retrying rows that already succeeded in any upload for this user/org
     const seenPayloads = new Set();
     const uploadOrg = upload.organizationName;
-    const previousSuccesses = await prisma.inventorySuccessRecord.findMany({
-      where: {
-        upload: {
-          userId: upload.userId,
-          organizationName: uploadOrg,
+    try {
+      const previousSuccesses = await prisma.inventorySuccessRecord.findMany({
+        where: {
+          upload: {
+            userId: upload.userId,
+            organizationName: uploadOrg,
+          },
         },
-      },
-      select: { rawData: true },
-    });
-    for (const { rawData } of previousSuccesses) {
-      seenPayloads.add(rawData);
+        select: { rawData: true },
+      });
+      for (const { rawData } of previousSuccesses) {
+        seenPayloads.add(rawData);
+      }
+    } catch (error) {
+      console.error(
+        `[Inventory] Upload #${upload.id} retry: WARNING: Could not load previous success records: ${error.message}. Proceeding without deduplication cache.`
+      );
+      // Continue processing without deduplication cache
     }
 
     let retrySuccess = 0;
