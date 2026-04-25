@@ -7,6 +7,8 @@
  * - Extracting correct SOAPAction headers
  * - Implementing retry logic with exponential backoff
  * - Providing comprehensive error handling
+ * - Detailed request/response logging for debugging
+ * - Production-ready error recovery
  */
 
 const axios = require('axios');
@@ -23,11 +25,15 @@ class OracleSoapClient {
     this.retryMinTimeout = config.retryMinTimeout || 1000;
     this.retryMaxTimeout = config.retryMaxTimeout || 10000;
     this.requestTimeout = config.requestTimeout || 30000;
+    this.debugMode = config.debugMode || process.env.SOAP_DEBUG === 'true';
 
     // Cache for WSDL data
     this.wsdlCache = null;
     this.namespaces = {};
     this.operations = {};
+
+    // Request counter for logging
+    this.requestCounter = 0;
 
     // XML parser configuration
     this.xmlParser = new XMLParser({
@@ -46,6 +52,28 @@ class OracleSoapClient {
       format: true,
       suppressEmptyNode: true,
     });
+  }
+
+  /**
+   * Logs debug information if debug mode is enabled
+   */
+  debugLog(message, data) {
+    if (this.debugMode) {
+      console.log(`[OracleSoapClient DEBUG] ${message}`);
+      if (data) {
+        console.log(JSON.stringify(data, null, 2));
+      }
+    }
+  }
+
+  /**
+   * Safely truncates XML for logging
+   */
+  truncateXml(xml, maxLength = 1000) {
+    if (!xml) return '';
+    const str = typeof xml === 'string' ? xml : String(xml);
+    if (str.length <= maxLength) return str;
+    return str.substring(0, maxLength) + `... [truncated ${str.length - maxLength} chars]`;
   }
 
   /**
@@ -394,58 +422,138 @@ class OracleSoapClient {
    * Calls a SOAP operation with custom XML envelope (for backward compatibility)
    */
   async callWithCustomEnvelope(soapXml, soapAction) {
-    console.log(`[OracleSoapClient] Calling with custom envelope`);
-    console.log(`[OracleSoapClient] SOAPAction: ${soapAction}`);
-    console.log(`[OracleSoapClient] Endpoint: ${this.serviceUrl}`);
+    this.requestCounter++;
+    const requestId = `REQ-${Date.now()}-${this.requestCounter}`;
+
+    console.log(`[OracleSoapClient] ${requestId} Starting SOAP call`);
+    console.log(`[OracleSoapClient] ${requestId} SOAPAction: ${soapAction || '(none)'}`);
+    console.log(`[OracleSoapClient] ${requestId} Endpoint: ${this.serviceUrl}`);
+
+    // Validate inputs
+    if (!soapXml || typeof soapXml !== 'string') {
+      throw new Error('Invalid SOAP XML: must be a non-empty string');
+    }
+
+    if (!this.serviceUrl) {
+      throw new Error('Service URL is not configured');
+    }
+
+    // Log request XML in debug mode
+    this.debugLog(`${requestId} Request XML:`, this.truncateXml(soapXml));
 
     return pRetry(
       async () => {
-        const response = await axios.post(this.serviceUrl, soapXml, {
-          headers: {
+        const startTime = Date.now();
+
+        try {
+          // Build authentication header
+          const authHeader = `Basic ${Buffer.from(`${this.username}:${this.password}`).toString('base64')}`;
+
+          const headers = {
             'Content-Type': 'text/xml; charset=utf-8',
             'Accept': 'text/xml, application/xml, multipart/related',
             'SOAPAction': soapAction ? `"${soapAction}"` : '""',
-            'Authorization': `Basic ${Buffer.from(`${this.username}:${this.password}`).toString('base64')}`,
-          },
-          timeout: this.requestTimeout,
-          validateStatus: () => true,
-          responseType: 'text',
-          transformResponse: [(data) => data],
-        });
+            'Authorization': authHeader,
+            'Content-Length': Buffer.byteLength(soapXml, 'utf-8'),
+          };
 
-        const contentType = response.headers['content-type'] || '';
-        const xmlResponse = this.parseMtomResponse(response.data, contentType);
-        const fault = this.extractSoapFault(xmlResponse);
+          this.debugLog(`${requestId} Request Headers:`, headers);
 
-        if (response.status >= 500) {
-          console.error(`[OracleSoapClient] HTTP ${response.status} error:`, xmlResponse.substring(0, 500));
+          const response = await axios.post(this.serviceUrl, soapXml, {
+            headers,
+            timeout: this.requestTimeout,
+            validateStatus: () => true,
+            responseType: 'text',
+            transformResponse: [(data) => data],
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+          });
 
-          const errorMessage = fault ? fault.message : `HTTP ${response.status} error`;
+          const elapsed = Date.now() - startTime;
+          console.log(`[OracleSoapClient] ${requestId} Response received in ${elapsed}ms - HTTP ${response.status}`);
 
-          if (fault && /InvalidSecurity|FailedAuthentication|InvalidCredentials|invalid credentials/i.test(fault.message)) {
+          // Log response headers in debug mode
+          this.debugLog(`${requestId} Response Headers:`, response.headers);
+
+          const contentType = response.headers['content-type'] || '';
+          const xmlResponse = this.parseMtomResponse(response.data, contentType);
+
+          // Log response XML in debug mode
+          this.debugLog(`${requestId} Response XML:`, this.truncateXml(xmlResponse));
+
+          const fault = this.extractSoapFault(xmlResponse);
+
+          // Check for HTTP errors (5xx)
+          if (response.status >= 500) {
+            console.error(`[OracleSoapClient] ${requestId} HTTP ${response.status} error:`, this.truncateXml(xmlResponse, 500));
+
+            const errorMessage = fault ? fault.message : `HTTP ${response.status} error`;
+
+            // Check for non-retryable errors
+            if (fault && /InvalidSecurity|FailedAuthentication|InvalidCredentials|invalid credentials|unauthorized/i.test(fault.message)) {
+              console.error(`[OracleSoapClient] ${requestId} Authentication failed - not retrying`);
+              throw new pRetry.AbortError(new Error(`Authentication failed: ${errorMessage}`));
+            }
+
+            throw new Error(errorMessage);
+          }
+
+          // Check for client errors (4xx)
+          if (response.status >= 400) {
+            console.error(`[OracleSoapClient] ${requestId} HTTP ${response.status} client error:`, this.truncateXml(xmlResponse, 500));
+            const errorMessage = fault ? fault.message : `HTTP ${response.status} client error`;
+            // 4xx errors are typically not retryable
             throw new pRetry.AbortError(new Error(errorMessage));
           }
 
-          throw new Error(errorMessage);
-        }
+          // Check for SOAP faults
+          if (fault) {
+            console.error(`[OracleSoapClient] ${requestId} SOAP Fault detected:`, fault);
 
-        if (fault) {
-          console.error(`[OracleSoapClient] SOAP Fault:`, fault);
+            // Check if fault is retryable (transient errors)
+            if (/timeout|temporarily unavailable|service unavailable|too many requests|rate limit/i.test(fault.message)) {
+              console.warn(`[OracleSoapClient] ${requestId} Transient error detected - will retry`);
+              throw new Error(fault.message);
+            }
 
-          if (/timeout|temporarily unavailable|service unavailable/i.test(fault.message)) {
-            throw new Error(fault.message);
+            // Non-retryable SOAP fault (business logic errors, validation errors, etc.)
+            console.error(`[OracleSoapClient] ${requestId} Non-retryable SOAP fault - aborting`);
+            throw new pRetry.AbortError(new Error(fault.message));
           }
 
-          throw new pRetry.AbortError(new Error(fault.message));
-        }
+          // Success response
+          console.log(`[OracleSoapClient] ${requestId} ✅ Success - HTTP ${response.status} in ${elapsed}ms`);
 
-        return {
-          success: true,
-          status: response.status,
-          statusText: response.statusText,
-          data: xmlResponse,
-          parsed: this.xmlParser.parse(xmlResponse),
-        };
+          return {
+            success: true,
+            status: response.status,
+            statusText: response.statusText,
+            data: xmlResponse,
+            parsed: this.xmlParser.parse(xmlResponse),
+            requestId,
+            elapsed,
+          };
+
+        } catch (error) {
+          // Handle axios errors
+          if (error.code === 'ECONNABORTED') {
+            console.error(`[OracleSoapClient] ${requestId} Request timeout after ${this.requestTimeout}ms`);
+            throw new Error(`Request timeout after ${this.requestTimeout}ms`);
+          }
+
+          if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+            console.error(`[OracleSoapClient] ${requestId} Network error: ${error.code}`);
+            throw new Error(`Network error: Cannot reach ${this.serviceUrl}`);
+          }
+
+          // Re-throw if it's already a pRetry.AbortError
+          if (error instanceof pRetry.AbortError) {
+            throw error;
+          }
+
+          // Re-throw other errors for retry
+          throw error;
+        }
       },
       {
         retries: this.maxRetries,
@@ -453,8 +561,13 @@ class OracleSoapClient {
         maxTimeout: this.retryMaxTimeout,
         onFailedAttempt: (error) => {
           console.warn(
-            `[OracleSoapClient] Retry ${error.attemptNumber}/${this.maxRetries}: ${error.message}`
+            `[OracleSoapClient] ${requestId} Retry ${error.attemptNumber}/${this.maxRetries + 1}: ${error.message}`
           );
+          if (error.attemptNumber < this.maxRetries + 1) {
+            console.log(`[OracleSoapClient] ${requestId} Waiting before retry...`);
+          } else {
+            console.error(`[OracleSoapClient] ${requestId} All retries exhausted`);
+          }
         },
       }
     );
