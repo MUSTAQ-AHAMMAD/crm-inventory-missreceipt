@@ -24,9 +24,10 @@ const REQUIRED_FIELDS = [
 const TEMPLATE_FIELDS = [...REQUIRED_FIELDS];
 
 // SOAP namespaces - MATCHES WSDL EXACTLY
-const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
-const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/';
+const SOAP_ENV_NS    = 'http://schemas.xmlsoap.org/soap/envelope/';
+const SOAP_TYPES_NS  = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/types/';
 const SOAP_COMMON_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
+const SOAP_MIS_NS    = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/model/flex/MiscellaneousReceiptDff/';
 const REQUIRED_CURRENCY = 'SAR';
 
 const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 3;
@@ -106,18 +107,16 @@ function validateCsv(records) {
 }
 
 /**
- * Generates SOAP envelope WITHOUT WS-Security (using simple Basic Auth)
- * Ensures proper XML declaration and namespace declarations
+ * Generates SOAP envelope matching the correct WSDL structure
+ * Uses typ: namespace for the operation/wrapper and com: namespace for all fields
  */
 function generateSoapEnvelope(row) {
-  const receiptMethodNameTag = row.ReceiptMethodName
-    ? `      <typ:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</typ:ReceiptMethodName>\n`
-    : '';
-
   // Validate all required fields are present
-  const requiredFields = ['Amount', 'CurrencyCode', 'ReceiptNumber', 'ReceiptDate',
-                          'DepositDate', 'GlDate', 'ReceivableActivityName',
-                          'BankAccountNumber', 'OrgId'];
+  const requiredFields = [
+    'Amount', 'CurrencyCode', 'ReceiptNumber', 'ReceiptDate',
+    'DepositDate', 'GlDate', 'ReceivableActivityName',
+    'BankAccountNumber', 'OrgId',
+  ];
 
   for (const field of requiredFields) {
     if (row[field] === undefined || row[field] === null || row[field] === '') {
@@ -125,20 +124,29 @@ function generateSoapEnvelope(row) {
     }
   }
 
+  const receiptMethodNameTag = row.ReceiptMethodName
+    ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
+    : '';
+
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${SOAP_TYPES_NS}">
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
+  xmlns:typ="${SOAP_TYPES_NS}"
+  xmlns:com="${SOAP_COMMON_NS}"
+  xmlns:mis="${SOAP_MIS_NS}">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:createMiscellaneousReceipt>
-      <typ:Amount>${escapeXml(row.Amount)}</typ:Amount>
-      <typ:CurrencyCode>${escapeXml(row.CurrencyCode)}</typ:CurrencyCode>
-      <typ:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</typ:ReceiptNumber>
-      <typ:ReceiptDate>${escapeXml(row.ReceiptDate)}</typ:ReceiptDate>
-      <typ:DepositDate>${escapeXml(row.DepositDate)}</typ:DepositDate>
-      <typ:GlDate>${escapeXml(row.GlDate)}</typ:GlDate>
-${receiptMethodNameTag}      <typ:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</typ:ReceivableActivityName>
-      <typ:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</typ:BankAccountNumber>
-      <typ:OrgId>${escapeXml(row.OrgId)}</typ:OrgId>
+      <typ:miscellaneousReceipt>
+        <com:Amount>${escapeXml(row.Amount)}</com:Amount>
+        <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
+        <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
+        <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
+        <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
+        <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
+${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
+        <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
+        <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
+      </typ:miscellaneousReceipt>
     </typ:createMiscellaneousReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
@@ -270,7 +278,7 @@ async function upload(req, res, next) {
 
         try {
           console.log(`\n📤 Processing Row ${rowNumber}: ${row.ReceiptNumber}`);
-          
+
           const result = await sendSoapRequest(soapXml, row.ReceiptNumber);
 
           successCount++;
@@ -281,7 +289,7 @@ async function upload(req, res, next) {
         } catch (error) {
           failureCount++;
           const errorMessage = error.message || 'Unknown error';
-          
+
           failures.push({
             uploadId: uploadRecord.id,
             rowNumber,
@@ -455,5 +463,5 @@ module.exports = {
   listUploads,
   getUpload,
   getUploadProgress,
-  downloadTemplate
+  downloadTemplate,
 };
