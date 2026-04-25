@@ -25,6 +25,7 @@ const TEMPLATE_FIELDS = [...REQUIRED_FIELDS];
 
 // SOAP namespaces - MATCHES WSDL EXACTLY
 const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
+const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/';
 const SOAP_COMMON_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
 const REQUIRED_CURRENCY = 'SAR';
 
@@ -113,7 +114,7 @@ function generateSoapEnvelope(row) {
     : '';
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:com="${SOAP_COMMON_NS}">
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${SOAP_TYPES_NS}" xmlns:com="${SOAP_COMMON_NS}">
   <soapenv:Header/>
   <soapenv:Body>
     <com:createMiscellaneousReceipt>
