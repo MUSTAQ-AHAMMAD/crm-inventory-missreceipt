@@ -150,8 +150,9 @@ async function sendSoapRequest(soapXml, receiptNumber) {
     // Create SOAP client with automatic WSDL discovery
     const soapClient = createOracleSoapClient(endpoint);
 
-    // Use SOAPAction for createMiscellaneousReceipt operation
-    const SOAP_ACTION = 'createMiscellaneousReceipt';
+    // Use empty SOAPAction for document/literal style (Oracle Fusion requirement)
+    // Oracle Fusion SOAP services with document/literal binding style require empty SOAPAction
+    const SOAP_ACTION = '';
 
     const response = await soapClient.callWithCustomEnvelope(soapXml, SOAP_ACTION);
 
