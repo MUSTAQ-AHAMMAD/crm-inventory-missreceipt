@@ -56,6 +56,41 @@ function extractSoapFaultMessage(text) {
 }
 
 /**
+ * Normalizes date from Oracle API to YYYY-MM-DD format.
+ * Oracle REST APIs return dates in ISO 8601 format (e.g., "2025-05-02T00:00:00.000+00:00"),
+ * but SOAP APIs require just the date part in YYYY-MM-DD format.
+ */
+function normalizeOracleDate(dateValue) {
+  if (!dateValue) return null;
+
+  const dateString = String(dateValue).trim();
+  if (!dateString) return null;
+
+  // If already in YYYY-MM-DD format, return as-is
+  const isoDateMatch = dateString.match(/^(\d{4}-\d{2}-\d{2})$/);
+  if (isoDateMatch) return isoDateMatch[1];
+
+  // Extract date from ISO 8601 timestamp (e.g., "2025-05-02T00:00:00.000+00:00")
+  const isoTimestampMatch = dateString.match(/^(\d{4}-\d{2}-\d{2})[T\s]/);
+  if (isoTimestampMatch) return isoTimestampMatch[1];
+
+  // Try parsing as JavaScript Date and formatting
+  try {
+    const date = new Date(dateString);
+    if (!isNaN(date.getTime())) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+  } catch (e) {
+    // Fall through to return null
+  }
+
+  return null;
+}
+
+/**
  * Validates CSV structure - must have InvoiceNumber and at least one ReceiptNumber column
  */
 function validateCsv(records) {
@@ -134,9 +169,15 @@ async function lookupInvoice(invoiceNumber, oracleAuth) {
     throw new Error(`Invoice '${invoiceNumber}' not found in Oracle`);
   }
 
+  // Normalize TransactionDate from ISO 8601 timestamp to YYYY-MM-DD format
+  const rawTransactionDate = items[0].TransactionDate;
+  const normalizedDate = normalizeOracleDate(rawTransactionDate);
+
+  console.log(`[ApplyReceipt] Invoice ${invoiceNumber} TransactionDate: ${rawTransactionDate} -> ${normalizedDate}`);
+
   return {
     customerTrxId: String(items[0].CustomerTransactionId),
-    transactionDate: items[0].TransactionDate ? String(items[0].TransactionDate) : null,
+    transactionDate: normalizedDate,
     data: items[0],
   };
 }
@@ -221,7 +262,7 @@ async function applyReceiptSoap(customerTrxId, receiptId, amount, transactionDat
 
   try {
     console.log(`[ApplyReceipt] Sending SOAP request to ${url}`);
-    console.log(`[ApplyReceipt] CustomerTrxId: ${customerTrxId}, ReceiptId: ${receiptId}, Amount: ${amount}`);
+    console.log(`[ApplyReceipt] CustomerTrxId: ${customerTrxId}, ReceiptId: ${receiptId}, Amount: ${amount}, TransactionDate: ${transactionDate}`);
 
     // Create SOAP client with automatic authentication and error handling
     const soapClient = createOracleSoapClient(url);
