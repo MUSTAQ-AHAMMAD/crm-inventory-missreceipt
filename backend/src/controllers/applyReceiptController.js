@@ -285,7 +285,7 @@ async function applyReceiptSoap(customerTrxId, receiptId, amount, transactionDat
 }
 
 /**
- * Preview endpoint - parses CSV and shows what would be sent
+ * Preview endpoint - parses CSV and shows what would be sent (with placeholders)
  */
 async function previewPayload(req, res, next) {
   try {
@@ -332,6 +332,156 @@ async function previewPayload(req, res, next) {
       totalRows: records.length,
       totalApplications: previews.length,
       previews
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * Verify endpoint - parses CSV, looks up all IDs, and builds actual SOAP payloads for verification
+ * This allows the user to review the exact payloads before sending to SOAP API
+ */
+async function verifyPayload(req, res, next) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'CSV file is required.' });
+    }
+
+    // Validate environment configuration
+    const requiredEnvVars = [
+      'ORACLE_RECEIVABLES_INVOICES_API_URL',
+      'ORACLE_STANDARD_RECEIPTS_LOOKUP_API_URL',
+      'ORACLE_APPLY_RECEIPT_SOAP_URL',
+    ];
+    const missing = requiredEnvVars.filter(v => !process.env[v]);
+    if (missing.length > 0) {
+      return res.status(500).json({
+        error: `Missing required environment variables: ${missing.join(', ')}`
+      });
+    }
+
+    const records = parse(req.file.buffer, {
+      columns: true,
+      skip_empty_lines: true,
+      trim: true,
+      bom: true,
+    });
+
+    if (records.length === 0) {
+      return res.status(400).json({ error: 'CSV file is empty.' });
+    }
+
+    const validationError = validateCsv(records);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    const normalizedRecords = records.map(normalizeRow);
+    const oracleAuth = Buffer.from(
+      `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
+    ).toString('base64');
+
+    const verifiedPayloads = [];
+    const errors = [];
+    const limit = pLimit(CONCURRENT_REQUESTS);
+
+    // Process all rows with parallel processing to build payloads
+    const processingPromises = normalizedRecords.map((row, rowIndex) => {
+      return limit(async () => {
+        const rowNumber = rowIndex + 2;
+        const { invoiceNumber, receiptNumbers } = row;
+
+        // Step 1: Look up invoice to get CustomerTrxId
+        let customerTrxId = null;
+        let transactionDate = null;
+        try {
+          const invoiceResult = await pRetry(
+            async () => lookupInvoice(invoiceNumber, oracleAuth),
+            {
+              retries: MAX_RETRIES,
+              minTimeout: RETRY_MIN_TIMEOUT,
+              maxTimeout: RETRY_MAX_TIMEOUT,
+            }
+          );
+          customerTrxId = invoiceResult.customerTrxId;
+          transactionDate = invoiceResult.transactionDate;
+        } catch (invoiceErr) {
+          // Invoice lookup failed - all receipts for this row fail
+          const errorMsg = invoiceErr.message || 'Invoice lookup failed';
+          for (const receiptNum of receiptNumbers) {
+            errors.push({
+              rowNumber,
+              invoiceNumber,
+              receiptNumber: receiptNum,
+              error: errorMsg,
+              step: 'INVOICE_LOOKUP',
+            });
+          }
+          return; // Skip receipt processing for this row
+        }
+
+        // Step 2: For each receipt, look it up and build SOAP payload
+        for (const receiptNum of receiptNumbers) {
+          try {
+            // Look up receipt details
+            const receiptResult = await pRetry(
+              async () => lookupReceipt(receiptNum, oracleAuth),
+              {
+                retries: MAX_RETRIES,
+                minTimeout: RETRY_MIN_TIMEOUT,
+                maxTimeout: RETRY_MAX_TIMEOUT,
+              }
+            );
+
+            const receiptId = receiptResult.receiptId;
+            const amount = receiptResult.amount;
+            const receiptDate = receiptResult.receiptDate;
+            const applicationDate = transactionDate || receiptDate;
+
+            // Build the actual SOAP payload
+            const soapPayload = buildApplyReceiptXml(
+              customerTrxId,
+              receiptId,
+              amount,
+              applicationDate
+            );
+
+            verifiedPayloads.push({
+              rowNumber,
+              invoiceNumber,
+              receiptNumber: receiptNum,
+              customerTrxId,
+              receiptId,
+              amount,
+              applicationDate,
+              soapPayload,
+            });
+          } catch (err) {
+            // Receipt lookup failed
+            const errorMsg = err.message || 'Receipt lookup failed';
+            errors.push({
+              rowNumber,
+              invoiceNumber,
+              receiptNumber: receiptNum,
+              error: errorMsg,
+              step: 'RECEIPT_LOOKUP',
+            });
+          }
+        }
+      });
+    });
+
+    // Wait for all processing to complete
+    await Promise.all(processingPromises);
+
+    return res.json({
+      totalRows: records.length,
+      totalApplications: normalizedRecords.reduce((sum, r) => sum + r.receiptNumbers.length, 0),
+      verifiedPayloadsCount: verifiedPayloads.length,
+      errorsCount: errors.length,
+      verifiedPayloads,
+      errors,
     });
   } catch (err) {
     next(err);
@@ -748,6 +898,7 @@ function downloadTemplate(_req, res) {
 
 module.exports = {
   previewPayload,
+  verifyPayload,
   upload,
   listUploads,
   getUpload,
