@@ -22,11 +22,13 @@ const MAX_RETRIES = parseInt(process.env.MAX_RETRIES) || 3;
 const RETRY_MIN_TIMEOUT = 1000; // 1 second
 const RETRY_MAX_TIMEOUT = 10000; // 10 seconds
 
-// SOAP namespaces for StandardReceiptService.
-// Fixed namespace - removed the extra 'standardReceipts/' segment that was causing "Unknown method" errors
-const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
-const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/standardReceiptService/types/';
-const SOAP_ACTION = 'applyReceipt';
+// SOAP namespaces for StandardReceiptService - createApplyReceipt operation
+const SOAP_ENV_NS   = 'http://schemas.xmlsoap.org/soap/envelope/';
+const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/types/';
+const SOAP_COM_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/';
+const SOAP_APP_NS   = 'http://xmlns.oracle.com/apps/flex/financials/receivables/receipts/shared/standardReceiptService/commonService/ApplyReceiptDff/';
+
+const SOAP_ACTION        = 'createApplyReceipt';
 const SOAP_ACTION_HEADER = `"${SOAP_ACTION}"`;
 
 function asText(data) {
@@ -213,7 +215,17 @@ async function lookupReceipt(receiptNumber, oracleAuth) {
 }
 
 /**
- * Builds SOAP XML envelope for applyReceipt operation.
+ * Builds SOAP XML envelope for the createApplyReceipt operation.
+ *
+ * Correct envelope structure (per Oracle WSDL):
+ *   typ:createApplyReceipt
+ *     └─ typ:applyReceipt          <- wrapper element
+ *          ├─ com:AmountApplied
+ *          ├─ com:ReceiptId
+ *          ├─ com:CustomerTrxId
+ *          ├─ com:ApplicationDate
+ *          └─ com:AccountingDate
+ *
  * `transactionDate` is the invoice TransactionDate from the first lookup API
  * and is used for both ApplicationDate and AccountingDate.
  * Includes proper XML declaration and validation.
@@ -221,7 +233,7 @@ async function lookupReceipt(receiptNumber, oracleAuth) {
 function buildApplyReceiptXml(customerTrxId, receiptId, amount, transactionDate) {
   // Validate inputs
   if (!customerTrxId || !receiptId || !amount || !transactionDate) {
-    throw new Error('Missing required parameters for applyReceipt SOAP call');
+    throw new Error('Missing required parameters for createApplyReceipt SOAP call');
   }
 
   // Escape special XML characters
@@ -235,16 +247,22 @@ function buildApplyReceiptXml(customerTrxId, receiptId, amount, transactionDate)
   };
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}" xmlns:typ="${SOAP_TYPES_NS}">
+<soapenv:Envelope
+  xmlns:soapenv="${SOAP_ENV_NS}"
+  xmlns:typ="${SOAP_TYPES_NS}"
+  xmlns:com="${SOAP_COM_NS}"
+  xmlns:app="${SOAP_APP_NS}">
   <soapenv:Header/>
   <soapenv:Body>
-    <typ:applyReceipt>
-      <typ:ReceiptId>${escapeXml(receiptId)}</typ:ReceiptId>
-      <typ:CustomerTrxId>${escapeXml(customerTrxId)}</typ:CustomerTrxId>
-      <typ:AmountApplied>${escapeXml(amount)}</typ:AmountApplied>
-      <typ:ApplicationDate>${escapeXml(transactionDate)}</typ:ApplicationDate>
-      <typ:AccountingDate>${escapeXml(transactionDate)}</typ:AccountingDate>
-    </typ:applyReceipt>
+    <typ:createApplyReceipt>
+      <typ:applyReceipt>
+        <com:AmountApplied>${escapeXml(amount)}</com:AmountApplied>
+        <com:ReceiptId>${escapeXml(receiptId)}</com:ReceiptId>
+        <com:CustomerTrxId>${escapeXml(customerTrxId)}</com:CustomerTrxId>
+        <com:ApplicationDate>${escapeXml(transactionDate)}</com:ApplicationDate>
+        <com:AccountingDate>${escapeXml(transactionDate)}</com:AccountingDate>
+      </typ:applyReceipt>
+    </typ:createApplyReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
 }
