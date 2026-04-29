@@ -8,19 +8,21 @@ const pLimit = require('p-limit');
 const prisma = require('../services/prisma');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
-// Required CSV columns
+// Required CSV columns (OrgId is required in CSV but value is ignored - static value used instead)
 const REQUIRED_FIELDS = [
   'Amount',
   'CurrencyCode',
   'DepositDate',
   'ReceiptDate',
   'GlDate',
+  'OrgId',
   'ReceiptNumber',
   'ReceivableActivityName',
   'BankAccountNumber',
 ];
 
 // Static OrgId value to avoid scientific notation issues from CSV
+// The OrgId from CSV is ignored and this static value is always used
 const STATIC_ORG_ID = '300000001421038';
 
 const TEMPLATE_FIELDS = [...REQUIRED_FIELDS];
@@ -477,7 +479,7 @@ async function getUploadProgress(req, res, next) {
  */
 function downloadTemplate(_req, res) {
   const header = TEMPLATE_FIELDS.join(',');
-  const sample = '-100.00,SAR,2024-01-20,2024-01-20,2024-01-20,REC001,Bank Charge,123456789';
+  const sample = '-100.00,SAR,2024-01-20,2024-01-20,2024-01-20,300000001421038,REC001,Bank Charge,123456789';
   const BOM = '\uFEFF';
   const csv = `${BOM}${header}\n${sample}\n`;
 
