@@ -36,7 +36,6 @@ describe('Misc Receipt Controller', () => {
       expect(response.text).toContain('DepositDate');
       expect(response.text).toContain('ReceiptDate');
       expect(response.text).toContain('GlDate');
-      expect(response.text).toContain('OrgId');
       expect(response.text).toContain('ReceiptNumber');
       expect(response.text).toContain('ReceivableActivityName');
       expect(response.text).toContain('BankAccountNumber');

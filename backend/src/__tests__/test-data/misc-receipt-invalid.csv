@@ -1,4 +1,4 @@
-Amount,CurrencyCode,DepositDate,ReceiptDate,GlDate,OrgId,ReceiptNumber,ReceivableActivityName,BankAccountNumber
-,SAR,2024-01-20,2024-01-20,2024-01-20,101,REC004,Misc Activity,123456789
--250.50,SAR,invalid-date,2024-01-21,2024-01-21,101,REC005,Misc Activity,123456789
-abc,SAR,2024-01-21,2024-01-21,2024-01-21,102,REC006,Refund Activity,987654321
+Amount,CurrencyCode,DepositDate,ReceiptDate,GlDate,ReceiptNumber,ReceivableActivityName,BankAccountNumber
+,SAR,2024-01-20,2024-01-20,2024-01-20,REC004,Misc Activity,123456789
+-250.50,SAR,invalid-date,2024-01-21,2024-01-21,REC005,Misc Activity,123456789
+abc,SAR,2024-01-21,2024-01-21,2024-01-21,REC006,Refund Activity,987654321
