@@ -55,19 +55,19 @@ function normalizeDate(raw, fieldName) {
 
   // Check if it's already in YYYY-MM-DD format
   const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (isoMatch) return `${isoMatch[1]}/${isoMatch[2]}/${isoMatch[3]}`;
+  if (isoMatch) return value;
 
   // Check if it's in DD-MM-YYYY format
   const dmyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (dmyMatch) return `${dmyMatch[3]}/${dmyMatch[2]}/${dmyMatch[1]}`;
+  if (dmyMatch) return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
 
   // Check if it's in YYYY/MM/DD format (with forward slashes)
   const isoSlashMatch = value.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
-  if (isoSlashMatch) return value;
+  if (isoSlashMatch) return `${isoSlashMatch[1]}-${isoSlashMatch[2]}-${isoSlashMatch[3]}`;
 
   // Check if it's in DD/MM/YYYY format (with forward slashes)
   const dmySlashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (dmySlashMatch) return `${dmySlashMatch[3]}/${dmySlashMatch[2]}/${dmySlashMatch[1]}`;
+  if (dmySlashMatch) return `${dmySlashMatch[3]}-${dmySlashMatch[2]}-${dmySlashMatch[1]}`;
 
   // Check if it's an Excel serial number (numeric value without separators)
   const isNumeric = /^\d+(\.\d+)?$/.test(value);
@@ -89,7 +89,7 @@ function normalizeDate(raw, fieldName) {
     const monthStr = String(month).padStart(2, '0');
     const dayStr = String(day).padStart(2, '0');
 
-    return `${yearStr}/${monthStr}/${dayStr}`;
+    return `${yearStr}-${monthStr}-${dayStr}`;
   }
 
   throw new Error(`${fieldName} must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or DD/MM/YYYY format, or an Excel serial number`);
@@ -505,7 +505,7 @@ async function getUploadProgress(req, res, next) {
 function downloadTemplate(_req, res) {
   const header = TEMPLATE_FIELDS.join(',');
   const sample =
-    'Visa-BLK-ALAR-00000008,Visa,2026/03/05,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026/03/05';
+    'Visa-BLK-ALAR-00000008,Visa,2026-03-05,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03-05';
   // Add UTF-8 BOM (Byte Order Mark) to ensure proper encoding of Arabic and other Unicode characters
   const BOM = '\uFEFF';
   const csv = `${BOM}${header}\n${sample}\n`;
