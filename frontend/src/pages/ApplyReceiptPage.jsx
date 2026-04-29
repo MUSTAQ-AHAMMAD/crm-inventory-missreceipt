@@ -13,7 +13,7 @@ import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 
 const REQUIRED_COLUMNS = ['InvoiceNumber']
-const RECEIPT_COLUMNS = ['ReceiptNumber1', 'ReceiptNumber2', 'ReceiptNumber3', 'ReceiptNumber4']
+// Receipt columns are dynamically detected - users can have unlimited ReceiptNumber1, ReceiptNumber2, etc.
 
 export default function ApplyReceiptPage() {
   const queryClient = useQueryClient()
@@ -166,12 +166,14 @@ export default function ApplyReceiptPage() {
           </div>
           <p className="text-sm font-medium text-indigo-700 mb-2">Receipt Number Columns (at least one required):</p>
           <div className="flex flex-wrap gap-2">
-            {RECEIPT_COLUMNS.map((col) => (
-              <span key={col} className="px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded text-xs font-mono">{col}</span>
-            ))}
+            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded text-xs font-mono">ReceiptNumber1</span>
+            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded text-xs font-mono">ReceiptNumber2</span>
+            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded text-xs font-mono">ReceiptNumber3</span>
+            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded text-xs font-mono">...</span>
+            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded text-xs font-mono">ReceiptNumberN</span>
           </div>
           <p className="text-xs text-indigo-700 mt-2">
-            Each row must have an InvoiceNumber and at least one ReceiptNumber. You can apply up to 4 receipts per invoice.
+            Each row must have an InvoiceNumber and at least one ReceiptNumber. You can have unlimited receipt columns (ReceiptNumber1, ReceiptNumber2, ... ReceiptNumberN).
           </p>
         </div>
 
