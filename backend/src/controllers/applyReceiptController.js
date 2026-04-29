@@ -11,10 +11,10 @@ const pRetry = require('p-retry');
 const prisma = require('../services/prisma');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
-// CSV column names - InvoiceNumber plus up to 4 receipt numbers
+// CSV column names - InvoiceNumber plus any number of receipt columns
 const REQUIRED_FIELDS = ['InvoiceNumber'];
-const RECEIPT_FIELDS = ['ReceiptNumber1', 'ReceiptNumber2', 'ReceiptNumber3', 'ReceiptNumber4'];
-const ALL_FIELDS = [...REQUIRED_FIELDS, ...RECEIPT_FIELDS];
+// Note: RECEIPT_FIELDS will be dynamically detected from CSV headers
+// Users can have ReceiptNumber1, ReceiptNumber2, ... ReceiptNumberN (unlimited)
 
 // Configuration for parallel processing and retries
 const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 5;
@@ -93,6 +93,20 @@ function normalizeOracleDate(dateValue) {
 }
 
 /**
+ * Extracts receipt number fields from CSV headers.
+ * Dynamically detects all columns matching the pattern ReceiptNumber*
+ */
+function getReceiptFields(headers) {
+  return headers
+    .filter(h => h.match(/^ReceiptNumber\d+$/))
+    .sort((a, b) => {
+      const numA = parseInt(a.replace('ReceiptNumber', ''));
+      const numB = parseInt(b.replace('ReceiptNumber', ''));
+      return numA - numB;
+    });
+}
+
+/**
  * Validates CSV structure - must have InvoiceNumber and at least one ReceiptNumber column
  */
 function validateCsv(records) {
@@ -107,10 +121,12 @@ function validateCsv(records) {
     return 'CSV is missing required column: InvoiceNumber';
   }
 
+  // Dynamically detect all ReceiptNumber columns
+  const receiptFields = getReceiptFields(headers);
+
   // Check that at least one receipt number column exists
-  const hasReceiptColumn = RECEIPT_FIELDS.some(field => headers.includes(field));
-  if (!hasReceiptColumn) {
-    return `CSV must have at least one receipt number column (${RECEIPT_FIELDS.join(', ')})`;
+  if (receiptFields.length === 0) {
+    return 'CSV must have at least one receipt number column (ReceiptNumber1, ReceiptNumber2, etc.)';
   }
 
   // Validate each row has invoice number
@@ -122,7 +138,7 @@ function validateCsv(records) {
     }
 
     // Check that at least one receipt number is provided
-    const hasReceipt = RECEIPT_FIELDS.some(field => {
+    const hasReceipt = receiptFields.some(field => {
       const val = String(row[field] ?? '').trim();
       return val !== '';
     });
@@ -137,10 +153,14 @@ function validateCsv(records) {
 
 /**
  * Normalizes a single CSV row - extracts invoice and receipt numbers
+ * Dynamically detects all ReceiptNumber columns
  */
 function normalizeRow(row) {
+  const headers = Object.keys(row).map(h => h.trim());
+  const receiptFields = getReceiptFields(headers);
+
   const invoiceNumber = String(row.InvoiceNumber ?? '').trim();
-  const receiptNumbers = RECEIPT_FIELDS
+  const receiptNumbers = receiptFields
     .map(field => String(row[field] ?? '').trim())
     .filter(val => val !== '');
 
@@ -899,11 +919,13 @@ async function getUploadProgress(req, res, next) {
 
 /**
  * Download CSV template
+ * Generates template with InvoiceNumber and 6 receipt columns as examples
  */
 function downloadTemplate(_req, res) {
-  const header = ALL_FIELDS.join(',');
-  const sample = 'BLK-ALAR-00000008,mada-12244,visa-12244,mastercard-12244,amex-12244';
-  const sample2 = 'BLK-ALAR-00000009,mada-12245,,,';
+  // Generate dynamic header with InvoiceNumber + ReceiptNumber1-6 as example
+  const header = ['InvoiceNumber', 'ReceiptNumber1', 'ReceiptNumber2', 'ReceiptNumber3', 'ReceiptNumber4', 'ReceiptNumber5', 'ReceiptNumber6'].join(',');
+  const sample = 'BLK-ALAR-00000008,mada-12244,visa-12244,mastercard-12244,amex-12244,apple-12244,google-12244';
+  const sample2 = 'BLK-ALAR-00000009,mada-12245,,,,,';
 
   // Add UTF-8 BOM for proper encoding
   const BOM = '\uFEFF';
