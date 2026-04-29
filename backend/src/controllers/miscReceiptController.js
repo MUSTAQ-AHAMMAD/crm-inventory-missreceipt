@@ -8,7 +8,7 @@ const pLimit = require('p-limit');
 const prisma = require('../services/prisma');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
-// Required CSV columns
+// Required CSV columns (OrgId is required in CSV but value is ignored - static value used instead)
 const REQUIRED_FIELDS = [
   'Amount',
   'CurrencyCode',
@@ -20,6 +20,10 @@ const REQUIRED_FIELDS = [
   'ReceivableActivityName',
   'BankAccountNumber',
 ];
+
+// Static OrgId value to avoid scientific notation issues from CSV
+// The OrgId from CSV is ignored and this static value is always used
+const STATIC_ORG_ID = '300000001421038';
 
 const TEMPLATE_FIELDS = [...REQUIRED_FIELDS];
 
@@ -55,19 +59,46 @@ function normalizeDate(raw, fieldName) {
   const value = String(raw ?? '').trim();
   if (!value) throw new Error(`${fieldName} is required`);
 
+  // Check if it's already in YYYY-MM-DD format
   const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (isoMatch) return value;
+  if (isoMatch) return `${isoMatch[1]}/${isoMatch[2]}/${isoMatch[3]}`;
 
+  // Check if it's in DD-MM-YYYY format
   const dmyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (dmyMatch) return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
+  if (dmyMatch) return `${dmyMatch[3]}/${dmyMatch[2]}/${dmyMatch[1]}`;
 
+  // Check if it's in YYYY/MM/DD format (with forward slashes)
   const isoSlashMatch = value.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
-  if (isoSlashMatch) return `${isoSlashMatch[1]}-${isoSlashMatch[2]}-${isoSlashMatch[3]}`;
+  if (isoSlashMatch) return value;
 
+  // Check if it's in DD/MM/YYYY format (with forward slashes)
   const dmySlashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (dmySlashMatch) return `${dmySlashMatch[3]}-${dmySlashMatch[2]}-${dmySlashMatch[1]}`;
+  if (dmySlashMatch) return `${dmySlashMatch[3]}/${dmySlashMatch[2]}/${dmySlashMatch[1]}`;
 
-  throw new Error(`${fieldName} must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or DD/MM/YYYY format`);
+  // Check if it's an Excel serial number (numeric value without separators)
+  const isNumeric = /^\d+(\.\d+)?$/.test(value);
+  if (isNumeric) {
+    const excelSerialNumber = parseFloat(value);
+
+    // Excel serial number: days since 1900-01-01 (with 1900 leap year bug)
+    // Excel incorrectly treats 1900 as a leap year, so dates after Feb 28, 1900 are off by 1
+    // Excel serial 1 = 1900-01-01, Serial 60 = 1900-02-29 (doesn't exist), Serial 61 = 1900-03-01
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30)); // Dec 30, 1899
+    const adjustedSerial = excelSerialNumber > 60 ? excelSerialNumber - 1 : excelSerialNumber;
+    const dateFromSerial = new Date(excelEpoch.getTime() + adjustedSerial * 24 * 60 * 60 * 1000);
+
+    const year = dateFromSerial.getUTCFullYear();
+    const month = dateFromSerial.getUTCMonth() + 1;
+    const day = dateFromSerial.getUTCDate();
+
+    const yearStr = String(year).padStart(4, '0');
+    const monthStr = String(month).padStart(2, '0');
+    const dayStr = String(day).padStart(2, '0');
+
+    return `${yearStr}/${monthStr}/${dayStr}`;
+  }
+
+  throw new Error(`${fieldName} must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or DD/MM/YYYY format, or an Excel serial number`);
 }
 
 function normalizeRow(row) {
@@ -81,7 +112,7 @@ function normalizeRow(row) {
     ReceiptMethodName: row.ReceiptMethodName ? String(row.ReceiptMethodName).trim() : undefined,
     ReceivableActivityName: String(row.ReceivableActivityName ?? '').trim(),
     BankAccountNumber: String(row.BankAccountNumber ?? '').trim(),
-    OrgId: String(row.OrgId ?? '').trim(),
+    OrgId: STATIC_ORG_ID,
   };
 }
 
@@ -448,7 +479,7 @@ async function getUploadProgress(req, res, next) {
  */
 function downloadTemplate(_req, res) {
   const header = TEMPLATE_FIELDS.join(',');
-  const sample = '-100.00,SAR,2024-01-20,2024-01-20,2024-01-20,101,REC001,Bank Charge,123456789';
+  const sample = '-100.00,SAR,2024-01-20,2024-01-20,2024-01-20,300000001421038,REC001,Bank Charge,123456789';
   const BOM = '\uFEFF';
   const csv = `${BOM}${header}\n${sample}\n`;
 
