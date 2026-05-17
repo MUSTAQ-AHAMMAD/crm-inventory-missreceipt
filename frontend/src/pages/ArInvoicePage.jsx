@@ -4,9 +4,9 @@
  * Displays the request payload and Oracle API response.
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import api from '../hooks/useApi'
 import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
@@ -50,10 +50,20 @@ const SAMPLE_PAYLOAD = {
 
 export default function ArInvoicePage() {
   const queryClient = useQueryClient()
+  const location = useLocation()
   const [payload, setPayload] = useState(JSON.stringify(SAMPLE_PAYLOAD, null, 2))
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
+
+  // Check if a payload was passed from AR Invoice Data page
+  useEffect(() => {
+    if (location.state?.prefilledPayload) {
+      setPayload(JSON.stringify(location.state.prefilledPayload, null, 2))
+      // Clear the state so it doesn't persist on refresh
+      window.history.replaceState({}, document.title)
+    }
+  }, [location.state])
 
   const { data: uploadsData, isLoading } = useQuery({
     queryKey: ['arInvoiceUploads'],
