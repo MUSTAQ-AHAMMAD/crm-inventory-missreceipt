@@ -15,6 +15,8 @@ const {
   createInvoice,
   listUploads,
   getUpload,
+  getMetadata,
+  listMetadata,
 } = require('../controllers/arInvoiceController');
 
 const router = express.Router();
@@ -115,5 +117,51 @@ router.get('/uploads', listUploads);
  *         description: Upload not found
  */
 router.get('/uploads/:id', getUpload);
+
+/**
+ * @swagger
+ * /ar-invoice/metadata:
+ *   get:
+ *     tags: [ARInvoice]
+ *     summary: Get sales header metadata for a customer and subinventory
+ *     parameters:
+ *       - in: query
+ *         name: customerName
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: subinventory
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Metadata and AR invoice header mapping
+ *       404:
+ *         description: No metadata found
+ */
+router.get('/metadata', getMetadata);
+
+/**
+ * @swagger
+ * /ar-invoice/metadata/list:
+ *   get:
+ *     tags: [ARInvoice]
+ *     summary: List all available sales metadata (paginated)
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Paginated list of metadata records
+ */
+router.get('/metadata/list', listMetadata);
 
 module.exports = router;

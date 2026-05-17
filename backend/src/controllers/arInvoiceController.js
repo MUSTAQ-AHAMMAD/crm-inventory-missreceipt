@@ -5,14 +5,40 @@
 
 const axios = require('axios');
 const prisma = require('../services/prisma');
+const fusionMetadataService = require('../services/fusionSalesMetadataService');
 
 /**
  * POST /api/ar-invoice/create
  * Creates an AR Invoice in Oracle Fusion and stores the response in the database
+ *
+ * This endpoint accepts the following scenarios:
+ * 1. Full payload with all required fields (traditional mode)
+ * 2. Minimal payload with customerName and subinventory - will auto-populate sales header from FusionSalesMetadata
  */
 async function createInvoice(req, res, next) {
   try {
-    const payload = req.body;
+    let payload = req.body;
+
+    // Auto-populate sales header from metadata if customerName and subinventory are provided
+    if (payload.customerName && payload.subinventory) {
+      console.log(`[AR Invoice] Looking up metadata for customer="${payload.customerName}", subinventory="${payload.subinventory}"`);
+
+      const headerData = await fusionMetadataService.getArInvoiceHeaderMapping(
+        payload.customerName,
+        payload.subinventory
+      );
+
+      if (Object.keys(headerData).length > 0) {
+        // Merge metadata into payload (existing fields take precedence)
+        payload = {
+          ...headerData,
+          ...payload,
+        };
+        console.log('[AR Invoice] Sales header populated from metadata');
+      } else {
+        console.warn('[AR Invoice] No metadata found, proceeding with provided data');
+      }
+    }
 
     // Validate required fields in the payload
     if (!payload.BusinessUnit || !payload.TransactionSource || !payload.TransactionType) {
@@ -226,8 +252,60 @@ async function getUpload(req, res, next) {
   }
 }
 
+/**
+ * GET /api/ar-invoice/metadata
+ * Retrieves sales header metadata for a given customer and subinventory
+ */
+async function getMetadata(req, res, next) {
+  try {
+    const { customerName, subinventory } = req.query;
+
+    if (!customerName || !subinventory) {
+      return res.status(400).json({
+        error: 'Missing required query parameters: customerName, subinventory'
+      });
+    }
+
+    const metadata = await fusionMetadataService.findBySalesHeader(customerName, subinventory);
+
+    if (!metadata) {
+      return res.status(404).json({
+        error: 'No metadata found for the given customer and subinventory'
+      });
+    }
+
+    const headerMapping = fusionMetadataService.mapToArInvoiceHeader(metadata);
+
+    return res.json({
+      metadata,
+      headerMapping,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/ar-invoice/metadata/list
+ * Lists all available sales metadata (paginated)
+ */
+async function listMetadata(req, res, next) {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 50);
+
+    const result = await fusionMetadataService.getAllMetadata({ page, limit });
+
+    return res.json(result);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   createInvoice,
   listUploads,
   getUpload,
+  getMetadata,
+  listMetadata,
 };
