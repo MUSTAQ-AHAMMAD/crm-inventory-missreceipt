@@ -202,3 +202,27 @@ model ActivityLog {
   ipAddress     String?
   createdAt     DateTime @default(now())
 }
+
+// Fusion Sales Metadata - lookup table for mapping sales data to AR invoices
+// Contains customer, business unit, and transaction source information
+model FusionSalesMetadata {
+  id                   Int     @id @default(autoincrement())
+  rowId                Int     @unique
+  billToName           String
+  billToAccount        Int
+  siteNumber           String
+  businessUnit         String
+  txnSource            String
+  txnType              String
+  rateIsCorporate      String
+  recActivityNameBank  String
+  subinventory         String
+  integrationSource    String
+  distributionAccId    String?
+  recActivityNameCash  String
+  region               String
+  customerType         String
+  costCenterCode       String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
