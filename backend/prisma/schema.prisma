@@ -30,6 +30,7 @@ model User {
   standardReceiptUploads StandardReceiptUpload[]
   applyReceiptUploads ApplyReceiptUpload[]
   arInvoiceUploads   ArInvoiceUpload[]
+  arInvoiceData      ArInvoiceData[]
   activityLogs       ActivityLog[]
 }
 
@@ -225,4 +226,48 @@ model FusionSalesMetadata {
   costCenterCode       String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
+}
+
+// AR Invoice Data - stores individual AR invoice line items for bulk operations
+// Can be populated via CSV upload or manual entry, then used to generate Oracle payloads
+model ArInvoiceData {
+  id                      Int      @id @default(autoincrement())
+
+  // Header information
+  customerName            String
+  customerNumber          String
+  siteNumber              String
+  subinventory            String?
+  businessUnit            String
+  transactionSource       String
+  transactionType         String
+  transactionDate         String   // YYYY-MM-DD format
+  accountingDate          String   // YYYY-MM-DD format
+  paymentTerms            String
+  invoiceCurrencyCode     String
+  crossReference          String?
+  comments                String?
+
+  // Line item information
+  lineNumber              Int
+  itemNumber              String
+  description             String
+  quantity                Float
+  unitSellingPrice        Float
+  taxClassificationCode   String
+  salesOrder              String?
+  memoLine                String?
+
+  // Metadata
+  userId                  Int
+  user                    User     @relation(fields: [userId], references: [id])
+  uploadBatchId           String?  // Group multiple lines from same CSV upload
+  status                  String   @default("PENDING") // PENDING, PROCESSED, FAILED
+  processedAt             DateTime?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([customerName, subinventory])
+  @@index([uploadBatchId])
+  @@index([status])
 }

@@ -1,0 +1,4 @@
+customerName,itemNumber,description,quantity,unitSellingPrice,taxClassificationCode,transactionDate,accountingDate,paymentTerms,invoiceCurrencyCode,customerNumber,siteNumber,subinventory,businessUnit,transactionSource,transactionType,crossReference,comments,lineNumber,salesOrder,memoLine
+Aziz Mall,6281074736314,DOSE COLLECTION-HAPPINESS DOSE ROSE TOBACCO (PINK)/ Each,2,94.79,OUTPUT-GOODS-DOM-15%,2026-05-17,2026-05-17,IMMEDIATE,SAR,13,13,EXBSA,AlQurashi-KSA,Vend,Vend Invoice,REF001,Sample invoice from CSV upload,1,ORDER123,
+Aziz Mall,6281074736315,DOSE COLLECTION-HAPPINESS DOSE ROSE TOBACCO (BLUE)/ Each,3,94.79,OUTPUT-GOODS-DOM-15%,2026-05-17,2026-05-17,IMMEDIATE,SAR,13,13,EXBSA,AlQurashi-KSA,Vend,Vend Invoice,REF001,Sample invoice from CSV upload,2,ORDER123,
+Aziz Mall,6281074736316,Product Sample C,5,120.00,OUTPUT-GOODS-DOM-15%,2026-05-17,2026-05-17,IMMEDIATE,SAR,13,13,EXBSA,AlQurashi-KSA,Vend,Vend Invoice,REF001,Sample invoice from CSV upload,3,ORDER123,

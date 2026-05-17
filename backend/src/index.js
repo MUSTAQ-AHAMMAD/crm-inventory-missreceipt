@@ -6,6 +6,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const fileUpload = require('express-fileupload');
 const rateLimit = require('express-rate-limit');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./swagger');
@@ -17,6 +18,7 @@ const miscReceiptRoutes = require('./routes/miscReceipt');
 const standardReceiptRoutes = require('./routes/standardReceipt');
 const applyReceiptRoutes = require('./routes/applyReceipt');
 const arInvoiceRoutes = require('./routes/arInvoice');
+const arInvoiceDataRoutes = require('./routes/arInvoiceData');
 const adminRoutes = require('./routes/admin');
 const reportsRoutes = require('./routes/reports');
 
@@ -39,6 +41,13 @@ app.use(
 // Parse JSON & URL-encoded bodies (50 MB limit for large CSV uploads)
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// File upload middleware for CSV uploads
+app.use(fileUpload({
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
+  abortOnLimit: true,
+  responseOnLimit: 'File size exceeds the 50MB limit.',
+}));
 
 // Request / response logging
 app.use(requestLogger);
@@ -76,6 +85,7 @@ app.use('/api/misc-receipt', miscReceiptRoutes);
 app.use('/api/standard-receipt', standardReceiptRoutes);
 app.use('/api/apply-receipt', applyReceiptRoutes);
 app.use('/api/ar-invoice', arInvoiceRoutes);
+app.use('/api/ar-invoice-data', arInvoiceDataRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportsRoutes);
 

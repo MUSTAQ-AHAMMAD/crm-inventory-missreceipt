@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { to: '/standard-receipt', label: 'Standard Receipt', icon: '💳' },
   { to: '/apply-receipt', label: 'Apply Receipt', icon: '🔗' },
   { to: '/ar-invoice', label: 'AR Invoice', icon: '📄' },
+  { to: '/ar-invoice-data', label: 'AR Invoice Data', icon: '📋' },
   { to: '/reports', label: 'Reports', icon: '📈' },
   { to: '/failures/0', label: 'Logs & Failures', icon: '⚠️' },
 ]
