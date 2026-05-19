@@ -166,6 +166,9 @@ npx prisma migrate deploy
 # Seed default admin
 node prisma/seed.js
 
+# Seed Fusion Sales Metadata (loads from FUSION_SALES_METADATA_202605180144.sql)
+node prisma/seedFusionMetadata.js
+
 # Start backend (keep this terminal open)
 node src/index.js
 
