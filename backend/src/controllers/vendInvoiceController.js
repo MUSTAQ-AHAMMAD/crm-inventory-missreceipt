@@ -8,6 +8,31 @@ const { v4: uuidv4 } = require('uuid');
 const prisma = require('../services/prisma');
 const fusionMetadataService = require('../services/fusionSalesMetadataService');
 
+function normalizeCellValue(value) {
+  return String(value || '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim();
+}
+
+function normalizeUpper(value) {
+  return normalizeCellValue(value).toUpperCase();
+}
+
+function getFirstNonEmpty(row, keys) {
+  for (const key of keys) {
+    const value = normalizeCellValue(row[key]);
+    if (value) return value;
+  }
+  return '';
+}
+
+function getPaymentType(paymentMethod) {
+  const normalizedMethod = normalizeUpper(paymentMethod);
+  if (normalizedMethod.includes('TABBY')) return 'TABBY';
+  if (normalizedMethod.includes('TAMARA')) return 'TAMARA';
+  return 'NORMAL';
+}
+
 /**
  * Parse Excel file buffer and return array of row objects
  */
@@ -159,38 +184,22 @@ async function uploadVendInvoice(req, res, next) {
     // Build a map of store codes to their available payment types and subinventory info
     // Key insight: Each store can have multiple payment types (NORMAL, TABBY, TAMARA)
     // The Store column in payment lines matches the store code extracted from sales lines
-    const storePaymentMap = {}; // Key: storeCode (from Store column) -> { paymentTypes: Set<string>, subinventory, branch }
+    const storePaymentMap = {}; // Key: storeCode -> { paymentTypes: Set<string>, subinventory, branch }
+    const orderPaymentTypeMap = {}; // Key: orderRef (upper) -> Set<paymentType>
 
     for (const payment of paymentLines) {
-      // Use 'Store' column from payment lines - this matches the store code from sales lines
-      const storeCode = String(payment['Store'] || '').trim().toUpperCase();
-      const subinventoryCode = String(payment['Subinventory code'] || payment['Store'] || '').trim().toUpperCase();
-      const branch = String(payment['Branch'] || '').trim();
-      const paymentMethod = String(payment['Payment Method'] || '').trim().toUpperCase();
+      const orderRef = normalizeUpper(getFirstNonEmpty(payment, ['Order Ref']));
+      const orderStoreCode = normalizeUpper(orderRef.split('/')[0] || '');
+      const storeCode = normalizeUpper(getFirstNonEmpty(payment, ['Store', 'Branch'])) || orderStoreCode;
+      const subinventoryCode = normalizeUpper(getFirstNonEmpty(payment, ['Subinventory code', 'Subinventory', 'Store', 'Branch'])) || orderStoreCode;
+      const branch = getFirstNonEmpty(payment, ['Branch', 'Store']) || orderStoreCode;
+      const paymentMethod = getFirstNonEmpty(payment, ['Payment Method', 'Payments/Payment Method', 'Payments/Method', 'Order Payment/Method', 'Method']);
 
       if (storeCode) {
-        // Determine payment method type (NORMAL, TABBY, TAMARA)
-        // Payment method categorization rules:
-        // - TABBY: Only payment methods containing "TABBY"
-        // - TAMARA: Only payment methods containing "TAMARA"
-        // - NORMAL: Everything else including Cash, Mada, Visa, Master, Bank, Card, etc.
-        let paymentType = 'NORMAL'; // Default for all payment methods
-
-        // Check for TABBY (case-insensitive)
-        if (paymentMethod.includes('TABBY')) {
-          paymentType = 'TABBY';
-        }
-        // Check for TAMARA (case-insensitive)
-        else if (paymentMethod.includes('TAMARA')) {
-          paymentType = 'TAMARA';
-        }
-        // All other payment methods remain as NORMAL:
-        // - Cash, Mada, Visa, Master, Mastercard
-        // - Bank transfers, Credit Card, Debit Card
-        // - Any other payment method not explicitly TABBY or TAMARA
+        const paymentType = getPaymentType(paymentMethod);
 
         // Log payment method categorization for debugging
-        console.log(`[Vend Invoice] Store: ${storeCode}, Payment Method: "${payment['Payment Method']}" → Type: ${paymentType}`);
+        console.log(`[Vend Invoice] Store: ${storeCode}, Payment Method: "${paymentMethod}" → Type: ${paymentType}`);
 
         // Store payment types available for this store
         if (!storePaymentMap[storeCode]) {
@@ -201,6 +210,13 @@ async function uploadVendInvoice(req, res, next) {
           };
         }
         storePaymentMap[storeCode].paymentTypes.add(paymentType);
+
+        if (orderRef) {
+          if (!orderPaymentTypeMap[orderRef]) {
+            orderPaymentTypeMap[orderRef] = new Set();
+          }
+          orderPaymentTypeMap[orderRef].add(paymentType);
+        }
       }
     }
 
@@ -216,8 +232,10 @@ async function uploadVendInvoice(req, res, next) {
         const row = salesLines[i];
 
         // Extract sales order reference (e.g., "AZIZMALL/64181")
-        const salesOrderRef = String(row['Order Lines/Order Ref'] || '').trim();
-        const storeCode = salesOrderRef.split('/')[0].trim().toUpperCase(); // e.g., "AZIZMALL"
+        const salesOrderRef = normalizeCellValue(row['Order Lines/Order Ref']);
+        const salesOrderRefKey = normalizeUpper(salesOrderRef);
+        const storeCode = normalizeUpper(salesOrderRef.split('/')[0]); // e.g., "AZIZMALL"
+        const orderPaymentTypes = orderPaymentTypeMap[salesOrderRefKey];
 
         // Find subinventory code, branch, and available payment types for this store
         let storeData = storePaymentMap[storeCode];
@@ -232,9 +250,9 @@ async function uploadVendInvoice(req, res, next) {
           storeData = {
             subinventoryCode: storeCode,
             branch: '',
-            paymentTypes: new Set(['NORMAL']),
-          };
-          storePaymentMap[storeCode] = storeData;
+              paymentTypes: new Set(orderPaymentTypes && orderPaymentTypes.size > 0 ? Array.from(orderPaymentTypes) : ['NORMAL']),
+            };
+            storePaymentMap[storeCode] = storeData;
         }
 
         const { subinventoryCode, branch, paymentTypes } = storeData;
@@ -250,12 +268,13 @@ async function uploadVendInvoice(req, res, next) {
 
         // Try to extract payment method from sales line (if available)
         // Payment method field might be named: "Payment Method", "Order Lines/Payment Method", etc.
-        const linePaymentMethod = String(
+        const linePaymentMethod = normalizeUpper(
           row['Payment Method'] ||
           row['Order Lines/Payment Method'] ||
           row['Payment Type'] ||
+          row['Payments/Payment Method'] ||
           ''
-        ).trim().toUpperCase();
+        );
 
         // Determine which payment type this line belongs to
         // Payment method categorization rules:
@@ -265,32 +284,21 @@ async function uploadVendInvoice(req, res, next) {
         let linePaymentType = null;
 
         if (linePaymentMethod) {
-          // Check for TABBY (case-insensitive)
-          if (linePaymentMethod.includes('TABBY')) {
-            linePaymentType = 'TABBY';
-          }
-          // Check for TAMARA (case-insensitive)
-          else if (linePaymentMethod.includes('TAMARA')) {
-            linePaymentType = 'TAMARA';
-          }
-          // All other payment methods map to NORMAL:
-          // - Cash, Mada, Visa, Master, Mastercard
-          // - Bank transfers, Credit Card, Debit Card
-          // - Any other payment method not explicitly TABBY or TAMARA
-          else {
-            linePaymentType = 'NORMAL';
-          }
+          linePaymentType = getPaymentType(linePaymentMethod);
         }
 
         // If line has a specific payment method, only add it to that invoice
-        // Otherwise, add it to all available payment type invoices (for backward compatibility)
-        const targetPaymentTypes = linePaymentType ? [linePaymentType] : Array.from(paymentTypes);
+        // Otherwise, use payment type(s) detected for this order; if unavailable, fallback to store map
+        const targetPaymentTypes = linePaymentType
+          ? [linePaymentType]
+          : (orderPaymentTypes && orderPaymentTypes.size > 0
+            ? Array.from(orderPaymentTypes)
+            : Array.from(paymentTypes));
 
         for (const paymentType of targetPaymentTypes) {
-          // Skip if this payment type is not available for this store
+          // Ensure store-level payment types include detected order-level payment types
           if (!paymentTypes.has(paymentType)) {
-            console.warn(`[Vend Invoice] Skipping line ${i + 2}: payment type ${paymentType} not available for store ${storeCode}`);
-            continue;
+            paymentTypes.add(paymentType);
           }
           // Create key for grouping: one invoice per store per day per payment type
           const groupKey = `${subinventoryCode}_${saleDate}_${paymentType}`;

@@ -6,7 +6,10 @@
 const prisma = require('./prisma');
 
 function normalizeLookupValue(value) {
-  return String(value || '').trim().toUpperCase();
+  return String(value || '')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim()
+    .toUpperCase();
 }
 
 /**
