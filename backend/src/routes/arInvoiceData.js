@@ -10,9 +10,11 @@
  */
 
 const express = require('express');
+const multer = require('multer');
 const { authenticate } = require('../middleware/auth');
 const { activityLogger } = require('../middleware/activityLogger');
 const {
+  previewCsvPayload,
   uploadCsv,
   listRecords,
   listBatches,
@@ -23,8 +25,45 @@ const {
 
 const router = express.Router();
 
+const csvUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only CSV files are accepted.'));
+    }
+  },
+});
+
 // ── Protected routes (JWT auth + activity logging) ──────────────────────
 router.use(authenticate, activityLogger);
+
+/**
+ * @swagger
+ * /ar-invoice-data/preview:
+ *   post:
+ *     tags: [ARInvoiceData]
+ *     summary: Preview AR Invoice payloads from CSV without uploading to database
+ *     description: Parses CSV file and generates invoice payloads grouped by customer/date/reference with constant BusinessUnit, TransactionSource, and TransactionType values
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               file:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Array of invoice payloads that would be generated
+ *       400:
+ *         description: Invalid CSV format or missing required fields
+ */
+router.post('/preview', csvUpload.single('file'), previewCsvPayload);
 
 /**
  * @swagger
@@ -48,7 +87,7 @@ router.use(authenticate, activityLogger);
  *       400:
  *         description: Invalid CSV format or missing required fields
  */
-router.post('/upload', uploadCsv);
+router.post('/upload', csvUpload.single('file'), uploadCsv);
 
 /**
  * @swagger
