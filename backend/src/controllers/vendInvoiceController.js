@@ -156,25 +156,41 @@ async function uploadVendInvoice(req, res, next) {
       return res.status(400).json({ error: 'Sales Lines file is empty or has no valid rows.' });
     }
 
-    // Build a map of Payment Method Details to Subinventory Code and Branch
-    // Payment Lines: Map by "Payment Method Details" to get "Subinventory code" and "Branch"
+    // Build a map of Payment Method Details to Subinventory Code, Branch, and Payment Type
+    // Payment Lines: Map by "Payment Method Details" to get "Subinventory code", "Branch", and "Payment Method"
     const paymentMethodMap = {};
     for (const payment of paymentLines) {
       const paymentMethodDetails = String(payment['Payment Method Details'] || '').trim().toUpperCase();
       const subinventoryCode = String(payment['Subinventory code'] || '').trim();
       const branch = String(payment['Branch'] || '').trim();
+      const paymentMethod = String(payment['Payment Method'] || '').trim().toUpperCase();
+
       if (paymentMethodDetails && subinventoryCode) {
-        paymentMethodMap[paymentMethodDetails] = {
+        // Determine payment method type (NORMAL, TABBY, TAMARA)
+        let paymentType = 'NORMAL'; // Default for cash/bank
+        if (paymentMethod.includes('TABBY')) {
+          paymentType = 'TABBY';
+        } else if (paymentMethod.includes('TAMARA')) {
+          paymentType = 'TAMARA';
+        }
+
+        // Store payment info with payment type
+        if (!paymentMethodMap[paymentMethodDetails]) {
+          paymentMethodMap[paymentMethodDetails] = [];
+        }
+        paymentMethodMap[paymentMethodDetails].push({
           subinventoryCode,
           branch,
-        };
+          paymentType,
+          paymentMethod,
+        });
       }
     }
 
     console.log(`[Vend Invoice] Built payment method map with ${Object.keys(paymentMethodMap).length} entries`);
 
-    // Process sales lines and group by store + date
-    const invoiceGroups = {}; // Key: `${subinventory}_${date}`
+    // Process sales lines and group by store + date + payment type
+    const invoiceGroups = {}; // Key: `${subinventory}_${date}_${paymentType}`
     const errors = [];
 
     for (let i = 0; i < salesLines.length; i++) {
@@ -185,14 +201,13 @@ async function uploadVendInvoice(req, res, next) {
         const salesOrderRef = String(row['Order Lines/Order Ref'] || '').trim();
         const storeCode = salesOrderRef.split('/')[0].toUpperCase(); // e.g., "AZIZMALL"
 
-        // Find subinventory code and branch from payment lines using the store code
+        // Find subinventory code, branch, and payment methods from payment lines using the store code
         // The store code should match "Payment Method Details" in payment lines
-        const paymentData = paymentMethodMap[storeCode];
-        const subinventoryCode = paymentData?.subinventoryCode || storeCode;
-        const branch = paymentData?.branch || '';
+        const paymentDataArray = paymentMethodMap[storeCode];
 
-        if (!paymentData) {
-          console.warn(`[Vend Invoice] No payment data found for store code: ${storeCode}, using store code as fallback`);
+        if (!paymentDataArray || paymentDataArray.length === 0) {
+          console.warn(`[Vend Invoice] No payment data found for store code: ${storeCode}, skipping row ${i + 2}`);
+          continue;
         }
 
         // Extract date from sales lines (using Order Ref/Date column)
@@ -204,68 +219,76 @@ async function uploadVendInvoice(req, res, next) {
         const quantity = parseFloat(row['Order Lines/Base Quantity'] || 0);
         const unitSellingPrice = parseFloat(row['Order Lines/Tax Incl'] || 0);
 
-        // Create key for grouping: one invoice per store per day
-        const groupKey = `${subinventoryCode}_${saleDate}`;
+        // Process this line for each payment method type (NORMAL, TABBY, TAMARA)
+        // This creates 3 separate invoices per store per day
+        for (const paymentData of paymentDataArray) {
+          const { subinventoryCode, branch, paymentType } = paymentData;
 
-        if (!invoiceGroups[groupKey]) {
-          // Get metadata for this branch/subinventory combination
-          let headerData = {};
-          try {
-            // Try to lookup by branch name first
-            if (branch) {
-              headerData = await fusionMetadataService.getArInvoiceHeaderMapping(
-                branch,
-                subinventoryCode
-              );
+          // Create key for grouping: one invoice per store per day per payment type
+          const groupKey = `${subinventoryCode}_${saleDate}_${paymentType}`;
+
+          if (!invoiceGroups[groupKey]) {
+            // Get metadata for this subinventory and payment type combination
+            let headerData = {};
+            let metadata = null;
+            try {
+              // Look up metadata by subinventory and customer type (payment type)
+              metadata = await prisma.fusionSalesMetadata.findFirst({
+                where: {
+                  subinventory: subinventoryCode,
+                  customerType: paymentType,
+                }
+              });
+
+              if (metadata) {
+                headerData = fusionMetadataService.mapToArInvoiceHeader(metadata);
+                console.log(`[Vend Invoice] Found metadata for ${subinventoryCode}/${paymentType}: ${metadata.billToName} (${metadata.billToAccount}/${metadata.siteNumber})`);
+              } else {
+                console.warn(`[Vend Invoice] No metadata found for ${subinventoryCode}/${paymentType}`);
+              }
+            } catch (err) {
+              console.warn(`[Vend Invoice] Could not fetch metadata for ${subinventoryCode}/${paymentType}:`, err.message);
             }
-            // If no data found and branch is different from subinventory, try subinventory
-            if (!headerData.BillToCustomerName && branch !== subinventoryCode) {
-              headerData = await fusionMetadataService.getArInvoiceHeaderMapping(
-                subinventoryCode,
-                subinventoryCode
-              );
-            }
-          } catch (err) {
-            console.warn(`[Vend Invoice] Could not fetch metadata for ${branch || subinventoryCode}/${subinventoryCode}:`, err.message);
+
+            invoiceGroups[groupKey] = {
+              subinventoryCode,
+              date: saleDate,
+              paymentType,
+              // Use metadata or fallback values
+              customerName: headerData.BillToCustomerName || branch || subinventoryCode,
+              customerNumber: headerData.BillToCustomerNumber || '',
+              siteNumber: headerData.BillToSite || '',
+              lines: [],
+            };
           }
 
-          invoiceGroups[groupKey] = {
-            subinventoryCode,
-            date: saleDate,
-            // Use branch from payment lines if available, otherwise use metadata or subinventory
-            customerName: branch || headerData.BillToCustomerName || subinventoryCode,
-            customerNumber: headerData.BillToCustomerNumber || '',
-            siteNumber: headerData.BillToSite || '',
-            lines: [],
-          };
-        }
+          // Add line item to this payment type's invoice
+          const lineNumber = invoiceGroups[groupKey].lines.length + 1;
 
-        // Add line item
-        const lineNumber = invoiceGroups[groupKey].lines.length + 1;
-
-        // If itemNumber is empty, treat it as a MemoLine
-        if (!itemNumber) {
-          invoiceGroups[groupKey].lines.push({
-            LineNumber: lineNumber,
-            ItemNumber: '',
-            Description: description || 'Discount Item',
-            Quantity: quantity,
-            UnitSellingPrice: unitSellingPrice,
-            TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
-            SalesOrder: salesOrderRef,
-            MemoLine: description || 'Discount Item',
-          });
-        } else {
-          invoiceGroups[groupKey].lines.push({
-            LineNumber: lineNumber,
-            ItemNumber: itemNumber,
-            Description: description,
-            Quantity: quantity,
-            UnitSellingPrice: unitSellingPrice,
-            TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
-            SalesOrder: salesOrderRef,
-            MemoLine: null,
-          });
+          // If itemNumber is empty, treat it as a MemoLine
+          if (!itemNumber) {
+            invoiceGroups[groupKey].lines.push({
+              LineNumber: lineNumber,
+              ItemNumber: '',
+              Description: description || 'Discount Item',
+              Quantity: quantity,
+              UnitSellingPrice: unitSellingPrice,
+              TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
+              SalesOrder: salesOrderRef,
+              MemoLine: description || 'Discount Item',
+            });
+          } else {
+            invoiceGroups[groupKey].lines.push({
+              LineNumber: lineNumber,
+              ItemNumber: itemNumber,
+              Description: description,
+              Quantity: quantity,
+              UnitSellingPrice: unitSellingPrice,
+              TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
+              SalesOrder: salesOrderRef,
+              MemoLine: null,
+            });
+          }
         }
       } catch (err) {
         errors.push({ row: i + 2, error: err.message });
@@ -285,6 +308,14 @@ async function uploadVendInvoice(req, res, next) {
     for (const group of Object.values(invoiceGroups)) {
       const crossReference = await getNextCrossReference();
 
+      // Determine payment type label for comments
+      let paymentTypeLabel = 'Cash/Bank';
+      if (group.paymentType === 'TABBY') {
+        paymentTypeLabel = 'Tabby';
+      } else if (group.paymentType === 'TAMARA') {
+        paymentTypeLabel = 'Tamara';
+      }
+
       payloads.push({
         BusinessUnit: 'AlQurashi-KSA',
         TransactionSource: 'Vend',
@@ -297,7 +328,7 @@ async function uploadVendInvoice(req, res, next) {
         PaymentTerms: 'IMMEDIATE',
         InvoiceCurrencyCode: 'SAR',
         CrossReference: String(crossReference),
-        Comments: `Invoice generated from request ID ${crossReference}`,
+        Comments: `${paymentTypeLabel} payment - Invoice generated from request ID ${crossReference}`,
         receivablesInvoiceLines: group.lines,
       });
     }
