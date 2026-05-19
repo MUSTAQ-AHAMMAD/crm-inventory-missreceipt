@@ -158,18 +158,145 @@ async function normalizeRow(row, rowIndex) {
 }
 
 /**
+ * POST /api/ar-invoice-data/preview
+ * Preview AR Invoice payloads from CSV without storing in database
+ * Uses constant values for BusinessUnit, TransactionSource, and TransactionType
+ */
+async function previewCsvPayload(req, res, next) {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded. Please attach a CSV file.' });
+    }
+
+    const csvText = req.file.buffer.toString('utf-8');
+    const filename = req.file.originalname || 'unknown.csv';
+
+    console.log(`\n[AR Invoice Data Preview] Processing CSV: ${filename}`);
+
+    // Parse CSV
+    let records;
+    try {
+      records = parse(csvText, {
+        columns: true,
+        skip_empty_lines: true,
+        trim: true,
+        relax_quotes: true,
+        relax_column_count: true,
+        bom: true,
+      });
+    } catch (parseError) {
+      return res.status(400).json({
+        error: 'Failed to parse CSV file. Please ensure it is properly formatted.',
+        details: parseError.message,
+      });
+    }
+
+    if (!records || records.length === 0) {
+      return res.status(400).json({ error: 'CSV file is empty or has no valid rows.' });
+    }
+
+    // Validate CSV structure
+    const validationError = validateCsv(records);
+    if (validationError) {
+      return res.status(400).json({ error: validationError });
+    }
+
+    console.log(`[AR Invoice Data Preview] Parsed ${records.length} records from CSV`);
+
+    // Normalize and validate all rows
+    const normalizedRecords = [];
+    const errors = [];
+
+    for (let i = 0; i < records.length; i++) {
+      try {
+        const normalized = await normalizeRow(records[i], i);
+        // Override with constant values
+        normalized.businessUnit = 'AlQurashi-KSA';
+        normalized.transactionSource = 'Vend';
+        normalized.transactionType = 'Vend Invoice';
+        normalizedRecords.push(normalized);
+      } catch (err) {
+        errors.push({ row: i + 2, error: err.message });
+      }
+    }
+
+    if (errors.length > 0) {
+      return res.status(400).json({
+        error: 'Some rows have validation errors',
+        errors: errors.slice(0, 10), // Return first 10 errors
+        totalErrors: errors.length,
+      });
+    }
+
+    // Group records by customer/invoice header (same logic as generatePayload)
+    const invoiceGroups = {};
+    for (const record of normalizedRecords) {
+      const key = `${record.customerName}_${record.transactionDate}_${record.crossReference || ''}`;
+      if (!invoiceGroups[key]) {
+        invoiceGroups[key] = {
+          header: {
+            BusinessUnit: record.businessUnit,
+            TransactionSource: record.transactionSource,
+            TransactionType: record.transactionType,
+            TransactionDate: record.transactionDate,
+            AccountingDate: record.accountingDate,
+            BillToCustomerName: record.customerName,
+            BillToCustomerNumber: record.customerNumber,
+            BillToSite: record.siteNumber,
+            PaymentTerms: record.paymentTerms,
+            InvoiceCurrencyCode: record.invoiceCurrencyCode,
+            CrossReference: record.crossReference,
+            Comments: record.comments,
+          },
+          lines: [],
+        };
+      }
+
+      invoiceGroups[key].lines.push({
+        LineNumber: record.lineNumber,
+        ItemNumber: record.itemNumber,
+        Description: record.description,
+        Quantity: record.quantity,
+        UnitSellingPrice: record.unitSellingPrice,
+        TaxClassificationCode: record.taxClassificationCode,
+        SalesOrder: record.salesOrder,
+        MemoLine: record.memoLine,
+      });
+    }
+
+    // Generate payloads for each invoice
+    const payloads = Object.values(invoiceGroups).map(group => ({
+      ...group.header,
+      receivablesInvoiceLines: group.lines,
+    }));
+
+    console.log(`✅ [AR Invoice Data Preview] Generated ${payloads.length} invoice payloads from ${normalizedRecords.length} line items`);
+
+    return res.json({
+      success: true,
+      message: `Preview generated ${payloads.length} invoices from ${normalizedRecords.length} line items`,
+      invoiceCount: payloads.length,
+      totalLines: normalizedRecords.length,
+      payloads,
+    });
+
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * POST /api/ar-invoice-data/upload
  * Upload CSV file containing AR invoice line items
  */
 async function uploadCsv(req, res, next) {
   try {
-    if (!req.files || !req.files.file) {
+    if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded. Please attach a CSV file.' });
     }
 
-    const fileData = req.files.file;
-    const csvText = asText(fileData.data);
-    const filename = fileData.name || 'unknown.csv';
+    const csvText = req.file.buffer.toString('utf-8');
+    const filename = req.file.originalname || 'unknown.csv';
 
     console.log(`\n[AR Invoice Data] Processing CSV: ${filename}`);
 
@@ -182,6 +309,7 @@ async function uploadCsv(req, res, next) {
         trim: true,
         relax_quotes: true,
         relax_column_count: true,
+        bom: true,
       });
     } catch (parseError) {
       return res.status(400).json({
@@ -479,6 +607,7 @@ function downloadTemplate(req, res) {
 }
 
 module.exports = {
+  previewCsvPayload,
   uploadCsv,
   listRecords,
   listBatches,
