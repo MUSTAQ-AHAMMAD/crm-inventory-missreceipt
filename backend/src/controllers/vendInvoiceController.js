@@ -328,19 +328,19 @@ async function uploadVendInvoice(req, res, next) {
           // Add line item to this payment type's invoice
           const lineNumber = invoiceGroups[groupKey].lines.length + 1;
 
-          // If itemNumber is empty, treat it as a MemoLine
-          if (!itemNumber) {
-            invoiceGroups[groupKey].lines.push({
-              LineNumber: lineNumber,
-              ItemNumber: '',
-              Description: description || 'Discount Item',
-              Quantity: quantity,
-              UnitSellingPrice: unitSellingPrice,
-              TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
-              SalesOrder: salesOrderRef,
-              MemoLine: description || 'Discount Item',
-            });
-          } else {
+           // If itemNumber is empty, always use fixed discount item text
+           if (!itemNumber) {
+             invoiceGroups[groupKey].lines.push({
+               LineNumber: lineNumber,
+               ItemNumber: '',
+               Description: 'Disscount Item',
+               Quantity: quantity,
+               UnitSellingPrice: unitSellingPrice,
+               TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
+               SalesOrder: salesOrderRef,
+               MemoLine: 'Disscount Item',
+             });
+           } else {
             invoiceGroups[groupKey].lines.push({
               LineNumber: lineNumber,
               ItemNumber: itemNumber,
@@ -396,13 +396,29 @@ async function uploadVendInvoice(req, res, next) {
       });
     }
 
-    console.log(`✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines`);
+    const invoiceTypeStats = {
+      NORMAL: 0,
+      TABBY: 0,
+      TAMARA: 0,
+    };
+    for (const group of Object.values(invoiceGroups)) {
+      if (group.paymentType === 'TABBY') {
+        invoiceTypeStats.TABBY += 1;
+      } else if (group.paymentType === 'TAMARA') {
+        invoiceTypeStats.TAMARA += 1;
+      } else {
+        invoiceTypeStats.NORMAL += 1;
+      }
+    }
+
+    console.log(`✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines (NORMAL=${invoiceTypeStats.NORMAL}, TABBY=${invoiceTypeStats.TABBY}, TAMARA=${invoiceTypeStats.TAMARA})`);
 
     return res.json({
       success: true,
-      message: `Generated ${payloads.length} invoice(s) from ${salesLines.length} sales line(s)`,
+      message: `Generated ${payloads.length} invoice(s) from ${salesLines.length} sales line(s) [NORMAL: ${invoiceTypeStats.NORMAL}, TABBY: ${invoiceTypeStats.TABBY}, TAMARA: ${invoiceTypeStats.TAMARA}]`,
       invoiceCount: payloads.length,
       totalLines: salesLines.length,
+      invoiceTypeStats,
       payloads,
     });
 
