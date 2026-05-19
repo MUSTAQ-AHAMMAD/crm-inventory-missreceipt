@@ -170,12 +170,16 @@ async function uploadVendInvoice(req, res, next) {
 
       if (storeCode) {
         // Determine payment method type (NORMAL, TABBY, TAMARA)
-        let paymentType = 'NORMAL'; // Default for cash/bank
+        // Only TABBY and TAMARA get their own types
+        // All other payment methods (Cash, Mada, Visa, Master, Bank, etc.) map to NORMAL
+        let paymentType = 'NORMAL'; // Default for all except TABBY and TAMARA
         if (paymentMethod.includes('TABBY')) {
           paymentType = 'TABBY';
         } else if (paymentMethod.includes('TAMARA')) {
           paymentType = 'TAMARA';
         }
+        // Log payment method categorization for debugging
+        console.log(`[Vend Invoice] Store: ${storeCode}, Payment Method: "${payment['Payment Method']}" → Type: ${paymentType}`);
 
         // Store payment types available for this store
         if (!storePaymentMap[storeCode]) {
@@ -233,13 +237,15 @@ async function uploadVendInvoice(req, res, next) {
         ).trim().toUpperCase();
 
         // Determine which payment type this line belongs to
+        // Only TABBY and TAMARA get their own invoice types
+        // All other payment methods (Cash, Mada, Visa, Master, Bank, etc.) map to NORMAL
         let linePaymentType = null;
         if (linePaymentMethod.includes('TABBY')) {
           linePaymentType = 'TABBY';
         } else if (linePaymentMethod.includes('TAMARA')) {
           linePaymentType = 'TAMARA';
         } else if (linePaymentMethod) {
-          // Any other payment method (Cash, Bank, Card, etc.) maps to NORMAL
+          // Any other payment method (Cash, Mada, Visa, Master, Bank, Card, etc.) maps to NORMAL
           linePaymentType = 'NORMAL';
         }
 

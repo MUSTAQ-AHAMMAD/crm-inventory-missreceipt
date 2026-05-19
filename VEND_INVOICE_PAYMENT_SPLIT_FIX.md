@@ -23,14 +23,18 @@ Updated `vendInvoiceController.js` to properly split sales lines by payment meth
    - Changed from array-based mapping to Set-based tracking of payment types per store
    - Now stores: `{ subinventoryCode, branch, paymentTypes: Set<'NORMAL'|'TABBY'|'TAMARA'> }`
    - Only creates invoices for payment types that actually exist for each store
+   - **Payment Method Classification:**
+     - Payment methods containing "TABBY" → TABBY type
+     - Payment methods containing "TAMARA" → TAMARA type
+     - **All other payment methods** (Cash, Mada, Visa, Master, Bank, Card, etc.) → NORMAL type
 
-2. **Sales Line Payment Method Detection (Lines 224-242)**
+2. **Sales Line Payment Method Detection (Lines 239-250)**
    - Added support for reading payment method from sales lines
    - Checks multiple possible column names: `Payment Method`, `Order Lines/Payment Method`, `Payment Type`
    - Maps payment methods to types:
      - Contains "TABBY" → TABBY
      - Contains "TAMARA" → TAMARA
-     - Any other value (Cash, Bank, Card, etc.) → NORMAL
+     - **Any other value** (Cash, Mada, Visa, Master, Bank, Card, etc.) → NORMAL
 
 3. **Conditional Invoice Assignment (Lines 244-253)**
    - If sales line has a payment method → adds ONLY to matching invoice
@@ -53,9 +57,13 @@ For YASMEEN subinventory with all 3 payment types:
 - Must have a `Store` column (e.g., "YASMEEN", "AZIZMALL") - this is the store code
 - Optionally has `Subinventory code` column (if not present, `Store` value is used)
 - Has `Payment Method` column indicating payment type
-- YASMEEN with Payment Method "Cash" → creates NORMAL payment type
-- YASMEEN with Payment Method "Tabby" → creates TABBY payment type
-- YASMEEN with Payment Method "Tamara" → creates TAMARA payment type
+- Examples of payment method mapping:
+  - Payment Method: "Cash" → NORMAL type
+  - Payment Method: "Mada" → NORMAL type
+  - Payment Method: "Visa" → NORMAL type
+  - Payment Method: "Master" → NORMAL type
+  - Payment Method: "Tabby" → TABBY type
+  - Payment Method: "Tamara" → TAMARA type
 
 **Sales Lines:**
 - Has `Order Lines/Order Ref` column with values like "AZIZMALL/64181"
