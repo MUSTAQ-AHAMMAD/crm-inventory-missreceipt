@@ -2,15 +2,24 @@
 
 ## Problem Statement
 
-The AR Invoice generation from Vend data was duplicating all sales lines across all payment type invoices (NORMAL/TABBY/TAMARA), leading to incorrect invoicing where the same sales were invoiced multiple times.
+The AR Invoice generation from Vend data had two issues:
+1. **Duplicating sales lines**: All sales lines were being added across all payment type invoices (NORMAL/TABBY/TAMARA), leading to incorrect invoicing where the same sales were invoiced multiple times.
+2. **Incorrect store matching**: The code was using the wrong column (`Payment Method Details`) from payment lines instead of the `Store` column, causing store code mismatches.
 
 ## Solution
 
-Updated `vendInvoiceController.js` to properly split sales lines by payment method:
+Updated `vendInvoiceController.js` to properly split sales lines by payment method and fix store code matching:
 
 ### Changes Made
 
-1. **Payment Method Mapping (Lines 159-191)**
+1. **Store Code Matching Fix (Lines 159-193)**
+   - **OLD**: Used `Payment Method Details` column from payment lines as the key
+   - **NEW**: Uses `Store` column from payment lines as the key
+   - Store code from sales lines (extracted from `Order Lines/Order Ref` like "AZIZMALL/64181") now correctly matches the `Store` column
+   - Added fallback: if `Subinventory code` is not present, uses `Store` column value
+   - Added debug logging to show all available store codes in the payment map
+
+2. **Payment Method Mapping**
    - Changed from array-based mapping to Set-based tracking of payment types per store
    - Now stores: `{ subinventoryCode, branch, paymentTypes: Set<'NORMAL'|'TABBY'|'TAMARA'> }`
    - Only creates invoices for payment types that actually exist for each store
@@ -41,14 +50,20 @@ For YASMEEN subinventory with all 3 payment types:
 ### Input Files
 
 **Payment Lines:**
+- Must have a `Store` column (e.g., "YASMEEN", "AZIZMALL") - this is the store code
+- Optionally has `Subinventory code` column (if not present, `Store` value is used)
+- Has `Payment Method` column indicating payment type
 - YASMEEN with Payment Method "Cash" → creates NORMAL payment type
 - YASMEEN with Payment Method "Tabby" → creates TABBY payment type
 - YASMEEN with Payment Method "Tamara" → creates TAMARA payment type
 
 **Sales Lines:**
-- Line 1: Product A, $100, Payment Method: Cash
-- Line 2: Product B, $200, Payment Method: Tabby
-- Line 3: Product C, $150, Payment Method: Tamara
+- Has `Order Lines/Order Ref` column with values like "AZIZMALL/64181"
+- Store code is extracted by splitting on "/" and taking the first part: "AZIZMALL"
+- This extracted store code matches the `Store` column in payment lines
+- Line 1: Product A, $100, Order Ref: "YASMEEN/12345", Payment Method: Cash
+- Line 2: Product B, $200, Order Ref: "YASMEEN/12346", Payment Method: Tabby
+- Line 3: Product C, $150, Order Ref: "YASMEEN/12347", Payment Method: Tamara
 
 ### Output (3 separate invoices)
 
