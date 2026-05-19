@@ -156,9 +156,9 @@ async function uploadVendInvoice(req, res, next) {
       return res.status(400).json({ error: 'Sales Lines file is empty or has no valid rows.' });
     }
 
-    // Build a map of Payment Method Details to Subinventory Code, Branch, and Payment Type
-    // Payment Lines: Map by "Payment Method Details" to get "Subinventory code", "Branch", and "Payment Method"
-    const paymentMethodMap = {};
+    // Build a map of store codes to their subinventory, branch, and payment types
+    // Payment Lines: Map by "Payment Method Details" (store code) to get unique payment types per store
+    const storePaymentMap = {};
     for (const payment of paymentLines) {
       const paymentMethodDetails = String(payment['Payment Method Details'] || '').trim().toUpperCase();
       const subinventoryCode = String(payment['Subinventory code'] || '').trim();
@@ -167,27 +167,30 @@ async function uploadVendInvoice(req, res, next) {
 
       if (paymentMethodDetails && subinventoryCode) {
         // Determine payment method type (NORMAL, TABBY, TAMARA)
-        let paymentType = 'NORMAL'; // Default for cash/bank
+        // NORMAL = Cash, Mada, Visa, Master, and any other bank payments
+        // Only Tabby and Tamara are separate
+        let paymentType = 'NORMAL'; // Default for cash/bank/card payments
         if (paymentMethod.includes('TABBY')) {
           paymentType = 'TABBY';
         } else if (paymentMethod.includes('TAMARA')) {
           paymentType = 'TAMARA';
         }
 
-        // Store payment info with payment type
-        if (!paymentMethodMap[paymentMethodDetails]) {
-          paymentMethodMap[paymentMethodDetails] = [];
+        // Initialize store entry if not exists
+        if (!storePaymentMap[paymentMethodDetails]) {
+          storePaymentMap[paymentMethodDetails] = {
+            subinventoryCode,
+            branch,
+            paymentTypes: new Set(), // Use Set to track unique payment types
+          };
         }
-        paymentMethodMap[paymentMethodDetails].push({
-          subinventoryCode,
-          branch,
-          paymentType,
-          paymentMethod,
-        });
+
+        // Add this payment type to the store's set of payment types
+        storePaymentMap[paymentMethodDetails].paymentTypes.add(paymentType);
       }
     }
 
-    console.log(`[Vend Invoice] Built payment method map with ${Object.keys(paymentMethodMap).length} entries`);
+    console.log(`[Vend Invoice] Built store payment map with ${Object.keys(storePaymentMap).length} stores`);
 
     // Process sales lines and group by store + date + payment type
     const invoiceGroups = {}; // Key: `${subinventory}_${date}_${paymentType}`
@@ -201,14 +204,15 @@ async function uploadVendInvoice(req, res, next) {
         const salesOrderRef = String(row['Order Lines/Order Ref'] || '').trim();
         const storeCode = salesOrderRef.split('/')[0].toUpperCase(); // e.g., "AZIZMALL"
 
-        // Find subinventory code, branch, and payment methods from payment lines using the store code
-        // The store code should match "Payment Method Details" in payment lines
-        const paymentDataArray = paymentMethodMap[storeCode];
+        // Find store data from payment lines
+        const storeData = storePaymentMap[storeCode];
 
-        if (!paymentDataArray || paymentDataArray.length === 0) {
+        if (!storeData) {
           console.warn(`[Vend Invoice] No payment data found for store code: ${storeCode}, skipping row ${i + 2}`);
           continue;
         }
+
+        const { subinventoryCode, branch, paymentTypes } = storeData;
 
         // Extract date from sales lines (using Order Ref/Date column)
         const saleDate = normalizeDate(row['Order Lines/Order Ref/Date'], 'Sale Date');
@@ -219,11 +223,10 @@ async function uploadVendInvoice(req, res, next) {
         const quantity = parseFloat(row['Order Lines/Base Quantity'] || 0);
         const unitSellingPrice = parseFloat(row['Order Lines/Tax Incl'] || 0);
 
-        // Process this line for each payment method type (NORMAL, TABBY, TAMARA)
-        // This creates 3 separate invoices per store per day
-        for (const paymentData of paymentDataArray) {
-          const { subinventoryCode, branch, paymentType } = paymentData;
-
+        // For this sale line, determine which payment type(s) it should be included in
+        // Each sale line should be added to ALL payment type invoices for this store/date
+        // (e.g., if store has NORMAL, TABBY, TAMARA payments, add line to all 3 invoices)
+        for (const paymentType of paymentTypes) {
           // Create key for grouping: one invoice per store per day per payment type
           const groupKey = `${subinventoryCode}_${saleDate}_${paymentType}`;
 
