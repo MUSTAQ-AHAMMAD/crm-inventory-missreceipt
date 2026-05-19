@@ -340,6 +340,10 @@ async function uploadCsv(req, res, next) {
     for (let i = 0; i < records.length; i++) {
       try {
         const normalized = await normalizeRow(records[i], i);
+        // Override with constant values
+        normalized.businessUnit = 'AlQurashi-KSA';
+        normalized.transactionSource = 'Vend';
+        normalized.transactionType = 'Vend Invoice';
         normalizedRecords.push(normalized);
       } catch (err) {
         errors.push({ row: i + 2, error: err.message });
@@ -497,9 +501,9 @@ async function generatePayload(req, res, next) {
       if (!invoiceGroups[key]) {
         invoiceGroups[key] = {
           header: {
-            BusinessUnit: record.businessUnit,
-            TransactionSource: record.transactionSource,
-            TransactionType: record.transactionType,
+            BusinessUnit: 'AlQurashi-KSA',
+            TransactionSource: 'Vend',
+            TransactionType: 'Vend Invoice',
             TransactionDate: record.transactionDate,
             AccountingDate: record.accountingDate,
             BillToCustomerName: record.customerName,
