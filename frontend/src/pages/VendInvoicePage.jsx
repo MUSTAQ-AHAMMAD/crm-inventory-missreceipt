@@ -5,17 +5,19 @@
  */
 
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import api from '../hooks/useApi'
 import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 
 export default function VendInvoicePage() {
+  const navigate = useNavigate()
   const [paymentLinesFile, setPaymentLinesFile] = useState(null)
   const [salesLinesFile, setSalesLinesFile] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
+  const [downloading, setDownloading] = useState(false)
 
   const handleFileSelect = (type, file) => {
     if (type === 'payment') {
@@ -68,6 +70,64 @@ export default function VendInvoicePage() {
     } finally {
       setUploading(false)
     }
+  }
+
+  const handleDownloadJson = async () => {
+    if (!result?.payloads) return
+    setDownloading(true)
+    try {
+      const response = await api.post('/vend-invoice/download-json', {
+        payloads: result.payloads,
+      }, {
+        responseType: 'blob',
+      })
+      const blob = new Blob([JSON.stringify(result.payloads, null, 2)], { type: 'application/json' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)
+      link.download = `vend-invoices-${timestamp}.json`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      setError('Failed to download JSON file')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const handleDownloadCsv = async () => {
+    if (!result?.payloads) return
+    setDownloading(true)
+    try {
+      const response = await api.post('/vend-invoice/download-csv', {
+        payloads: result.payloads,
+      }, {
+        responseType: 'blob',
+      })
+      const blob = new Blob([response.data], { type: 'text/csv' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)
+      link.download = `vend-invoices-${timestamp}.csv`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      setError('Failed to download CSV file')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const handleBulkTransfer = () => {
+    if (!result?.payloads) return
+    // Navigate to AR Invoice page with all payloads
+    navigate('/ar-invoice', { state: { bulkPayloads: result.payloads } })
   }
 
   const FileUploadBox = ({ title, file, onFileSelect, type }) => (
@@ -170,7 +230,35 @@ export default function VendInvoicePage() {
       {/* Result card */}
       {result && (
         <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
-          <h2 className="font-semibold text-gray-700">Generated Payloads</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-gray-700">Generated Payloads</h2>
+
+            {/* Bulk actions */}
+            <div className="flex gap-2">
+              <button
+                onClick={handleDownloadJson}
+                disabled={downloading}
+                className="px-3 py-1.5 text-sm bg-green-600 text-white font-medium rounded hover:bg-green-700 disabled:opacity-60 transition-colors flex items-center gap-1"
+              >
+                {downloading ? <Spinner size="sm" /> : '📥'}
+                Download JSON
+              </button>
+              <button
+                onClick={handleDownloadCsv}
+                disabled={downloading}
+                className="px-3 py-1.5 text-sm bg-green-600 text-white font-medium rounded hover:bg-green-700 disabled:opacity-60 transition-colors flex items-center gap-1"
+              >
+                {downloading ? <Spinner size="sm" /> : '📥'}
+                Download CSV
+              </button>
+              <button
+                onClick={handleBulkTransfer}
+                className="px-3 py-1.5 text-sm bg-blue-600 text-white font-medium rounded hover:bg-blue-700 transition-colors flex items-center gap-1"
+              >
+                🚀 Bulk Transfer to AR Invoice
+              </button>
+            </div>
+          </div>
 
           <div className="p-4 rounded-lg border bg-green-50 border-green-200">
             <p className="font-semibold text-green-700">✅ Success</p>

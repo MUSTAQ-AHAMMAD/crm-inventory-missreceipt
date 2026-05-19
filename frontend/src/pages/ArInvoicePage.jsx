@@ -55,11 +55,19 @@ export default function ArInvoicePage() {
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
+  const [bulkPayloads, setBulkPayloads] = useState(null)
+  const [bulkSubmitting, setBulkSubmitting] = useState(false)
+  const [bulkResults, setBulkResults] = useState([])
 
-  // Check if a payload was passed from AR Invoice Data page
+  // Check if a payload was passed from AR Invoice Data page or Vend Invoice page
   useEffect(() => {
     if (location.state?.prefilledPayload) {
       setPayload(JSON.stringify(location.state.prefilledPayload, null, 2))
+      // Clear the state so it doesn't persist on refresh
+      window.history.replaceState({}, document.title)
+    }
+    if (location.state?.bulkPayloads) {
+      setBulkPayloads(location.state.bulkPayloads)
       // Clear the state so it doesn't persist on refresh
       window.history.replaceState({}, document.title)
     }
@@ -100,6 +108,44 @@ export default function ArInvoicePage() {
     setResult(null)
   }
 
+  const handleBulkSubmit = async () => {
+    if (!bulkPayloads || bulkPayloads.length === 0) return
+
+    setBulkSubmitting(true)
+    setBulkResults([])
+    setError('')
+
+    const results = []
+    for (let i = 0; i < bulkPayloads.length; i++) {
+      const currentPayload = bulkPayloads[i]
+      try {
+        const res = await api.post('/ar-invoice/create', currentPayload)
+        results.push({
+          index: i + 1,
+          success: true,
+          payload: currentPayload,
+          response: res.data,
+        })
+      } catch (err) {
+        results.push({
+          index: i + 1,
+          success: false,
+          payload: currentPayload,
+          error: err.response?.data?.error || err.response?.data?.message || 'Submission failed',
+        })
+      }
+      setBulkResults([...results])
+    }
+
+    setBulkSubmitting(false)
+    queryClient.invalidateQueries({ queryKey: ['arInvoiceUploads'] })
+  }
+
+  const handleCancelBulk = () => {
+    setBulkPayloads(null)
+    setBulkResults([])
+  }
+
   const handleFormatJson = () => {
     try {
       const parsed = JSON.parse(payload)
@@ -115,6 +161,75 @@ export default function ArInvoicePage() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-bold text-gray-800">AR Invoice Creation</h1>
       </div>
+
+      {/* Bulk payloads section */}
+      {bulkPayloads && (
+        <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="font-semibold text-gray-700">
+              Bulk Invoice Submission ({bulkPayloads.length} invoices)
+            </h2>
+            <button
+              onClick={handleCancelBulk}
+              disabled={bulkSubmitting}
+              className="px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 rounded transition-colors"
+            >
+              ✕ Cancel
+            </button>
+          </div>
+
+          <div className="p-4 rounded-lg border bg-blue-50 border-blue-100">
+            <p className="text-sm font-medium text-blue-700">
+              Ready to submit {bulkPayloads.length} invoice(s) to Oracle Fusion
+            </p>
+            <p className="text-xs text-blue-600 mt-1">
+              Each invoice will be submitted sequentially. This may take a few moments.
+            </p>
+          </div>
+
+          <button
+            onClick={handleBulkSubmit}
+            disabled={bulkSubmitting}
+            className="w-full px-5 py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
+          >
+            {bulkSubmitting ? <Spinner size="sm" /> : '🚀'}
+            {bulkSubmitting ? `Submitting ${bulkResults.length + 1} of ${bulkPayloads.length}...` : 'Submit All Invoices'}
+          </button>
+
+          {/* Bulk results */}
+          {bulkResults.length > 0 && (
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {bulkResults.map((result) => (
+                <div
+                  key={result.index}
+                  className={`p-3 rounded-lg border ${
+                    result.success
+                      ? 'bg-green-50 border-green-200'
+                      : 'bg-red-50 border-red-200'
+                  }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <p className={`text-sm font-medium ${
+                        result.success ? 'text-green-700' : 'text-red-700'
+                      }`}>
+                        {result.success ? '✅' : '❌'} Invoice #{result.index} - {result.payload.BillToCustomerName}
+                      </p>
+                      {result.success ? (
+                        <p className="text-xs text-gray-600 mt-1">
+                          CrossRef: {result.payload.CrossReference}
+                        </p>
+                      ) : (
+                        <p className="text-xs text-red-600 mt-1">{result.error}</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Input card */}
       <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
