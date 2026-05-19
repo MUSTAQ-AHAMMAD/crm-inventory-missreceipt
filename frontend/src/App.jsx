@@ -17,6 +17,7 @@ import ArInvoicePage from './pages/ArInvoicePage'
 import ArInvoiceDataPage from './pages/ArInvoiceDataPage'
 import ArInvoiceDetailPage from './pages/ArInvoiceDetailPage'
 import VendInvoicePage from './pages/VendInvoicePage'
+import VendSalesMetadataPage from './pages/VendSalesMetadataPage'
 import UserManagementPage from './pages/UserManagementPage'
 import ReportsPage from './pages/ReportsPage'
 import FailureDetailsPage from './pages/FailureDetailsPage'
@@ -65,6 +66,7 @@ export default function App() {
             <Route path="ar-invoice-data" element={<ArInvoiceDataPage />} />
             <Route path="ar-invoice/uploads/:uploadId" element={<ArInvoiceDetailPage />} />
             <Route path="vend-invoice" element={<VendInvoicePage />} />
+            <Route path="vend-sales-metadata" element={<VendSalesMetadataPage />} />
             <Route
               path="admin/users"
               element={

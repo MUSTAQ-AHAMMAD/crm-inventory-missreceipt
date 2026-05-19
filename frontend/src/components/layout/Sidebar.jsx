@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { to: '/ar-invoice', label: 'AR Invoice', icon: '📄' },
   { to: '/ar-invoice-data', label: 'AR Invoice Data', icon: '📋' },
   { to: '/vend-invoice', label: 'Vend Invoice', icon: '🏪' },
+  { to: '/vend-sales-metadata', label: 'VendSales Metadata', icon: '🗂️' },
   { to: '/reports', label: 'Reports', icon: '📈' },
   { to: '/failures/0', label: 'Logs & Failures', icon: '⚠️' },
 ]
