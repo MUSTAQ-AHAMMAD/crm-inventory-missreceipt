@@ -220,11 +220,21 @@ async function uploadVendInvoice(req, res, next) {
         const storeCode = salesOrderRef.split('/')[0].toUpperCase(); // e.g., "AZIZMALL"
 
         // Find subinventory code, branch, and available payment types for this store
-        const storeData = storePaymentMap[storeCode];
+        let storeData = storePaymentMap[storeCode];
 
         if (!storeData) {
-          console.warn(`[Vend Invoice] No payment data found for store code: ${storeCode} (from ${salesOrderRef}), skipping row ${i + 2}`);
-          continue;
+          // Fallback: if no payment data exists for this store code (e.g. payment
+          // lines file uses different column values or is missing this store),
+          // assume NORMAL payment type with the storeCode itself as subinventory
+          // so that the invoice is still generated instead of silently dropping
+          // every line for this store.
+          console.warn(`[Vend Invoice] No payment data found for store code: ${storeCode} (from ${salesOrderRef}), using fallback (subinventory=${storeCode}, paymentType=NORMAL) for row ${i + 2}`);
+          storeData = {
+            subinventoryCode: storeCode,
+            branch: '',
+            paymentTypes: new Set(['NORMAL']),
+          };
+          storePaymentMap[storeCode] = storeData;
         }
 
         const { subinventoryCode, branch, paymentTypes } = storeData;
