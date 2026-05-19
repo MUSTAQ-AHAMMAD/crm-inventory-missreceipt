@@ -66,7 +66,7 @@ export default function App() {
             <Route path="ar-invoice-data" element={<ArInvoiceDataPage />} />
             <Route path="ar-invoice/uploads/:uploadId" element={<ArInvoiceDetailPage />} />
             <Route path="vend-invoice" element={<VendInvoicePage />} />
-            <Route path="vendsales-meta-data" element={<VendSalesMetadataPage />} />
+            <Route path="vend-sales-metadata" element={<VendSalesMetadataPage />} />
             <Route
               path="admin/users"
               element={

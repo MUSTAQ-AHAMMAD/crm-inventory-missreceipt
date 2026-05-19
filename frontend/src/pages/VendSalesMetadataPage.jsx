@@ -29,7 +29,7 @@ export default function VendSalesMetadataPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h1 className="text-2xl font-bold text-gray-800">Vendsales Metadata</h1>
+        <h1 className="text-2xl font-bold text-gray-800">VendSales Metadata</h1>
         <div className="text-sm text-gray-600">
           Total: <span className="font-semibold">{total}</span>
         </div>
@@ -41,7 +41,7 @@ export default function VendSalesMetadataPage() {
             <Spinner />
           </div>
         ) : error ? (
-          <ErrorAlert message="Failed to load Vendsales metadata." />
+          <ErrorAlert message="Failed to load VendSales metadata." />
         ) : records.length === 0 ? (
           <p className="text-sm text-gray-500 text-center py-8">No metadata records found.</p>
         ) : (
