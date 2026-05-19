@@ -149,16 +149,18 @@ async function uploadVendInvoice(req, res, next) {
       return res.status(400).json({ error: 'Sales Lines file is empty or has no valid rows.' });
     }
 
-    // Build a map of sales orders to payment methods and subinventory codes
-    // Payment Lines: Map by "Payment Method Details" to get Subinventory Code
+    // Build a map of Payment Method Details to Subinventory Code
+    // Payment Lines: Map by "Payment Method Details" to get "Subinventory code"
     const paymentMethodMap = {};
     for (const payment of paymentLines) {
-      const paymentMethodDetails = String(payment['Payment Method Details'] || '').trim();
+      const paymentMethodDetails = String(payment['Payment Method Details'] || '').trim().toUpperCase();
       const subinventoryCode = String(payment['Subinventory code'] || '').trim();
       if (paymentMethodDetails && subinventoryCode) {
         paymentMethodMap[paymentMethodDetails] = subinventoryCode;
       }
     }
+
+    console.log(`[Vend Invoice] Built payment method map with ${Object.keys(paymentMethodMap).length} entries`);
 
     // Process sales lines and group by store + date
     const invoiceGroups = {}; // Key: `${subinventory}_${date}`
@@ -170,10 +172,15 @@ async function uploadVendInvoice(req, res, next) {
 
         // Extract sales order (e.g., "AZIZMALL/64181") and split to get store code
         const salesOrder = String(row['Order Lines/Order'] || '').trim();
-        const storeCode = salesOrder.split('/')[0]; // e.g., "AZIZMALL"
+        const storeCode = salesOrder.split('/')[0].toUpperCase(); // e.g., "AZIZMALL"
 
         // Find subinventory code from payment lines using the store code
+        // The store code should match "Payment Method Details" in payment lines
         const subinventoryCode = paymentMethodMap[storeCode] || storeCode;
+
+        if (!paymentMethodMap[storeCode]) {
+          console.warn(`[Vend Invoice] No subinventory found for store code: ${storeCode}, using store code as fallback`);
+        }
 
         // Extract date from sales lines
         const saleDate = normalizeDate(row['Order Lines/Date'], 'Sale Date');
