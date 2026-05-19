@@ -3,7 +3,7 @@
 <html lang="en">
 
 <head>
-    <title>Code coverage report for controllers/reportsController.js</title>
+    <title>Code coverage report for services/OracleSoapClient.js</title>
     <meta charset="utf-8" />
     <link rel="stylesheet" href="../prettify.css" />
     <link rel="stylesheet" href="../base.css" />
@@ -19,34 +19,34 @@
 <body>
 <div class='wrapper'>
     <div class='pad1'>
-        <h1><a href="../index.html">All files</a> / <a href="index.html">controllers</a> reportsController.js</h1>
+        <h1><a href="../index.html">All files</a> / <a href="index.html">services</a> OracleSoapClient.js</h1>
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">68.96% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/190</span>
+                <span class='fraction'>160/232</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">60.1% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/162</span>
+                <span class='fraction'>119/198</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">63.63% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>0/32</span>
+                <span class='fraction'>14/22</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">69.46% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/164</span>
+                <span class='fraction'>157/226</span>
             </div>
         
             
@@ -61,7 +61,7 @@
             </div>
         </template>
     </div>
-    <div class='status-line low'></div>
+    <div class='status-line medium'></div>
     <pre><table class="coverage">
 <tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
 <a name='L2'></a><a href='#L2'>2</a>
@@ -626,37 +626,102 @@
 <a name='L561'></a><a href='#L561'>561</a>
 <a name='L562'></a><a href='#L562'>562</a>
 <a name='L563'></a><a href='#L563'>563</a>
-<a name='L564'></a><a href='#L564'>564</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L564'></a><a href='#L564'>564</a>
+<a name='L565'></a><a href='#L565'>565</a>
+<a name='L566'></a><a href='#L566'>566</a>
+<a name='L567'></a><a href='#L567'>567</a>
+<a name='L568'></a><a href='#L568'>568</a>
+<a name='L569'></a><a href='#L569'>569</a>
+<a name='L570'></a><a href='#L570'>570</a>
+<a name='L571'></a><a href='#L571'>571</a>
+<a name='L572'></a><a href='#L572'>572</a>
+<a name='L573'></a><a href='#L573'>573</a>
+<a name='L574'></a><a href='#L574'>574</a>
+<a name='L575'></a><a href='#L575'>575</a>
+<a name='L576'></a><a href='#L576'>576</a>
+<a name='L577'></a><a href='#L577'>577</a>
+<a name='L578'></a><a href='#L578'>578</a>
+<a name='L579'></a><a href='#L579'>579</a>
+<a name='L580'></a><a href='#L580'>580</a>
+<a name='L581'></a><a href='#L581'>581</a>
+<a name='L582'></a><a href='#L582'>582</a>
+<a name='L583'></a><a href='#L583'>583</a>
+<a name='L584'></a><a href='#L584'>584</a>
+<a name='L585'></a><a href='#L585'>585</a>
+<a name='L586'></a><a href='#L586'>586</a>
+<a name='L587'></a><a href='#L587'>587</a>
+<a name='L588'></a><a href='#L588'>588</a>
+<a name='L589'></a><a href='#L589'>589</a>
+<a name='L590'></a><a href='#L590'>590</a>
+<a name='L591'></a><a href='#L591'>591</a>
+<a name='L592'></a><a href='#L592'>592</a>
+<a name='L593'></a><a href='#L593'>593</a>
+<a name='L594'></a><a href='#L594'>594</a>
+<a name='L595'></a><a href='#L595'>595</a>
+<a name='L596'></a><a href='#L596'>596</a>
+<a name='L597'></a><a href='#L597'>597</a>
+<a name='L598'></a><a href='#L598'>598</a>
+<a name='L599'></a><a href='#L599'>599</a>
+<a name='L600'></a><a href='#L600'>600</a>
+<a name='L601'></a><a href='#L601'>601</a>
+<a name='L602'></a><a href='#L602'>602</a>
+<a name='L603'></a><a href='#L603'>603</a>
+<a name='L604'></a><a href='#L604'>604</a>
+<a name='L605'></a><a href='#L605'>605</a>
+<a name='L606'></a><a href='#L606'>606</a>
+<a name='L607'></a><a href='#L607'>607</a>
+<a name='L608'></a><a href='#L608'>608</a>
+<a name='L609'></a><a href='#L609'>609</a>
+<a name='L610'></a><a href='#L610'>610</a>
+<a name='L611'></a><a href='#L611'>611</a>
+<a name='L612'></a><a href='#L612'>612</a>
+<a name='L613'></a><a href='#L613'>613</a>
+<a name='L614'></a><a href='#L614'>614</a>
+<a name='L615'></a><a href='#L615'>615</a>
+<a name='L616'></a><a href='#L616'>616</a>
+<a name='L617'></a><a href='#L617'>617</a>
+<a name='L618'></a><a href='#L618'>618</a>
+<a name='L619'></a><a href='#L619'>619</a>
+<a name='L620'></a><a href='#L620'>620</a>
+<a name='L621'></a><a href='#L621'>621</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-yes">27x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-yes">27x</span>
+<span class="cline-any cline-yes">27x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">27x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">27x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -666,6 +731,7 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">27x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -677,6 +743,10 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">16x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -685,20 +755,24 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -706,28 +780,27 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -735,16 +808,22 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">6x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -752,116 +831,115 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">7x</span>
+<span class="cline-any cline-yes">7x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">7x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">6x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -869,77 +947,76 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">8x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">8x</span>
+<span class="cline-any cline-yes">8x</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">9x</span>
+<span class="cline-any cline-yes">9x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">9x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">9x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">7x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">7x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">7x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">7x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -949,12 +1026,17 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -965,31 +1047,42 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1002,14 +1095,9 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1018,95 +1106,112 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">5x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">5x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">8x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">8x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">8x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">8x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">8x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">8x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1115,12 +1220,11 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1129,19 +1233,24 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1149,9 +1258,13 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">4x</span>
+<span class="cline-any cline-yes">3x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -1166,15 +1279,16 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
@@ -1184,574 +1298,631 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-yes">2x</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">/**
- * Reports controller.
- * Provides dashboard metrics, failure reports, activity logs, and CSV exports.
+ * Oracle SOAP Client with WSDL Auto-Discovery and MTOM/XOP Support
+ *
+ * This client properly handles Oracle Fusion SOAP services by:
+ * - Auto-discovering namespaces and operations from WSDL
+ * - Parsing MTOM/XOP multipart responses
+ * - Extracting correct SOAPAction headers
+ * - Implementing retry logic with exponential backoff
+ * - Providing comprehensive error handling
+ * - Detailed request/response logging for debugging
+ * - Production-ready error recovery
  */
 &nbsp;
-const prisma = <span class="cstat-no" title="statement not covered" >require('../services/prisma');</span>
-const { csvEscape } = <span class="cstat-no" title="statement not covered" >require('../utils/csv');</span>
+const axios = require('axios');
+const { XMLParser, XMLBuilder } = require('fast-xml-parser');
+const pRetry = require('p-retry');
 &nbsp;
-/**
- * GET /api/reports/dashboard
- * Returns aggregated metrics for the dashboard.
- */
-async function <span class="fstat-no" title="function not covered" >dashboard(</span>req, res, next) {
-<span class="cstat-no" title="statement not covered" >  try {</span>
-    const thirtyDaysAgo = <span class="cstat-no" title="statement not covered" >new Date();</span>
-<span class="cstat-no" title="statement not covered" >    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);</span>
+class OracleSoapClient {
+  constructor(config) {
+    this.wsdlUrl = config.wsdlUrl;
+    this.serviceUrl = config.serviceUrl;
+    this.username = config.username;
+    this.password = config.password;
+    this.maxRetries = config.maxRetries || 3;
+    this.retryMinTimeout = config.retryMinTimeout || 1000;
+    this.retryMaxTimeout = config.retryMaxTimeout || 10000;
+    this.requestTimeout = config.requestTimeout || 30000;
+    this.debugMode = config.debugMode || process.env.SOAP_DEBUG === 'true';
 &nbsp;
-    // Aggregate queries in parallel for performance
-    const [
-      totalInventoryUploads,
-      inventoryStats,
-      totalMiscUploads,
-      totalStandardUploads,
-      standardStats,
-      activeUsers,
-      recentInventory,
-      recentMisc,
-      recentStandard,
-      recentActivity,
-    ] = <span class="cstat-no" title="statement not covered" >await Promise.all([</span>
-      prisma.inventoryUpload.count(),
-      prisma.inventoryUpload.aggregate({
-        _sum: { successCount: true, failureCount: true, totalRecords: true },
-      }),
-      prisma.miscReceiptUpload.count(),
-      prisma.standardReceiptUpload.count(),
-      prisma.standardReceiptUpload.aggregate({
-        _sum: { successCount: true, failureCount: true, totalRecords: true },
-      }),
-      prisma.user.count({ where: { isActive: true } }),
-      // Daily trend for inventory uploads over last 30 days
-      prisma.inventoryUpload.findMany({
-        where: { createdAt: { gte: thirtyDaysAgo } },
-        select: { createdAt: true, successCount: true, failureCount: true },
-        orderBy: { createdAt: 'asc' },
-      }),
-      // Daily trend for misc receipt uploads
-      prisma.miscReceiptUpload.findMany({
-        where: { createdAt: { gte: thirtyDaysAgo } },
-        select: { createdAt: true, responseStatus: true },
-        orderBy: { createdAt: 'asc' },
-      }),
-      // Daily trend for standard receipts
-      prisma.standardReceiptUpload.findMany({
-        where: { createdAt: { gte: thirtyDaysAgo } },
-        select: { createdAt: true, status: true, successCount: true, failureCount: true },
-        orderBy: { createdAt: 'asc' },
-      }),
-      // Recent activity logs
-      prisma.activityLog.findMany({
-        take: 10,
-        orderBy: { createdAt: 'desc' },
-        include: { user: { select: { email: true } } },
-      }),
-    ]);
+    // Cache for WSDL data
+    this.wsdlCache = null;
+    this.namespaces = {};
+    this.operations = {};
 &nbsp;
-    // Build daily trend data (group by date string YYYY-MM-DD)
-    const trendMap = <span class="cstat-no" title="statement not covered" >{};</span>
-<span class="cstat-no" title="statement not covered" >    recentInventory.forEach(<span class="fstat-no" title="function not covered" >({</span> createdAt, successCount, failureCount }) =&gt; {</span>
-      const day = <span class="cstat-no" title="statement not covered" >createdAt.toISOString().split('T')[0];</span>
-<span class="cstat-no" title="statement not covered" >      if (!trendMap[day])</span>
-<span class="cstat-no" title="statement not covered" >        trendMap[day] = {</span>
-          date: day,
-          inventorySuccess: 0,
-          inventoryFail: 0,
-          miscSuccess: 0,
-          miscFail: 0,
-          standardSuccess: 0,
-          standardFail: 0,
-        };
-<span class="cstat-no" title="statement not covered" >      trendMap[day].inventorySuccess += successCount;</span>
-<span class="cstat-no" title="statement not covered" >      trendMap[day].inventoryFail += failureCount;</span>
-    });
-<span class="cstat-no" title="statement not covered" >    recentMisc.forEach(<span class="fstat-no" title="function not covered" >({</span> createdAt, responseStatus }) =&gt; {</span>
-      const day = <span class="cstat-no" title="statement not covered" >createdAt.toISOString().split('T')[0];</span>
-<span class="cstat-no" title="statement not covered" >      if (!trendMap[day])</span>
-<span class="cstat-no" title="statement not covered" >        trendMap[day] = {</span>
-          date: day,
-          inventorySuccess: 0,
-          inventoryFail: 0,
-          miscSuccess: 0,
-          miscFail: 0,
-          standardSuccess: 0,
-          standardFail: 0,
-        };
-<span class="cstat-no" title="statement not covered" >      if (responseStatus === 'SUCCESS') <span class="cstat-no" title="statement not covered" >trendMap[day].miscSuccess++;</span></span>
-      else <span class="cstat-no" title="statement not covered" >trendMap[day].miscFail++;</span>
-    });
-<span class="cstat-no" title="statement not covered" >    recentStandard.forEach(<span class="fstat-no" title="function not covered" >({</span> createdAt, status, successCount, failureCount }) =&gt; {</span>
-      const day = <span class="cstat-no" title="statement not covered" >createdAt.toISOString().split('T')[0];</span>
-<span class="cstat-no" title="statement not covered" >      if (!trendMap[day])</span>
-<span class="cstat-no" title="statement not covered" >        trendMap[day] = {</span>
-          date: day,
-          inventorySuccess: 0,
-          inventoryFail: 0,
-          miscSuccess: 0,
-          miscFail: 0,
-          standardSuccess: 0,
-          standardFail: 0,
-        };
-<span class="cstat-no" title="statement not covered" >      trendMap[day].standardSuccess += successCount || (status === 'SUCCESS' ? 1 : 0);</span>
-<span class="cstat-no" title="statement not covered" >      trendMap[day].standardFail += failureCount || (status === 'SUCCESS' ? 0 : 1);</span>
+    // Request counter for logging
+    this.requestCounter = 0;
+&nbsp;
+    // XML parser configuration
+    this.xmlParser = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: '@_',
+      parseAttributeValue: true,
+      trimValues: true,
+      cdataPropName: '__cdata',
+      textNodeName: '#text',
+      parseTagValue: true,
     });
 &nbsp;
-    const dailyTrend = <span class="cstat-no" title="statement not covered" >Object.values(trendMap).sort(<span class="fstat-no" title="function not covered" >(a</span>, b) =&gt; <span class="cstat-no" title="statement not covered" >a.date.localeCompare(b.date))</span>;</span>
-&nbsp;
-<span class="cstat-no" title="statement not covered" >    return res.json({</span>
-      totalInventoryUploads,
-      totalMiscUploads,
-      totalStandardReceiptUploads: totalStandardUploads,
-      totalSuccessRecords: inventoryStats._sum.successCount || 0,
-      totalFailureRecords: inventoryStats._sum.failureCount || 0,
-      standardReceiptSuccessRecords: standardStats._sum.successCount || 0,
-      standardReceiptFailureRecords: standardStats._sum.failureCount || 0,
-      totalRecordsProcessed: inventoryStats._sum.totalRecords || 0,
-      activeUsers,
-      dailyTrend,
-      recentActivity,
+    this.xmlBuilder = new XMLBuilder({
+      ignoreAttributes: false,
+      attributeNamePrefix: '@_',
+      format: true,
+      suppressEmptyNode: true,
     });
-  } catch (err) {
-<span class="cstat-no" title="statement not covered" >    next(err);</span>
   }
-}
 &nbsp;
-/**
- * GET /api/reports/failures?type=inventory|misc&amp;from=&amp;to=
- * Returns failure records with optional type and date-range filters.
- */
-async function <span class="fstat-no" title="function not covered" >failures(</span>req, res, next) {
-<span class="cstat-no" title="statement not covered" >  try {</span>
-    const { type, from, to } = <span class="cstat-no" title="statement not covered" >req.query;</span>
-    const page = <span class="cstat-no" title="statement not covered" >Math.max(1, parseInt(req.query.page) || 1);</span>
-    const limit = <span class="cstat-no" title="statement not covered" >Math.min(100, parseInt(req.query.limit) || 20);</span>
-    const skip = <span class="cstat-no" title="statement not covered" >(page - 1) * limit;</span>
-&nbsp;
-    const dateFilter = <span class="cstat-no" title="statement not covered" >{};</span>
-<span class="cstat-no" title="statement not covered" >    if (from) <span class="cstat-no" title="statement not covered" >dateFilter.gte = new Date(from);</span></span>
-<span class="cstat-no" title="statement not covered" >    if (to) <span class="cstat-no" title="statement not covered" >dateFilter.lte = new Date(to);</span></span>
-&nbsp;
-    let inventoryFailures = <span class="cstat-no" title="statement not covered" >[];</span>
-    let miscFailures = <span class="cstat-no" title="statement not covered" >[];</span>
-    let standardFailures = <span class="cstat-no" title="statement not covered" >[];</span>
-&nbsp;
-<span class="cstat-no" title="statement not covered" >    if (!type || type === 'inventory') {</span>
-      const raw = <span class="cstat-no" title="statement not covered" >await prisma.inventoryFailureRecord.findMany({</span>
-        where: dateFilter.gte || dateFilter.lte ? { createdAt: dateFilter } : {},
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: { upload: { select: { filename: true, userId: true } } },
-      });
-      // Parse rawData JSON strings back to objects
-<span class="cstat-no" title="statement not covered" >      inventoryFailures = raw.map(<span class="fstat-no" title="function not covered" >(f</span>) =&gt; (<span class="cstat-no" title="statement not covered" >{</span></span>
-        ...f,
-        rawData: (<span class="fstat-no" title="function not covered" >()</span> =&gt; { <span class="cstat-no" title="statement not covered" >try { <span class="cstat-no" title="statement not covered" >return JSON.parse(f.rawData); </span>} catch { <span class="cstat-no" title="statement not covered" >return f.rawData; </span>} </span>})(),
-      }));
+  /**
+   * Logs debug information if debug mode is enabled
+   */
+  debugLog(message, data) {
+    <span class="missing-if-branch" title="if path not taken" >I</span>if (this.debugMode) {
+<span class="cstat-no" title="statement not covered" >      console.log(`[OracleSoapClient DEBUG] ${message}`);</span>
+<span class="cstat-no" title="statement not covered" >      if (data) {</span>
+<span class="cstat-no" title="statement not covered" >        console.log(JSON.stringify(data, null, 2));</span>
+      }
     }
-&nbsp;
-<span class="cstat-no" title="statement not covered" >    if (!type || type === 'misc') {</span>
-      const raw = <span class="cstat-no" title="statement not covered" >await prisma.miscReceiptFailure.findMany({</span>
-        where: dateFilter.gte || dateFilter.lte ? { createdAt: dateFilter } : {},
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: { upload: { select: { filename: true, userId: true } } },
-      });
-      // Parse rawData JSON strings back to objects
-<span class="cstat-no" title="statement not covered" >      miscFailures = raw.map(<span class="fstat-no" title="function not covered" >(f</span>) =&gt; (<span class="cstat-no" title="statement not covered" >{</span></span>
-        ...f,
-        rawData: (<span class="fstat-no" title="function not covered" >()</span> =&gt; { <span class="cstat-no" title="statement not covered" >try { <span class="cstat-no" title="statement not covered" >return JSON.parse(f.rawData); </span>} catch { <span class="cstat-no" title="statement not covered" >return f.rawData; </span>} </span>})(),
-      }));
-    }
-&nbsp;
-<span class="cstat-no" title="statement not covered" >    if (!type || type === 'standard') {</span>
-      const raw = <span class="cstat-no" title="statement not covered" >await prisma.standardReceiptFailure.findMany({</span>
-        where: dateFilter.gte || dateFilter.lte ? { createdAt: dateFilter } : {},
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: { upload: { select: { filename: true, userId: true } } },
-      });
-<span class="cstat-no" title="statement not covered" >      standardFailures = raw.map(<span class="fstat-no" title="function not covered" >(f</span>) =&gt; (<span class="cstat-no" title="statement not covered" >{</span></span>
-        ...f,
-        rawData: (<span class="fstat-no" title="function not covered" >()</span> =&gt; { <span class="cstat-no" title="statement not covered" >try { <span class="cstat-no" title="statement not covered" >return JSON.parse(f.rawData); </span>} catch { <span class="cstat-no" title="statement not covered" >return f.rawData; </span>} </span>})(),
-      }));
-    }
-&nbsp;
-<span class="cstat-no" title="statement not covered" >    return res.json({ inventoryFailures, miscFailures, standardFailures });</span>
-  } catch (err) {
-<span class="cstat-no" title="statement not covered" >    next(err);</span>
   }
-}
 &nbsp;
-/**
- * GET /api/reports/activity?userId=&amp;from=&amp;to=
- * Returns activity logs with optional filters.
- */
-async function <span class="fstat-no" title="function not covered" >activity(</span>req, res, next) {
-<span class="cstat-no" title="statement not covered" >  try {</span>
-    const { userId, from, to } = <span class="cstat-no" title="statement not covered" >req.query;</span>
-    const page = <span class="cstat-no" title="statement not covered" >Math.max(1, parseInt(req.query.page) || 1);</span>
-    const limit = <span class="cstat-no" title="statement not covered" >Math.min(100, parseInt(req.query.limit) || 20);</span>
-    const skip = <span class="cstat-no" title="statement not covered" >(page - 1) * limit;</span>
+  /**
+   * Safely truncates XML for logging
+   */
+  truncateXml(xml, maxLength = 1000) {
+    <span class="missing-if-branch" title="if path not taken" >I</span>if (!xml) <span class="cstat-no" title="statement not covered" >return '';</span>
+    const str = typeof xml === 'string' ? xml : <span class="branch-1 cbranch-no" title="branch not covered" >String(xml);</span>
+    <span class="missing-if-branch" title="else path not taken" >E</span>if (str.length &lt;= maxLength) return str;
+<span class="cstat-no" title="statement not covered" >    return str.substring(0, maxLength) + `... [truncated ${str.length - maxLength} chars]`;</span>
+  }
 &nbsp;
-    const where = <span class="cstat-no" title="statement not covered" >{};</span>
-<span class="cstat-no" title="statement not covered" >    if (userId) <span class="cstat-no" title="statement not covered" >where.userId = parseInt(userId);</span></span>
-<span class="cstat-no" title="statement not covered" >    if (from || to) {</span>
-<span class="cstat-no" title="statement not covered" >      where.createdAt = {};</span>
-<span class="cstat-no" title="statement not covered" >      if (from) <span class="cstat-no" title="statement not covered" >where.createdAt.gte = new Date(from);</span></span>
-<span class="cstat-no" title="statement not covered" >      if (to) <span class="cstat-no" title="statement not covered" >where.createdAt.lte = new Date(to);</span></span>
+  /**
+   * Fetches and parses the WSDL to extract namespaces and operations
+   */
+  async loadWsdl() {
+    if (this.wsdlCache) {
+      return this.wsdlCache;
     }
 &nbsp;
-    const [logs, total] = <span class="cstat-no" title="statement not covered" >await Promise.all([</span>
-      prisma.activityLog.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { createdAt: 'desc' },
-        include: { user: { select: { email: true } } },
-      }),
-      prisma.activityLog.count({ where }),
-    ]);
+    try {
+      console.log(`[OracleSoapClient] Fetching WSDL from ${this.wsdlUrl}`);
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    return res.json({ logs, total, page, limit });</span>
-  } catch (err) {
-<span class="cstat-no" title="statement not covered" >    next(err);</span>
+      const response = await axios.get(this.wsdlUrl, {
+        auth: {
+          username: this.username,
+          password: this.password,
+        },
+        timeout: this.requestTimeout,
+        headers: {
+          'Accept': 'text/xml, application/xml',
+        },
+      });
+&nbsp;
+      const wsdlText = typeof response.data === 'string' ? response.data : <span class="branch-1 cbranch-no" title="branch not covered" >response.data.toString();</span>
+      const wsdl = this.xmlParser.parse(wsdlText);
+&nbsp;
+      // Extract namespaces from WSDL
+      this.extractNamespaces(wsdl);
+&nbsp;
+      // Extract operations and their SOAPAction
+      this.extractOperations(wsdl);
+&nbsp;
+      this.wsdlCache = wsdl;
+      console.log(`[OracleSoapClient] WSDL loaded successfully`);
+      console.log(`[OracleSoapClient] Found namespaces:`, Object.keys(this.namespaces));
+      console.log(`[OracleSoapClient] Found operations:`, Object.keys(this.operations));
+&nbsp;
+      return wsdl;
+    } catch (error) {
+      console.error(`[OracleSoapClient] Failed to load WSDL:`, error.message);
+      throw new Error(`Failed to load WSDL from ${this.wsdlUrl}: ${error.message}`);
+    }
   }
-}
 &nbsp;
-/**
- * GET /api/reports/export?type=failures|activity|standard-failures|misc-failures&amp;format=csv
- * Exports report data as a CSV file.
- */
-async function <span class="fstat-no" title="function not covered" >exportReport(</span>req, res, next) {
-<span class="cstat-no" title="statement not covered" >  try {</span>
-    const { type = <span class="branch-0 cbranch-no" title="branch not covered" >'failures',</span> from, to } = <span class="cstat-no" title="statement not covered" >req.query;</span>
+  /**
+   * Extracts namespace declarations from WSDL
+   */
+  extractNamespaces(wsdl) {
+    const definitions = wsdl['wsdl:definitions'] || wsdl.definitions || wsdl;
 &nbsp;
-    const dateFilter = <span class="cstat-no" title="statement not covered" >{};</span>
-<span class="cstat-no" title="statement not covered" >    if (from) <span class="cstat-no" title="statement not covered" >dateFilter.gte = new Date(from);</span></span>
-<span class="cstat-no" title="statement not covered" >    if (to) <span class="cstat-no" title="statement not covered" >dateFilter.lte = new Date(to);</span></span>
-    const hasDateFilter = <span class="cstat-no" title="statement not covered" >!!(from || to);</span>
+    // Extract all xmlns attributes
+    for (const key in definitions) {
+      if (key.startsWith('@_xmlns:')) {
+        const prefix = key.replace('@_xmlns:', '');
+        const uri = definitions[key];
+        this.namespaces[prefix] = uri;
+      } else if (key === '@_targetNamespace') {
+        this.namespaces['tns'] = definitions[key];
+      }
+    }
 &nbsp;
-    let csvRows = <span class="cstat-no" title="statement not covered" >[];</span>
-    let filename = <span class="cstat-no" title="statement not covered" >'export.csv';</span>
+    // Common Oracle Fusion namespaces
+    <span class="missing-if-branch" title="else path not taken" >E</span>if (!this.namespaces['soapenv']) {
+      this.namespaces['soapenv'] = 'http://schemas.xmlsoap.org/soap/envelope/';
+    }
+  }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (type === 'activity') {</span>
-      const logs = <span class="cstat-no" title="statement not covered" >await prisma.activityLog.findMany({</span>
-        where: hasDateFilter ? { createdAt: dateFilter } : {},
-        orderBy: { createdAt: 'desc' },
-        take: 5000,
-        include: { user: { select: { email: true } } },
-      });
-<span class="cstat-no" title="statement not covered" >      csvRows = logs.map(<span class="fstat-no" title="function not covered" >(l</span>) =&gt;</span>
-<span class="cstat-no" title="statement not covered" >        [</span>
-          csvEscape(l.id),
-          csvEscape(l.user?.email || ''),
-          csvEscape(l.actionType),
-          csvEscape(l.actionDetails),
-          csvEscape(l.ipAddress || ''),
-          csvEscape(l.createdAt.toISOString()),
-        ].join(',')
-      );
-<span class="cstat-no" title="statement not covered" >      csvRows.unshift(['id', 'email', 'actionType', 'actionDetails', 'ipAddress', 'createdAt'].map(csvEscape).join(','));</span>
-<span class="cstat-no" title="statement not covered" >      filename = 'activity_export.csv';</span>
-    } else <span class="cstat-no" title="statement not covered" >if (type === 'standard-failures') {</span>
-      // Export standard receipt failures with detailed logs
-      const failures = <span class="cstat-no" title="statement not covered" >await prisma.standardReceiptFailure.findMany({</span>
-        where: hasDateFilter ? { createdAt: dateFilter } : {},
-        orderBy: { createdAt: 'desc' },
-        take: 5000,
-        include: { upload: { select: { filename: true } } },
-      });
-<span class="cstat-no" title="statement not covered" >      csvRows = failures.map(<span class="fstat-no" title="function not covered" >(f</span>) =&gt;</span>
-<span class="cstat-no" title="statement not covered" >        [</span>
-          csvEscape(f.id),
-          csvEscape(f.uploadId),
-          csvEscape(f.upload?.filename || ''),
-          csvEscape(f.rowNumber),
-          csvEscape(f.errorMessage || ''),
-          csvEscape(f.responseStatus ?? ''),
-          csvEscape(f.requestPayload || ''),
-          csvEscape(f.responseBody || ''),
-          csvEscape(f.createdAt.toISOString()),
-        ].join(',')
-      );
-<span class="cstat-no" title="statement not covered" >      csvRows.unshift(</span>
-        ['id', 'uploadId', 'filename', 'rowNumber', 'errorMessage', 'responseStatus', 'requestPayload', 'responseBody', 'createdAt']
-          .map(csvEscape)
-          .join(',')
-      );
-<span class="cstat-no" title="statement not covered" >      filename = 'standard_receipt_failures_export.csv';</span>
-    } else <span class="cstat-no" title="statement not covered" >if (type === 'misc-failures') {</span>
-      // Export misc receipt failures with detailed logs
-      const failures = <span class="cstat-no" title="statement not covered" >await prisma.miscReceiptFailure.findMany({</span>
-        where: hasDateFilter ? { createdAt: dateFilter } : {},
-        orderBy: { createdAt: 'desc' },
-        take: 5000,
-        include: { upload: { select: { filename: true } } },
-      });
-<span class="cstat-no" title="statement not covered" >      csvRows = failures.map(<span class="fstat-no" title="function not covered" >(f</span>) =&gt;</span>
-<span class="cstat-no" title="statement not covered" >        [</span>
-          csvEscape(f.id),
-          csvEscape(f.uploadId),
-          csvEscape(f.upload?.filename || ''),
-          csvEscape(f.rowNumber),
-          csvEscape(f.errorMessage || ''),
-          csvEscape(f.responseStatus ?? ''),
-          csvEscape(f.requestPayload || ''),
-          csvEscape(f.responseBody || ''),
-          csvEscape(f.createdAt.toISOString()),
-        ].join(',')
-      );
-<span class="cstat-no" title="statement not covered" >      csvRows.unshift(</span>
-        ['id', 'uploadId', 'filename', 'rowNumber', 'errorMessage', 'responseStatus', 'requestPayload', 'responseBody', 'createdAt']
-          .map(csvEscape)
-          .join(',')
-      );
-<span class="cstat-no" title="statement not covered" >      filename = 'misc_receipt_failures_export.csv';</span>
-    } else {
-      // Default: inventory failures
-      const invFails = <span class="cstat-no" title="statement not covered" >await prisma.inventoryFailureRecord.findMany({</span>
-        where: hasDateFilter ? { createdAt: dateFilter } : {},
-        orderBy: { createdAt: 'desc' },
-        take: 5000,
-        include: { upload: { select: { filename: true, organizationName: true } } },
-      });
+  /**
+   * Extracts operations and their SOAPAction from WSDL
+   */
+  extractOperations(wsdl) {
+    try {
+      const definitions = wsdl['wsdl:definitions'] || wsdl.definitions || wsdl;
+      const binding = definitions['wsdl:binding'] || definitions.binding;
 &nbsp;
-      // Parse rawData so the original CSV columns can be flattened into the export.
-      const parsed = <span class="cstat-no" title="statement not covered" >invFails.map(<span class="fstat-no" title="function not covered" >(f</span>) =&gt; {</span>
-        let rawData = <span class="cstat-no" title="statement not covered" >{};</span>
-<span class="cstat-no" title="statement not covered" >        try {</span>
-          const obj = <span class="cstat-no" title="statement not covered" >JSON.parse(f.rawData);</span>
-<span class="cstat-no" title="statement not covered" >          if (obj &amp;&amp; typeof obj === 'object' &amp;&amp; !Array.isArray(obj)) <span class="cstat-no" title="statement not covered" >rawData = obj;</span></span>
-        } catch {
-          // ignore — rawData will remain empty
+      if (!binding) {
+        console.warn('[OracleSoapClient] No binding found in WSDL');
+        return;
+      }
+&nbsp;
+      // Handle single binding or array of bindings
+      const bindings = Array.isArray(binding) ? <span class="branch-0 cbranch-no" title="branch not covered" >binding </span>: [binding];
+&nbsp;
+      for (const b of bindings) {
+        const operations = b['wsdl:operation'] || <span class="branch-1 cbranch-no" title="branch not covered" >b.operation;</span>
+        <span class="missing-if-branch" title="if path not taken" >I</span>if (!operations) <span class="cstat-no" title="statement not covered" >continue;</span>
+&nbsp;
+        const ops = Array.isArray(operations) ? <span class="branch-0 cbranch-no" title="branch not covered" >operations </span>: [operations];
+&nbsp;
+        for (const op of ops) {
+          const opName = op['@_name'];
+          const soapOp = op['soap:operation'] || <span class="branch-1 cbranch-no" title="branch not covered" >op['soap12:operation'];</span>
+&nbsp;
+          <span class="missing-if-branch" title="else path not taken" >E</span>if (opName &amp;&amp; soapOp) {
+            this.operations[opName] = {
+              soapAction: soapOp['@_soapAction'] || <span class="branch-1 cbranch-no" title="branch not covered" >'',</span>
+              style: soapOp['@_style'] || <span class="branch-1 cbranch-no" title="branch not covered" >'document',</span>
+            };
+          }
         }
-<span class="cstat-no" title="statement not covered" >        return { ...f, rawData };</span>
-      });
+      }
+    } catch (error) {
+<span class="cstat-no" title="statement not covered" >      console.warn('[OracleSoapClient] Failed to extract operations:', error.message);</span>
+    }
+  }
 &nbsp;
-      // Collect the union of rawData keys across all failures (preserving first-seen order)
-      const rawDataKeys = <span class="cstat-no" title="statement not covered" >[];</span>
-      const seenKeys = <span class="cstat-no" title="statement not covered" >new Set();</span>
-<span class="cstat-no" title="statement not covered" >      for (const f of parsed) {</span>
-<span class="cstat-no" title="statement not covered" >        for (const key of Object.keys(f.rawData || {})) {</span>
-<span class="cstat-no" title="statement not covered" >          if (!seenKeys.has(key)) {</span>
-<span class="cstat-no" title="statement not covered" >            seenKeys.add(key);</span>
-<span class="cstat-no" title="statement not covered" >            rawDataKeys.push(key);</span>
+  /**
+   * Gets the SOAPAction header for an operation
+   */
+  getSoapAction(operationName) {
+    if (this.operations[operationName]) {
+      return this.operations[operationName].soapAction;
+    }
+    // Fallback to operation name
+    return operationName;
+  }
+&nbsp;
+  /**
+   * Builds a SOAP envelope with proper namespaces
+   */
+  buildSoapEnvelope(operationName, parameters, operationNamespace) {
+    // Use discovered namespaces or fallback to defaults
+    const soapenvNs = this.namespaces['soapenv'] || <span class="branch-1 cbranch-no" title="branch not covered" >'http://schemas.xmlsoap.org/soap/envelope/';</span>
+    const targetNs = operationNamespace || this.namespaces['tns'] || <span class="branch-2 cbranch-no" title="branch not covered" >'';</span>
+&nbsp;
+    const envelope = {
+      'soapenv:Envelope': {
+        '@_xmlns:soapenv': soapenvNs,
+        '@_xmlns:ns': targetNs,
+        'soapenv:Header': {},
+        'soapenv:Body': {
+          [`ns:${operationName}`]: parameters,
+        },
+      },
+    };
+&nbsp;
+    return this.xmlBuilder.build(envelope);
+  }
+&nbsp;
+  /**
+   * Parses MTOM/XOP multipart responses from Oracle
+   */
+  parseMtomResponse(responseData, contentType) {
+    try {
+      const data = typeof responseData === 'string' ? responseData : <span class="branch-1 cbranch-no" title="branch not covered" >responseData.toString('utf-8');</span>
+&nbsp;
+      // Check if it's a multipart response
+      if (contentType &amp;&amp; contentType.includes('multipart')) {
+        // Extract boundary
+        const boundaryMatch = contentType.match(/boundary="?([^";,]+)"?/);
+        <span class="missing-if-branch" title="if path not taken" >I</span>if (!boundaryMatch) {
+<span class="cstat-no" title="statement not covered" >          console.warn('[OracleSoapClient] Multipart response but no boundary found');</span>
+<span class="cstat-no" title="statement not covered" >          return this.extractXmlFromResponse(data);</span>
+        }
+&nbsp;
+        const boundary = boundaryMatch[1];
+        const parts = data.split(new RegExp(`--${boundary.replace(/[.*+?^${}()|[\]\\]/g, '\\$&amp;')}`));
+&nbsp;
+        // Find the SOAP XML part (usually the first part after boundary)
+        for (const part of parts) {
+          if (part.includes('Content-Type:') &amp;&amp; (part.includes('application/xop+xml') || part.includes('text/xml'))) {
+            // Extract XML content after headers
+            const xmlStart = part.indexOf('&lt;?xml');
+            if (xmlStart === -1) {
+              const envelopeStart = part.search(/&lt;\s*[\w.:-]*Envelope/i);
+              <span class="missing-if-branch" title="else path not taken" >E</span>if (envelopeStart !== -1) {
+                return part.slice(envelopeStart);
+              }
+            } else {
+              return part.slice(xmlStart);
+            }
           }
         }
       }
 &nbsp;
-      const header = <span class="cstat-no" title="statement not covered" >[</span>
-        'id',
-        'uploadId',
-        'filename',
-        'organizationName',
-        'rowNumber',
-        ...rawDataKeys,
-        'errorMessage',
-        'oracleErrorCode',
-        'oracleProcessStatus',
-        'httpStatus',
-        'responseBody',
-        'createdAt',
-      ];
-&nbsp;
-<span class="cstat-no" title="statement not covered" >      csvRows = parsed.map(<span class="fstat-no" title="function not covered" >(f</span>) =&gt;</span>
-<span class="cstat-no" title="statement not covered" >        [</span>
-          csvEscape(f.id),
-          csvEscape(f.uploadId),
-          csvEscape(f.upload?.filename || ''),
-          csvEscape(f.upload?.organizationName || ''),
-          csvEscape(f.rowNumber),
-          ...rawDataKeys.map(<span class="fstat-no" title="function not covered" >(k</span>) =&gt; <span class="cstat-no" title="statement not covered" >csvEscape(f.rawData?.[k] ?? ''))</span>,
-          csvEscape(f.errorMessage || ''),
-          csvEscape(f.oracleErrorCode || ''),
-          csvEscape(f.oracleProcessStatus || ''),
-          csvEscape(f.responseStatus ?? ''),
-          csvEscape(f.responseBody || ''),
-          csvEscape(f.createdAt.toISOString()),
-        ].join(',')
-      );
-<span class="cstat-no" title="statement not covered" >      csvRows.unshift(header.map(csvEscape).join(','));</span>
-<span class="cstat-no" title="statement not covered" >      filename = 'failures_export.csv';</span>
+      // Not multipart or couldn't parse - return as-is
+      return this.extractXmlFromResponse(data);
+    } catch (error) {
+<span class="cstat-no" title="statement not covered" >      console.error('[OracleSoapClient] Error parsing MTOM response:', error.message);</span>
+<span class="cstat-no" title="statement not covered" >      return this.extractXmlFromResponse(responseData);</span>
     }
-&nbsp;
-    // Add UTF-8 BOM (Byte Order Mark) to ensure proper encoding of Arabic and other Unicode characters
-    const BOM = <span class="cstat-no" title="statement not covered" >'\uFEFF';</span>
-    const csvContent = <span class="cstat-no" title="statement not covered" >BOM + csvRows.join('\n');</span>
-<span class="cstat-no" title="statement not covered" >    res.setHeader('Content-Type', 'text/csv; charset=utf-8');</span>
-<span class="cstat-no" title="statement not covered" >    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);</span>
-<span class="cstat-no" title="statement not covered" >    return res.send(csvContent);</span>
-  } catch (err) {
-<span class="cstat-no" title="statement not covered" >    next(err);</span>
   }
-}
 &nbsp;
-/**
- * GET /api/reports/upload-detail/:type/:id
- * Returns comprehensive details for a specific upload including request/response logs
- * @param {string} type - 'standard', 'misc', or 'apply'
- * @param {number} id - Upload ID
- */
-async function <span class="fstat-no" title="function not covered" >getUploadDetail(</span>req, res, next) {
-<span class="cstat-no" title="statement not covered" >  try {</span>
-    const { type, id } = <span class="cstat-no" title="statement not covered" >req.params;</span>
-    const uploadId = <span class="cstat-no" title="statement not covered" >parseInt(id);</span>
+  /**
+   * Extracts XML payload from response data
+   */
+  extractXmlFromResponse(data) {
+    const text = typeof data === 'string' ? data : <span class="branch-1 cbranch-no" title="branch not covered" >data.toString('utf-8');</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (isNaN(uploadId)) {</span>
-<span class="cstat-no" title="statement not covered" >      return res.status(400).json({ error: 'Invalid upload ID.' });</span>
+    // Try to find XML declaration
+    const xmlStart = text.indexOf('&lt;?xml');
+    if (xmlStart !== -1) {
+      return text.slice(xmlStart);
     }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >    if (type === 'standard') {</span>
-      const upload = <span class="cstat-no" title="statement not covered" >await prisma.standardReceiptUpload.findUnique({</span>
-        where: { id: uploadId },
-        include: {
-          user: { select: { email: true } },
-          failures: {
-            orderBy: { rowNumber: 'asc' }
-          },
-        },
-      });
+    // Try to find Envelope tag
+    const envelopeStart = text.search(/&lt;\s*[\w.:-]*Envelope/i);
+    if (envelopeStart !== -1) {
+      return text.slice(envelopeStart);
+    }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      if (!upload) {</span>
-<span class="cstat-no" title="statement not covered" >        return res.status(404).json({ error: 'Upload not found.' });</span>
-      }
+    return text;
+  }
 &nbsp;
-      // Parse rawData and failures
-      const parsedUpload = <span class="cstat-no" title="statement not covered" >{</span>
-        ...upload,
-        failures: upload.failures.map(<span class="fstat-no" title="function not covered" >(f</span>) =&gt; (<span class="cstat-no" title="statement not covered" >{</span>
-          ...f,
-          rawData: (<span class="fstat-no" title="function not covered" >()</span> =&gt; { <span class="cstat-no" title="statement not covered" >try { <span class="cstat-no" title="statement not covered" >return JSON.parse(f.rawData); </span>} catch { <span class="cstat-no" title="statement not covered" >return f.rawData; </span>} </span>})(),
-          requestPayload: f.requestPayload ? (<span class="fstat-no" title="function not covered" >()</span> =&gt; { <span class="cstat-no" title="statement not covered" >try { <span class="cstat-no" title="statement not covered" >return JSON.parse(f.requestPayload); </span>} catch { <span class="cstat-no" title="statement not covered" >return f.requestPayload; </span>} </span>})() : null,
-        })),
+  /**
+   * Extracts SOAP fault message from response
+   */
+  extractSoapFault(xmlText) {
+    try {
+      const parsed = this.xmlParser.parse(xmlText);
+&nbsp;
+      // Navigate through possible SOAP envelope structures
+      const envelope = parsed['soap:Envelope'] ||
+                      parsed['soapenv:Envelope'] ||
+                      parsed['env:Envelope'] ||
+                      parsed.Envelope;
+&nbsp;
+      if (!envelope) return null;
+&nbsp;
+      const body = envelope['soap:Body'] ||
+                   envelope['soapenv:Body'] ||
+<span class="branch-2 cbranch-no" title="branch not covered" >                   envelope['env:Body'] </span>||
+<span class="branch-3 cbranch-no" title="branch not covered" >                   envelope.Body;</span>
+&nbsp;
+      <span class="missing-if-branch" title="if path not taken" >I</span>if (!body) <span class="cstat-no" title="statement not covered" >return null;</span>
+&nbsp;
+      const fault = body['soap:Fault'] ||
+                    body['soapenv:Fault'] ||
+                    body['env:Fault'] ||
+                    body.Fault;
+&nbsp;
+      if (!fault) return null;
+&nbsp;
+      // Extract fault details
+      const faultcode = fault.faultcode || fault['soap:faultcode'] || '';
+      const faultstring = fault.faultstring || fault['soap:faultstring'] || <span class="branch-2 cbranch-no" title="branch not covered" >'';</span>
+      const detail = fault.detail || fault['soap:detail'] || '';
+&nbsp;
+      return {
+        code: typeof faultcode === 'object' ? <span class="branch-0 cbranch-no" title="branch not covered" >faultcode['#text'] || '' </span>: faultcode,
+        message: typeof faultstring === 'object' ? <span class="branch-0 cbranch-no" title="branch not covered" >faultstring['#text'] || '' </span>: faultstring,
+        detail: typeof detail === 'object' ? JSON.stringify(detail) : detail,
       };
+    } catch (error) {
+<span class="cstat-no" title="statement not covered" >      console.error('[OracleSoapClient] Error parsing SOAP fault:', error.message);</span>
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      return res.json(parsedUpload);</span>
-    } else <span class="cstat-no" title="statement not covered" >if (type === 'misc') {</span>
-      const upload = <span class="cstat-no" title="statement not covered" >await prisma.miscReceiptUpload.findUnique({</span>
-        where: { id: uploadId },
-        include: {
-          user: { select: { email: true } },
-          failures: {
-            orderBy: { rowNumber: 'asc' }
-          },
-        },
-      });
-&nbsp;
-<span class="cstat-no" title="statement not covered" >      if (!upload) {</span>
-<span class="cstat-no" title="statement not covered" >        return res.status(404).json({ error: 'Upload not found.' });</span>
+      // Fallback to regex extraction
+      const faultMatch = <span class="cstat-no" title="statement not covered" >xmlText.match(/&lt;faultstring[^&gt;]*&gt;([\s\S]*?)&lt;\/faultstring&gt;/i);</span>
+<span class="cstat-no" title="statement not covered" >      if (faultMatch) {</span>
+<span class="cstat-no" title="statement not covered" >        return {</span>
+          code: 'SOAP-ENV:Server',
+          message: faultMatch[1].trim(),
+          detail: '',
+        };
       }
 &nbsp;
-      // Parse rawData
-      const parsedUpload = <span class="cstat-no" title="statement not covered" >{</span>
-        ...upload,
-        failures: upload.failures.map(<span class="fstat-no" title="function not covered" >(f</span>) =&gt; (<span class="cstat-no" title="statement not covered" >{</span>
-          ...f,
-          rawData: (<span class="fstat-no" title="function not covered" >()</span> =&gt; { <span class="cstat-no" title="statement not covered" >try { <span class="cstat-no" title="statement not covered" >return JSON.parse(f.rawData); </span>} catch { <span class="cstat-no" title="statement not covered" >return f.rawData; </span>} </span>})(),
-        })),
-      };
+<span class="cstat-no" title="statement not covered" >      return null;</span>
+    }
+  }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >      return res.json(parsedUpload);</span>
-    } else <span class="cstat-no" title="statement not covered" >if (type === 'apply') {</span>
-      const upload = <span class="cstat-no" title="statement not covered" >await prisma.applyReceiptUpload.findUnique({</span>
-        where: { id: uploadId },
-        include: {
-          user: { select: { email: true } },
-          failures: {
-            orderBy: { rowNumber: 'asc' }
+  /**
+   * Calls a SOAP operation with automatic retry and error handling
+   */
+<span class="fstat-no" title="function not covered" >  as</span>ync call(operationName, parameters, operationNamespace) {
+    // Load WSDL if not already loaded
+<span class="cstat-no" title="statement not covered" >    if (!this.wsdlCache) {</span>
+<span class="cstat-no" title="statement not covered" >      await this.loadWsdl();</span>
+    }
+&nbsp;
+    const soapAction = <span class="cstat-no" title="statement not covered" >this.getSoapAction(operationName);</span>
+    const soapEnvelope = <span class="cstat-no" title="statement not covered" >this.buildSoapEnvelope(operationName, parameters, operationNamespace);</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    console.log(`[OracleSoapClient] Calling operation: ${operationName}`);</span>
+<span class="cstat-no" title="statement not covered" >    console.log(`[OracleSoapClient] SOAPAction: ${soapAction}`);</span>
+<span class="cstat-no" title="statement not covered" >    console.log(`[OracleSoapClient] Endpoint: ${this.serviceUrl}`);</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >    return pRetry(</span>
+<span class="fstat-no" title="function not covered" >      as</span>ync () =&gt; {
+        const response = <span class="cstat-no" title="statement not covered" >await axios.post(this.serviceUrl, soapEnvelope, {</span>
+          headers: {
+            'Content-Type': 'text/xml; charset=utf-8',
+            'Accept': 'text/xml, application/xml, multipart/related',
+            'SOAPAction': soapAction ? `"${soapAction}"` : `"${operationName}"`,
+            'Authorization': `Basic ${Buffer.from(`${this.username}:${this.password}`).toString('base64')}`,
           },
+          timeout: this.requestTimeout,
+          validateStatus: <span class="fstat-no" title="function not covered" >()</span> =&gt; <span class="cstat-no" title="statement not covered" >true,</span> // Don't throw on any status
+          responseType: 'text',
+          transformResponse: [<span class="fstat-no" title="function not covered" >(d</span>ata) =&gt; <span class="cstat-no" title="statement not covered" >data]</span>, // Prevent axios from parsing
+        });
+&nbsp;
+        const contentType = <span class="cstat-no" title="statement not covered" >response.headers['content-type'] || '';</span>
+        const xmlResponse = <span class="cstat-no" title="statement not covered" >this.parseMtomResponse(response.data, contentType);</span>
+        const fault = <span class="cstat-no" title="statement not covered" >this.extractSoapFault(xmlResponse);</span>
+&nbsp;
+        // Check for HTTP errors
+<span class="cstat-no" title="statement not covered" >        if (response.status &gt;= 500) {</span>
+<span class="cstat-no" title="statement not covered" >          console.error(`[OracleSoapClient] HTTP ${response.status} error:`, xmlResponse.substring(0, 500));</span>
+&nbsp;
+          const errorMessage = <span class="cstat-no" title="statement not covered" >fault ? fault.message : `HTTP ${response.status} error`;</span>
+&nbsp;
+          // Check for non-retryable errors
+<span class="cstat-no" title="statement not covered" >          if (fault &amp;&amp; /InvalidSecurity|FailedAuthentication|InvalidCredentials|invalid credentials/i.test(fault.message)) {</span>
+<span class="cstat-no" title="statement not covered" >            throw new pRetry.AbortError(new Error(errorMessage));</span>
+          }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >          throw new Error(errorMessage);</span>
+        }
+&nbsp;
+        // Check for SOAP faults
+<span class="cstat-no" title="statement not covered" >        if (fault) {</span>
+<span class="cstat-no" title="statement not covered" >          console.error(`[OracleSoapClient] SOAP Fault:`, fault);</span>
+&nbsp;
+          // Check if fault is retryable
+<span class="cstat-no" title="statement not covered" >          if (/timeout|temporarily unavailable|service unavailable/i.test(fault.message)) {</span>
+<span class="cstat-no" title="statement not covered" >            throw new Error(fault.message);</span>
+          }
+&nbsp;
+          // Non-retryable SOAP fault
+<span class="cstat-no" title="statement not covered" >          throw new pRetry.AbortError(new Error(fault.message));</span>
+        }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >        return {</span>
+          success: true,
+          status: response.status,
+          statusText: response.statusText,
+          data: xmlResponse,
+          parsed: this.xmlParser.parse(xmlResponse),
+        };
+      },
+      {
+        retries: this.maxRetries,
+        minTimeout: this.retryMinTimeout,
+        maxTimeout: this.retryMaxTimeout,
+        onFailedAttempt: <span class="fstat-no" title="function not covered" >(e</span>rror) =&gt; {
+<span class="cstat-no" title="statement not covered" >          console.warn(</span>
+            `[OracleSoapClient] Retry ${error.attemptNumber}/${this.maxRetries}: ${error.message}`
+          );
         },
-      });
-&nbsp;
-<span class="cstat-no" title="statement not covered" >      if (!upload) {</span>
-<span class="cstat-no" title="statement not covered" >        return res.status(404).json({ error: 'Upload not found.' });</span>
       }
+    );
+  }
 &nbsp;
-      // Return the upload with failures (no rawData parsing needed for apply receipts)
-<span class="cstat-no" title="statement not covered" >      return res.json(upload);</span>
+  /**
+   * Calls a SOAP operation with custom XML envelope (for backward compatibility)
+   */
+  async callWithCustomEnvelope(soapXml, soapAction) {
+    this.requestCounter++;
+    const requestId = `REQ-${Date.now()}-${this.requestCounter}`;
+&nbsp;
+    console.log(`[OracleSoapClient] ${requestId} Starting SOAP call`);
+    console.log(`[OracleSoapClient] ${requestId} SOAPAction: ${soapAction || <span class="branch-1 cbranch-no" title="branch not covered" >'(none)'}</span>`);
+    console.log(`[OracleSoapClient] ${requestId} Endpoint: ${this.serviceUrl}`);
+&nbsp;
+    // Validate inputs
+    <span class="missing-if-branch" title="if path not taken" >I</span>if (!soapXml || typeof soapXml !== 'string') {
+<span class="cstat-no" title="statement not covered" >      throw new Error('Invalid SOAP XML: must be a non-empty string');</span>
+    }
+&nbsp;
+    <span class="missing-if-branch" title="if path not taken" >I</span>if (!this.serviceUrl) {
+<span class="cstat-no" title="statement not covered" >      throw new Error('Service URL is not configured');</span>
+    }
+&nbsp;
+    // Always log the request XML for debugging (truncated in normal mode, full in debug mode)
+    <span class="missing-if-branch" title="if path not taken" >I</span>if (this.debugMode) {
+<span class="cstat-no" title="statement not covered" >      console.log(`[OracleSoapClient] ${requestId} Full Request XML:`, soapXml);</span>
     } else {
-<span class="cstat-no" title="statement not covered" >      return res.status(400).json({ error: 'Invalid upload type. Use "standard", "misc", or "apply".' });</span>
+      console.log(`[OracleSoapClient] ${requestId} Request XML (truncated):`, this.truncateXml(soapXml, 500));
     }
-  } catch (err) {
-<span class="cstat-no" title="statement not covered" >    next(err);</span>
+&nbsp;
+    return pRetry(
+      async () =&gt; {
+        const startTime = Date.now();
+&nbsp;
+        try {
+          // Build authentication header
+          const authHeader = `Basic ${Buffer.from(`${this.username}:${this.password}`).toString('base64')}`;
+&nbsp;
+          const headers = {
+            'Content-Type': 'text/xml; charset=utf-8',
+            'Accept': 'text/xml, application/xml, multipart/related',
+            'SOAPAction': soapAction ? `"${soapAction}"` : <span class="branch-1 cbranch-no" title="branch not covered" >'""',</span>
+            'Authorization': authHeader,
+            'Content-Length': Buffer.byteLength(soapXml, 'utf-8'),
+          };
+&nbsp;
+          this.debugLog(`${requestId} Request Headers:`, headers);
+&nbsp;
+          const response = await axios.post(this.serviceUrl, soapXml, {
+            headers,
+            timeout: this.requestTimeout,
+            validateStatus: <span class="fstat-no" title="function not covered" >()</span> =&gt; <span class="cstat-no" title="statement not covered" >true,</span>
+            responseType: 'text',
+            transformResponse: [<span class="fstat-no" title="function not covered" >(d</span>ata) =&gt; <span class="cstat-no" title="statement not covered" >data]</span>,
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+          });
+&nbsp;
+          const elapsed = Date.now() - startTime;
+          console.log(`[OracleSoapClient] ${requestId} Response received in ${elapsed}ms - HTTP ${response.status}`);
+&nbsp;
+          // Log response headers in debug mode
+          this.debugLog(`${requestId} Response Headers:`, response.headers);
+&nbsp;
+          const contentType = response.headers['content-type'] || <span class="branch-1 cbranch-no" title="branch not covered" >'';</span>
+          const xmlResponse = this.parseMtomResponse(response.data, contentType);
+&nbsp;
+          // Log response XML in debug mode
+          this.debugLog(`${requestId} Response XML:`, this.truncateXml(xmlResponse));
+&nbsp;
+          const fault = this.extractSoapFault(xmlResponse);
+&nbsp;
+          // Check for HTTP errors (5xx)
+          if (response.status &gt;= 500) {
+            // Log FULL response XML for 500 errors (don't truncate)
+            console.error(`[OracleSoapClient] ${requestId} HTTP ${response.status} error`);
+            console.error(`[OracleSoapClient] ${requestId} Full Response XML:`, xmlResponse);
+&nbsp;
+            const errorMessage = fault ? fault.message : <span class="branch-1 cbranch-no" title="branch not covered" >`HTTP ${response.status} error`;</span>
+&nbsp;
+            <span class="missing-if-branch" title="else path not taken" >E</span>if (fault) {
+              console.error(`[OracleSoapClient] ${requestId} SOAP Fault Details:`);
+              console.error(`  Code: ${fault.code}`);
+              console.error(`  Message: ${fault.message}`);
+              console.error(`  Detail: ${fault.detail}`);
+            }
+&nbsp;
+            // Check for non-retryable errors
+            <span class="missing-if-branch" title="else path not taken" >E</span>if (fault &amp;&amp; /InvalidSecurity|FailedAuthentication|InvalidCredentials|invalid credentials|unauthorized/i.test(fault.message)) {
+              console.error(`[OracleSoapClient] ${requestId} Authentication failed - not retrying`);
+              throw new pRetry.AbortError(new Error(`Authentication failed: ${errorMessage}`));
+            }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >            throw new Error(errorMessage);</span>
+          }
+&nbsp;
+          // Check for client errors (4xx)
+          <span class="missing-if-branch" title="if path not taken" >I</span>if (response.status &gt;= 400) {
+<span class="cstat-no" title="statement not covered" >            console.error(`[OracleSoapClient] ${requestId} HTTP ${response.status} client error:`, this.truncateXml(xmlResponse, 500));</span>
+            const errorMessage = <span class="cstat-no" title="statement not covered" >fault ? fault.message : `HTTP ${response.status} client error`;</span>
+            // 4xx errors are typically not retryable
+<span class="cstat-no" title="statement not covered" >            throw new pRetry.AbortError(new Error(errorMessage));</span>
+          }
+&nbsp;
+          // Check for SOAP faults
+          <span class="missing-if-branch" title="if path not taken" >I</span>if (fault) {
+<span class="cstat-no" title="statement not covered" >            console.error(`[OracleSoapClient] ${requestId} SOAP Fault detected:`, fault);</span>
+&nbsp;
+            // Check if fault is retryable (transient errors)
+<span class="cstat-no" title="statement not covered" >            if (/timeout|temporarily unavailable|service unavailable|too many requests|rate limit/i.test(fault.message)) {</span>
+<span class="cstat-no" title="statement not covered" >              console.warn(`[OracleSoapClient] ${requestId} Transient error detected - will retry`);</span>
+<span class="cstat-no" title="statement not covered" >              throw new Error(fault.message);</span>
+            }
+&nbsp;
+            // Non-retryable SOAP fault (business logic errors, validation errors, etc.)
+<span class="cstat-no" title="statement not covered" >            console.error(`[OracleSoapClient] ${requestId} Non-retryable SOAP fault - aborting`);</span>
+<span class="cstat-no" title="statement not covered" >            throw new pRetry.AbortError(new Error(fault.message));</span>
+          }
+&nbsp;
+          // Success response
+          console.log(`[OracleSoapClient] ${requestId} ✅ Success - HTTP ${response.status} in ${elapsed}ms`);
+&nbsp;
+          return {
+            success: true,
+            status: response.status,
+            statusText: response.statusText,
+            data: xmlResponse,
+            parsed: this.xmlParser.parse(xmlResponse),
+            requestId,
+            elapsed,
+          };
+&nbsp;
+        } catch (error) {
+          // Handle axios errors
+          <span class="missing-if-branch" title="if path not taken" >I</span>if (error.code === 'ECONNABORTED') {
+<span class="cstat-no" title="statement not covered" >            console.error(`[OracleSoapClient] ${requestId} Request timeout after ${this.requestTimeout}ms`);</span>
+<span class="cstat-no" title="statement not covered" >            throw new Error(`Request timeout after ${this.requestTimeout}ms`);</span>
+          }
+&nbsp;
+          <span class="missing-if-branch" title="if path not taken" >I</span>if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+<span class="cstat-no" title="statement not covered" >            console.error(`[OracleSoapClient] ${requestId} Network error: ${error.code}`);</span>
+<span class="cstat-no" title="statement not covered" >            throw new Error(`Network error: Cannot reach ${this.serviceUrl}`);</span>
+          }
+&nbsp;
+          // Re-throw if it's already a pRetry.AbortError
+          if (error instanceof pRetry.AbortError) {
+            throw error;
+          }
+&nbsp;
+          // Re-throw other errors for retry
+          throw error;
+        }
+      },
+      {
+        retries: this.maxRetries,
+        minTimeout: this.retryMinTimeout,
+        maxTimeout: this.retryMaxTimeout,
+        onFailedAttempt: (error) =&gt; {
+          console.warn(
+            `[OracleSoapClient] ${requestId} Retry ${error.attemptNumber}/${this.maxRetries + 1}: ${error.message}`
+          );
+          if (error.attemptNumber &lt; this.maxRetries + 1) {
+            console.log(`[OracleSoapClient] ${requestId} Waiting before retry...`);
+          } else {
+            console.error(`[OracleSoapClient] ${requestId} All retries exhausted`);
+          }
+        },
+      }
+    );
   }
 }
 &nbsp;
 /**
- * GET /api/reports/all-uploads
- * Returns all uploads (inventory, standard, misc, apply) combined for the upload history tab
+ * Factory function to create OracleSoapClient instances with environment configuration
  */
-async function <span class="fstat-no" title="function not covered" >getAllUploads(</span>req, res, next) {
-<span class="cstat-no" title="statement not covered" >  try {</span>
-    const page = <span class="cstat-no" title="statement not covered" >Math.max(1, parseInt(req.query.page) || 1);</span>
-    const limit = <span class="cstat-no" title="statement not covered" >Math.min(100, parseInt(req.query.limit) || 20);</span>
-    const skip = <span class="cstat-no" title="statement not covered" >(page - 1) * limit;</span>
+function <span class="fstat-no" title="function not covered" >createOracleSoapClient(</span>serviceUrl, wsdlUrl) {
+  const username = <span class="cstat-no" title="statement not covered" >process.env.ORACLE_USERNAME;</span>
+  const password = <span class="cstat-no" title="statement not covered" >process.env.ORACLE_PASSWORD;</span>
+  const maxRetries = <span class="cstat-no" title="statement not covered" >parseInt(process.env.MAX_RETRIES) || 3;</span>
 &nbsp;
-    // Fetch all four types of uploads in parallel
-    const [inventoryUploads, standardUploads, miscUploads, applyUploads] = <span class="cstat-no" title="statement not covered" >await Promise.all([</span>
-      prisma.inventoryUpload.findMany({
-        include: {
-          user: { select: { email: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-      }),
-      prisma.standardReceiptUpload.findMany({
-        include: {
-          user: { select: { email: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-      }),
-      prisma.miscReceiptUpload.findMany({
-        include: {
-          user: { select: { email: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-      }),
-      prisma.applyReceiptUpload.findMany({
-        include: {
-          user: { select: { email: true } },
-        },
-        orderBy: { createdAt: 'desc' },
-      }),
-    ]);
-&nbsp;
-    // Combine and add type field to each upload
-    const allUploads = <span class="cstat-no" title="statement not covered" >[</span>
-      ...inventoryUploads.map(<span class="fstat-no" title="function not covered" >u </span>=&gt; (<span class="cstat-no" title="statement not covered" >{ ...u, uploadType: 'inventory' })</span>),
-      ...standardUploads.map(<span class="fstat-no" title="function not covered" >u </span>=&gt; (<span class="cstat-no" title="statement not covered" >{ ...u, uploadType: 'standard' })</span>),
-      ...miscUploads.map(<span class="fstat-no" title="function not covered" >u </span>=&gt; (<span class="cstat-no" title="statement not covered" >{ ...u, uploadType: 'misc' })</span>),
-      ...applyUploads.map(<span class="fstat-no" title="function not covered" >u </span>=&gt; (<span class="cstat-no" title="statement not covered" >{ ...u, uploadType: 'apply' })</span>),
-    ];
-&nbsp;
-    // Sort by createdAt descending
-<span class="cstat-no" title="statement not covered" >    allUploads.sort(<span class="fstat-no" title="function not covered" >(a</span>, b) =&gt; <span class="cstat-no" title="statement not covered" >new Date(b.createdAt) - new Date(a.createdAt))</span>;</span>
-&nbsp;
-    // Apply pagination
-    const total = <span class="cstat-no" title="statement not covered" >allUploads.length;</span>
-    const paginatedUploads = <span class="cstat-no" title="statement not covered" >allUploads.slice(skip, skip + limit);</span>
-&nbsp;
-<span class="cstat-no" title="statement not covered" >    return res.json({</span>
-      uploads: paginatedUploads,
-      total,
-      page,
-      limit,
-    });
-  } catch (err) {
-<span class="cstat-no" title="statement not covered" >    next(err);</span>
+<span class="cstat-no" title="statement not covered" >  if (!username || !password) {</span>
+<span class="cstat-no" title="statement not covered" >    throw new Error('Oracle credentials not configured. Set ORACLE_USERNAME and ORACLE_PASSWORD in .env');</span>
   }
+&nbsp;
+<span class="cstat-no" title="statement not covered" >  if (!serviceUrl) {</span>
+<span class="cstat-no" title="statement not covered" >    throw new Error('Oracle service URL is required');</span>
+  }
+&nbsp;
+  // If WSDL URL not provided, try to construct it from service URL
+  const finalWsdlUrl = <span class="cstat-no" title="statement not covered" >wsdlUrl || `${serviceUrl}?WSDL`;</span>
+&nbsp;
+<span class="cstat-no" title="statement not covered" >  return new OracleSoapClient({</span>
+    wsdlUrl: finalWsdlUrl,
+    serviceUrl,
+    username,
+    password,
+    maxRetries,
+    requestTimeout: 30000,
+  });
 }
 &nbsp;
-<span class="cstat-no" title="statement not covered" >module.exports = { dashboard, failures, activity, exportReport, getUploadDetail, getAllUploads };</span>
+module.exports = OracleSoapClient;
+module.exports.createOracleSoapClient = createOracleSoapClient;
 &nbsp;</pre></td></tr></table></pre>
 
                 <div class='push'></div><!-- for sticky footer -->

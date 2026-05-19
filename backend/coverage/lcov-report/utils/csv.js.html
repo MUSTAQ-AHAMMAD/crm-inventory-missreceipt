@@ -3,7 +3,7 @@
 <html lang="en">
 
 <head>
-    <title>Code coverage report for routes/inventoryTemplate.js</title>
+    <title>Code coverage report for utils/csv.js</title>
     <meta charset="utf-8" />
     <link rel="stylesheet" href="../prettify.css" />
     <link rel="stylesheet" href="../base.css" />
@@ -19,13 +19,13 @@
 <body>
 <div class='wrapper'>
     <div class='pad1'>
-        <h1><a href="../index.html">All files</a> / <a href="index.html">routes</a> inventoryTemplate.js</h1>
+        <h1><a href="../index.html">All files</a> / <a href="index.html">utils</a> csv.js</h1>
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>0/14</span>
+                <span class='fraction'>0/5</span>
             </div>
         
             
@@ -46,7 +46,7 @@
             <div class='fl pad1y space-right2'>
                 <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>0/14</span>
+                <span class='fraction'>0/4</span>
             </div>
         
             
@@ -82,20 +82,14 @@
 <a name='L17'></a><a href='#L17'>17</a>
 <a name='L18'></a><a href='#L18'>18</a>
 <a name='L19'></a><a href='#L19'>19</a>
-<a name='L20'></a><a href='#L20'>20</a>
-<a name='L21'></a><a href='#L21'>21</a>
-<a name='L22'></a><a href='#L22'>22</a>
-<a name='L23'></a><a href='#L23'>23</a>
-<a name='L24'></a><a href='#L24'>24</a>
-<a name='L25'></a><a href='#L25'>25</a>
-<a name='L26'></a><a href='#L26'>26</a>
-<a name='L27'></a><a href='#L27'>27</a>
-<a name='L28'></a><a href='#L28'>28</a>
-<a name='L29'></a><a href='#L29'>29</a>
-<a name='L30'></a><a href='#L30'>30</a>
-<a name='L31'></a><a href='#L31'>31</a>
-<a name='L32'></a><a href='#L32'>32</a>
-<a name='L33'></a><a href='#L33'>33</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<a name='L20'></a><a href='#L20'>20</a></td><td class="line-coverage quiet"><span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
+<span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -104,61 +98,28 @@
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">/**
- * Inventory Template Generation routes.
- * Protected endpoints that convert Amro inventory CSV exports into the
- * inventory transaction template format for download/preview.
+ * Shared CSV helpers used by the report and inventory export endpoints.
  */
 &nbsp;
-const express = <span class="cstat-no" title="statement not covered" >require('express');</span>
-const multer = <span class="cstat-no" title="statement not covered" >require('multer');</span>
-const { authenticate } = <span class="cstat-no" title="statement not covered" >require('../middleware/auth');</span>
-const { activityLogger } = <span class="cstat-no" title="statement not covered" >require('../middleware/activityLogger');</span>
-const { previewTemplate, downloadTemplate } = <span class="cstat-no" title="statement not covered" >require('../controllers/inventoryTemplateController');</span>
+/**
+ * Escapes a single value for inclusion in a CSV field.
+ * Wraps the value in double quotes and escapes embedded quotes by doubling them.
+ * Newlines are normalized to spaces so they don't break the CSV row structure.
+ *
+ * @param {*} value
+ * @returns {string}
+ */
+function <span class="fstat-no" title="function not covered" >csvEscape(</span>value) {
+<span class="cstat-no" title="statement not covered" >  if (value === null || value === undefined) <span class="cstat-no" title="statement not covered" >return '""';</span></span>
+  const str = <span class="cstat-no" title="statement not covered" >String(value).replace(/"/g, '""').replace(/\r?\n/g, ' ');</span>
+<span class="cstat-no" title="statement not covered" >  return `"${str}"`;</span>
+}
 &nbsp;
-const router = <span class="cstat-no" title="statement not covered" >express.Router();</span>
-&nbsp;
-const upload = <span class="cstat-no" title="statement not covered" >multer({</span>
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB
-  fileFilter: <span class="fstat-no" title="function not covered" >(_</span>req, file, cb) =&gt; {
-<span class="cstat-no" title="statement not covered" >    if (file.mimetype === 'text/csv' || file.originalname.endsWith('.csv')) {</span>
-<span class="cstat-no" title="statement not covered" >      cb(null, true);</span>
-    } else {
-<span class="cstat-no" title="statement not covered" >      cb(new Error('Only CSV files are accepted.'));</span>
-    }
-  },
-});
-&nbsp;
-<span class="cstat-no" title="statement not covered" >router.use(authenticate, activityLogger);</span>
-&nbsp;
-<span class="cstat-no" title="statement not covered" >router.post('/preview', upload.single('file'), previewTemplate);</span>
-<span class="cstat-no" title="statement not covered" >router.post('/download', upload.single('file'), downloadTemplate);</span>
-&nbsp;
-<span class="cstat-no" title="statement not covered" >module.exports = router;</span>
+<span class="cstat-no" title="statement not covered" >module.exports = { csvEscape };</span>
 &nbsp;</pre></td></tr></table></pre>
 
                 <div class='push'></div><!-- for sticky footer -->
