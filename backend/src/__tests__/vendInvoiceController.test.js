@@ -1,6 +1,11 @@
 const XLSX = require('xlsx');
 const prisma = require('../services/prisma');
 const fusionMetadataService = require('../services/fusionSalesMetadataService');
+
+jest.mock('uuid', () => ({
+  v4: jest.fn(() => 'test-uuid'),
+}));
+
 const { uploadVendInvoice } = require('../controllers/vendInvoiceController');
 
 jest.mock('xlsx', () => ({
