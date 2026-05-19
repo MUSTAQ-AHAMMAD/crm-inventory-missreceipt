@@ -156,14 +156,18 @@ async function uploadVendInvoice(req, res, next) {
       return res.status(400).json({ error: 'Sales Lines file is empty or has no valid rows.' });
     }
 
-    // Build a map of Payment Method Details to Subinventory Code
-    // Payment Lines: Map by "Payment Method Details" to get "Subinventory code"
+    // Build a map of Payment Method Details to Subinventory Code and Branch
+    // Payment Lines: Map by "Payment Method Details" to get "Subinventory code" and "Branch"
     const paymentMethodMap = {};
     for (const payment of paymentLines) {
       const paymentMethodDetails = String(payment['Payment Method Details'] || '').trim().toUpperCase();
       const subinventoryCode = String(payment['Subinventory code'] || '').trim();
+      const branch = String(payment['Branch'] || '').trim();
       if (paymentMethodDetails && subinventoryCode) {
-        paymentMethodMap[paymentMethodDetails] = subinventoryCode;
+        paymentMethodMap[paymentMethodDetails] = {
+          subinventoryCode,
+          branch,
+        };
       }
     }
 
@@ -177,16 +181,18 @@ async function uploadVendInvoice(req, res, next) {
       try {
         const row = salesLines[i];
 
-        // Extract sales order (e.g., "AZIZMALL/64181") and split to get store code
-        const salesOrder = String(row['Order Lines/Order'] || '').trim();
-        const storeCode = salesOrder.split('/')[0].toUpperCase(); // e.g., "AZIZMALL"
+        // Extract sales order reference (e.g., "AZIZMALL/64181")
+        const salesOrderRef = String(row['Order Lines/Order Ref'] || '').trim();
+        const storeCode = salesOrderRef.split('/')[0].toUpperCase(); // e.g., "AZIZMALL"
 
-        // Find subinventory code from payment lines using the store code
+        // Find subinventory code and branch from payment lines using the store code
         // The store code should match "Payment Method Details" in payment lines
-        const subinventoryCode = paymentMethodMap[storeCode] || storeCode;
+        const paymentData = paymentMethodMap[storeCode];
+        const subinventoryCode = paymentData?.subinventoryCode || storeCode;
+        const branch = paymentData?.branch || '';
 
-        if (!paymentMethodMap[storeCode]) {
-          console.warn(`[Vend Invoice] No subinventory found for store code: ${storeCode}, using store code as fallback`);
+        if (!paymentData) {
+          console.warn(`[Vend Invoice] No payment data found for store code: ${storeCode}, using store code as fallback`);
         }
 
         // Extract date from sales lines (using Order Ref/Date column)
@@ -202,21 +208,32 @@ async function uploadVendInvoice(req, res, next) {
         const groupKey = `${subinventoryCode}_${saleDate}`;
 
         if (!invoiceGroups[groupKey]) {
-          // Get metadata for this subinventory
+          // Get metadata for this branch/subinventory combination
           let headerData = {};
           try {
-            headerData = await fusionMetadataService.getArInvoiceHeaderMapping(
-              subinventoryCode,
-              subinventoryCode
-            );
+            // Try to lookup by branch name first
+            if (branch) {
+              headerData = await fusionMetadataService.getArInvoiceHeaderMapping(
+                branch,
+                subinventoryCode
+              );
+            }
+            // If no data found and branch is different from subinventory, try subinventory
+            if (!headerData.BillToCustomerName && branch !== subinventoryCode) {
+              headerData = await fusionMetadataService.getArInvoiceHeaderMapping(
+                subinventoryCode,
+                subinventoryCode
+              );
+            }
           } catch (err) {
-            console.warn(`[Vend Invoice] Could not fetch metadata for ${subinventoryCode}:`, err.message);
+            console.warn(`[Vend Invoice] Could not fetch metadata for ${branch || subinventoryCode}/${subinventoryCode}:`, err.message);
           }
 
           invoiceGroups[groupKey] = {
             subinventoryCode,
             date: saleDate,
-            customerName: headerData.BillToCustomerName || subinventoryCode,
+            // Use branch from payment lines if available, otherwise use metadata or subinventory
+            customerName: branch || headerData.BillToCustomerName || subinventoryCode,
             customerNumber: headerData.BillToCustomerNumber || '',
             siteNumber: headerData.BillToSite || '',
             lines: [],
@@ -235,7 +252,7 @@ async function uploadVendInvoice(req, res, next) {
             Quantity: quantity,
             UnitSellingPrice: unitSellingPrice,
             TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
-            SalesOrder: salesOrder,
+            SalesOrder: salesOrderRef,
             MemoLine: description || 'Discount Item',
           });
         } else {
@@ -246,7 +263,7 @@ async function uploadVendInvoice(req, res, next) {
             Quantity: quantity,
             UnitSellingPrice: unitSellingPrice,
             TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
-            SalesOrder: salesOrder,
+            SalesOrder: salesOrderRef,
             MemoLine: null,
           });
         }
@@ -309,7 +326,111 @@ async function previewVendInvoice(req, res, next) {
   return uploadVendInvoice(req, res, next);
 }
 
+/**
+ * POST /api/vend-invoice/download-json
+ * Download payloads as JSON file
+ */
+async function downloadPayloadsAsJson(req, res, next) {
+  try {
+    const { payloads } = req.body;
+
+    if (!payloads || !Array.isArray(payloads)) {
+      return res.status(400).json({ error: 'payloads array is required' });
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    const filename = `vend-invoices-${timestamp}.json`;
+
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.json(payloads);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/vend-invoice/download-csv
+ * Download payloads as CSV file (flattened structure)
+ */
+async function downloadPayloadsAsCsv(req, res, next) {
+  try {
+    const { payloads } = req.body;
+
+    if (!payloads || !Array.isArray(payloads)) {
+      return res.status(400).json({ error: 'payloads array is required' });
+    }
+
+    // Flatten payloads into CSV rows
+    const rows = [];
+    const headers = [
+      'CrossReference',
+      'BusinessUnit',
+      'TransactionSource',
+      'TransactionType',
+      'TransactionDate',
+      'AccountingDate',
+      'BillToCustomerName',
+      'BillToCustomerNumber',
+      'BillToSite',
+      'PaymentTerms',
+      'InvoiceCurrencyCode',
+      'Comments',
+      'LineNumber',
+      'ItemNumber',
+      'Description',
+      'Quantity',
+      'UnitSellingPrice',
+      'TaxClassificationCode',
+      'SalesOrder',
+      'MemoLine',
+    ];
+
+    rows.push(headers.join(','));
+
+    for (const payload of payloads) {
+      for (const line of payload.receivablesInvoiceLines || []) {
+        const row = [
+          payload.CrossReference || '',
+          payload.BusinessUnit || '',
+          payload.TransactionSource || '',
+          payload.TransactionType || '',
+          payload.TransactionDate || '',
+          payload.AccountingDate || '',
+          `"${(payload.BillToCustomerName || '').replace(/"/g, '""')}"`,
+          payload.BillToCustomerNumber || '',
+          payload.BillToSite || '',
+          payload.PaymentTerms || '',
+          payload.InvoiceCurrencyCode || '',
+          `"${(payload.Comments || '').replace(/"/g, '""')}"`,
+          line.LineNumber || '',
+          line.ItemNumber || '',
+          `"${(line.Description || '').replace(/"/g, '""')}"`,
+          line.Quantity || '',
+          line.UnitSellingPrice || '',
+          line.TaxClassificationCode || '',
+          line.SalesOrder || '',
+          line.MemoLine ? `"${line.MemoLine.replace(/"/g, '""')}"` : '',
+        ];
+        rows.push(row.join(','));
+      }
+    }
+
+    const csvContent = rows.join('\n');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    const filename = `vend-invoices-${timestamp}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csvContent);
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   uploadVendInvoice,
   previewVendInvoice,
+  downloadPayloadsAsJson,
+  downloadPayloadsAsCsv,
 };
