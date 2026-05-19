@@ -10,7 +10,7 @@ export default function VendSalesMetadataPage() {
   const [page, setPage] = useState(1)
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['fusionSalesMetadata', page],
+    queryKey: ['vendSalesMetadata', page],
     queryFn: () =>
       api
         .get('/ar-invoice/metadata/list', {
@@ -41,7 +41,7 @@ export default function VendSalesMetadataPage() {
             <Spinner />
           </div>
         ) : error ? (
-          <ErrorAlert message="Failed to load VendSales metadata." />
+          <ErrorAlert message="Failed to load VendSales metadata. Please refresh the page and try again." />
         ) : records.length === 0 ? (
           <p className="text-sm text-gray-500 text-center py-8">No metadata records found.</p>
         ) : (
