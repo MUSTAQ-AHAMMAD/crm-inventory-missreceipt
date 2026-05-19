@@ -19,6 +19,7 @@ const standardReceiptRoutes = require('./routes/standardReceipt');
 const applyReceiptRoutes = require('./routes/applyReceipt');
 const arInvoiceRoutes = require('./routes/arInvoice');
 const arInvoiceDataRoutes = require('./routes/arInvoiceData');
+const vendInvoiceRoutes = require('./routes/vendInvoice');
 const adminRoutes = require('./routes/admin');
 const reportsRoutes = require('./routes/reports');
 
@@ -86,6 +87,7 @@ app.use('/api/standard-receipt', standardReceiptRoutes);
 app.use('/api/apply-receipt', applyReceiptRoutes);
 app.use('/api/ar-invoice', arInvoiceRoutes);
 app.use('/api/ar-invoice-data', arInvoiceDataRoutes);
+app.use('/api/vend-invoice', vendInvoiceRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportsRoutes);
 
