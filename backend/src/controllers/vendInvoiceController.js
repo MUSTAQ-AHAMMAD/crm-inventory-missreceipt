@@ -156,9 +156,11 @@ async function uploadVendInvoice(req, res, next) {
       return res.status(400).json({ error: 'Sales Lines file is empty or has no valid rows.' });
     }
 
-    // Build a map of Payment Method Details to Subinventory Code, Branch, and Payment Type
-    // Payment Lines: Map by "Payment Method Details" to get "Subinventory code", "Branch", and "Payment Method"
-    const paymentMethodMap = {};
+    // Build a map of store codes to their available payment types and subinventory info
+    // Key insight: Each store can have multiple payment types (NORMAL, TABBY, TAMARA)
+    // We group by store code + date + payment type
+    const storePaymentMap = {}; // Key: storeCode -> { paymentTypes: Set<string>, subinventory, branch }
+
     for (const payment of paymentLines) {
       const paymentMethodDetails = String(payment['Payment Method Details'] || '').trim().toUpperCase();
       const subinventoryCode = String(payment['Subinventory code'] || '').trim();
@@ -174,20 +176,19 @@ async function uploadVendInvoice(req, res, next) {
           paymentType = 'TAMARA';
         }
 
-        // Store payment info with payment type
-        if (!paymentMethodMap[paymentMethodDetails]) {
-          paymentMethodMap[paymentMethodDetails] = [];
+        // Store payment types available for this store
+        if (!storePaymentMap[paymentMethodDetails]) {
+          storePaymentMap[paymentMethodDetails] = {
+            subinventoryCode,
+            branch,
+            paymentTypes: new Set(),
+          };
         }
-        paymentMethodMap[paymentMethodDetails].push({
-          subinventoryCode,
-          branch,
-          paymentType,
-          paymentMethod,
-        });
+        storePaymentMap[paymentMethodDetails].paymentTypes.add(paymentType);
       }
     }
 
-    console.log(`[Vend Invoice] Built payment method map with ${Object.keys(paymentMethodMap).length} entries`);
+    console.log(`[Vend Invoice] Built payment method map with ${Object.keys(storePaymentMap).length} stores`);
 
     // Process sales lines and group by store + date + payment type
     const invoiceGroups = {}; // Key: `${subinventory}_${date}_${paymentType}`
@@ -201,14 +202,15 @@ async function uploadVendInvoice(req, res, next) {
         const salesOrderRef = String(row['Order Lines/Order Ref'] || '').trim();
         const storeCode = salesOrderRef.split('/')[0].toUpperCase(); // e.g., "AZIZMALL"
 
-        // Find subinventory code, branch, and payment methods from payment lines using the store code
-        // The store code should match "Payment Method Details" in payment lines
-        const paymentDataArray = paymentMethodMap[storeCode];
+        // Find subinventory code, branch, and available payment types for this store
+        const storeData = storePaymentMap[storeCode];
 
-        if (!paymentDataArray || paymentDataArray.length === 0) {
+        if (!storeData) {
           console.warn(`[Vend Invoice] No payment data found for store code: ${storeCode}, skipping row ${i + 2}`);
           continue;
         }
+
+        const { subinventoryCode, branch, paymentTypes } = storeData;
 
         // Extract date from sales lines (using Order Ref/Date column)
         const saleDate = normalizeDate(row['Order Lines/Order Ref/Date'], 'Sale Date');
@@ -219,11 +221,36 @@ async function uploadVendInvoice(req, res, next) {
         const quantity = parseFloat(row['Order Lines/Base Quantity'] || 0);
         const unitSellingPrice = parseFloat(row['Order Lines/Tax Incl'] || 0);
 
-        // Process this line for each payment method type (NORMAL, TABBY, TAMARA)
-        // This creates 3 separate invoices per store per day
-        for (const paymentData of paymentDataArray) {
-          const { subinventoryCode, branch, paymentType } = paymentData;
+        // Try to extract payment method from sales line (if available)
+        // Payment method field might be named: "Payment Method", "Order Lines/Payment Method", etc.
+        const linePaymentMethod = String(
+          row['Payment Method'] ||
+          row['Order Lines/Payment Method'] ||
+          row['Payment Type'] ||
+          ''
+        ).trim().toUpperCase();
 
+        // Determine which payment type this line belongs to
+        let linePaymentType = null;
+        if (linePaymentMethod.includes('TABBY')) {
+          linePaymentType = 'TABBY';
+        } else if (linePaymentMethod.includes('TAMARA')) {
+          linePaymentType = 'TAMARA';
+        } else if (linePaymentMethod) {
+          // Any other payment method (Cash, Bank, Card, etc.) maps to NORMAL
+          linePaymentType = 'NORMAL';
+        }
+
+        // If line has a specific payment method, only add it to that invoice
+        // Otherwise, add it to all available payment type invoices (for backward compatibility)
+        const targetPaymentTypes = linePaymentType ? [linePaymentType] : Array.from(paymentTypes);
+
+        for (const paymentType of targetPaymentTypes) {
+          // Skip if this payment type is not available for this store
+          if (!paymentTypes.has(paymentType)) {
+            console.warn(`[Vend Invoice] Skipping line ${i + 2}: payment type ${paymentType} not available for store ${storeCode}`);
+            continue;
+          }
           // Create key for grouping: one invoice per store per day per payment type
           const groupKey = `${subinventoryCode}_${saleDate}_${paymentType}`;
 
