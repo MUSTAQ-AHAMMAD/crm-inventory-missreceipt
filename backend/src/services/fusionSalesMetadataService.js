@@ -17,11 +17,12 @@ function normalizeLookupValue(value) {
  */
 async function findBySalesHeader(customerName, subinventory) {
   try {
+    const normalizedCustomerName = String(customerName || '').trim();
     const normalizedSubinventory = normalizeLookupValue(subinventory);
 
     const metadata = await prisma.fusionSalesMetadata.findFirst({
       where: {
-        billToName: customerName,
+        billToName: normalizedCustomerName,
         subinventory: normalizedSubinventory,
       },
     });

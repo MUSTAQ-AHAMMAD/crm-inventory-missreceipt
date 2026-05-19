@@ -28,7 +28,7 @@ describe('fusionSalesMetadataService', () => {
   test('findBySalesHeader normalizes subinventory', async () => {
     prisma.fusionSalesMetadata.findFirst.mockResolvedValue({ rowId: 2 });
 
-    await service.findBySalesHeader('Yasmeen Mall', ' yasmeen ');
+    await service.findBySalesHeader('  Yasmeen Mall  ', ' yasmeen ');
 
     expect(prisma.fusionSalesMetadata.findFirst).toHaveBeenCalledWith({
       where: {
