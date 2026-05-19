@@ -9,7 +9,7 @@ const prisma = require('../services/prisma');
 const fusionMetadataService = require('../services/fusionSalesMetadataService');
 
 function normalizeCellValue(value) {
-  return String(value || '')
+  return String(value ?? '')
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
     .trim();
 }
@@ -18,12 +18,34 @@ function normalizeUpper(value) {
   return normalizeCellValue(value).toUpperCase();
 }
 
+function normalizeHeaderKey(value) {
+  return normalizeUpper(value).replace(/[^A-Z0-9]/g, '');
+}
+
+function getValueByHeaderAlias(row, alias) {
+  const target = normalizeHeaderKey(alias);
+  for (const key of Object.keys(row || {})) {
+    if (normalizeHeaderKey(key) === target) {
+      return normalizeCellValue(row[key]);
+    }
+  }
+  return '';
+}
+
 function getFirstNonEmpty(row, keys) {
   for (const key of keys) {
-    const value = normalizeCellValue(row[key]);
+    const value = getValueByHeaderAlias(row, key);
     if (value) return value;
   }
   return '';
+}
+
+function parseNumericField(row, keys, defaultValue = 0) {
+  const raw = getFirstNonEmpty(row, keys);
+  if (!raw) return defaultValue;
+  const normalized = raw.replace(/,/g, '');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : defaultValue;
 }
 
 function getPaymentType(paymentMethod) {
@@ -188,12 +210,12 @@ async function uploadVendInvoice(req, res, next) {
     const orderPaymentTypeMap = {}; // Key: orderRef (upper) -> Set<paymentType>
 
     for (const payment of paymentLines) {
-      const orderRef = normalizeUpper(getFirstNonEmpty(payment, ['Order Ref']));
+      const orderRef = normalizeUpper(getFirstNonEmpty(payment, ['Order Ref', 'Order Lines/Order Ref', 'Order Reference']));
       const orderStoreCode = normalizeUpper(orderRef.split('/')[0] || '');
-      const storeCode = normalizeUpper(getFirstNonEmpty(payment, ['Store', 'Branch'])) || orderStoreCode;
-      const subinventoryCode = normalizeUpper(getFirstNonEmpty(payment, ['Subinventory code', 'Subinventory', 'Store', 'Branch'])) || orderStoreCode;
+      const storeCode = normalizeUpper(getFirstNonEmpty(payment, ['Store', 'Store Code', 'Branch'])) || orderStoreCode;
+      const subinventoryCode = normalizeUpper(getFirstNonEmpty(payment, ['Subinventory code', 'Subinventory Code', 'SubinventoryCode', 'Subinventory', 'Store', 'Branch'])) || orderStoreCode;
       const branch = getFirstNonEmpty(payment, ['Branch', 'Store']) || orderStoreCode;
-      const paymentMethod = getFirstNonEmpty(payment, ['Payment Method', 'Payments/Payment Method', 'Payments/Method', 'Order Payment/Method', 'Method']);
+      const paymentMethod = getFirstNonEmpty(payment, ['Payment Method', 'Payments/Payment Method', 'Payments/Method', 'Order Payment/Method', 'Order Payment/Payment Method', 'Payment Method Details', 'Method']);
 
       if (storeCode) {
         const paymentType = getPaymentType(paymentMethod);
@@ -232,7 +254,7 @@ async function uploadVendInvoice(req, res, next) {
         const row = salesLines[i];
 
         // Extract sales order reference (e.g., "AZIZMALL/64181")
-        const salesOrderRef = normalizeCellValue(row['Order Lines/Order Ref']);
+        const salesOrderRef = getFirstNonEmpty(row, ['Order Lines/Order Ref', 'Order Ref', 'Order Reference']);
         const salesOrderRefKey = normalizeUpper(salesOrderRef);
         const storeCode = normalizeUpper(salesOrderRef.split('/')[0]); // e.g., "AZIZMALL"
         const orderPaymentTypes = orderPaymentTypeMap[salesOrderRefKey];
@@ -258,23 +280,33 @@ async function uploadVendInvoice(req, res, next) {
         const { subinventoryCode, branch, paymentTypes } = storeData;
 
         // Extract date from sales lines (using Order Ref/Date column)
-        const saleDate = normalizeDate(row['Order Lines/Order Ref/Date'], 'Sale Date');
+        const saleDate = normalizeDate(getFirstNonEmpty(row, ['Order Lines/Order Ref/Date', 'Order Ref/Date', 'Date']), 'Sale Date');
 
         // Extract line item details
-        const itemNumber = String(row['Order Lines/Product Barcode'] || '').trim();
-        const description = String(row['Order Lines/Product'] || '').trim();
-        const quantity = parseFloat(row['Order Lines/Base Quantity'] || 0);
-        const unitSellingPrice = parseFloat(row['Order Lines/Tax Incl'] || 0);
+        const itemNumber = getFirstNonEmpty(row, ['Order Lines/Product Barcode', 'Order Lines/Product/Barcode', 'Product Barcode', 'Barcode', 'Item Number']);
+        const description = getFirstNonEmpty(row, ['Order Lines/Product', 'Product', 'Description']);
+        const quantity = parseNumericField(row, ['Order Lines/Base Quantity', 'Base Quantity', 'Order Lines/Quantity', 'Quantity', 'Qty']);
+        const unitSellingPrice = parseNumericField(row, [
+          'Order Lines/Unit Price',
+          'Unit Price',
+          'Order Lines/Sell Price',
+          'Order Lines/Selling Price',
+          'Selling Price',
+          'Price',
+          'Order Lines/Tax Incl',
+          'Tax Incl',
+          'Total',
+        ]);
 
         // Try to extract payment method from sales line (if available)
         // Payment method field might be named: "Payment Method", "Order Lines/Payment Method", etc.
-        const linePaymentMethod = normalizeUpper(
-          row['Payment Method'] ||
-          row['Order Lines/Payment Method'] ||
-          row['Payment Type'] ||
-          row['Payments/Payment Method'] ||
-          ''
-        );
+        const linePaymentMethod = normalizeUpper(getFirstNonEmpty(row, [
+          'Payment Method',
+          'Order Lines/Payment Method',
+          'Payment Type',
+          'Payments/Payment Method',
+          'Order Payment/Method',
+        ]));
 
         // Determine which payment type this line belongs to
         // Payment method categorization rules:
