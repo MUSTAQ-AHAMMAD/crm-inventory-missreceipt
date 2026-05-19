@@ -6,6 +6,15 @@ import ErrorAlert from '../components/common/ErrorAlert'
 
 const PAGE_SIZE = 50
 
+function formatNullable(value) {
+  return value == null || value === '' ? '—' : value
+}
+
+function formatDateTime(value) {
+  if (!value) return '—'
+  return new Date(value).toLocaleString()
+}
+
 export default function VendSalesMetadataPage() {
   const [page, setPage] = useState(1)
 
@@ -90,17 +99,13 @@ export default function VendSalesMetadataPage() {
                       <td className="px-3 py-2">{record.recActivityNameBank}</td>
                       <td className="px-3 py-2">{record.subinventory}</td>
                       <td className="px-3 py-2">{record.integrationSource}</td>
-                      <td className="px-3 py-2">{record.distributionAccId || '—'}</td>
+                      <td className="px-3 py-2">{formatNullable(record.distributionAccId)}</td>
                       <td className="px-3 py-2">{record.recActivityNameCash}</td>
                       <td className="px-3 py-2">{record.customerType}</td>
                       <td className="px-3 py-2">{record.region}</td>
-                      <td className="px-3 py-2">{record.costCenterCode || '—'}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {record.createdAt ? new Date(record.createdAt).toLocaleString() : '—'}
-                      </td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {record.updatedAt ? new Date(record.updatedAt).toLocaleString() : '—'}
-                      </td>
+                      <td className="px-3 py-2">{formatNullable(record.costCenterCode)}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{formatDateTime(record.createdAt)}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{formatDateTime(record.updatedAt)}</td>
                     </tr>
                   ))}
                 </tbody>
