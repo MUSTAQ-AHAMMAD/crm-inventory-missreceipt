@@ -8,6 +8,91 @@ const prisma = require('../services/prisma');
 const fusionMetadataService = require('../services/fusionSalesMetadataService');
 
 /**
+ * POST /api/ar-invoice/preview
+ * Validates and previews an AR Invoice payload without sending to Oracle
+ * Returns the complete payload that would be sent, with metadata auto-populated if applicable
+ */
+async function previewPayload(req, res, next) {
+  try {
+    let payload = req.body;
+
+    // Auto-populate sales header from metadata if customerName and subinventory are provided
+    if (payload.customerName && payload.subinventory) {
+      console.log(`[AR Invoice Preview] Looking up metadata for customer="${payload.customerName}", subinventory="${payload.subinventory}"`);
+
+      const headerData = await fusionMetadataService.getArInvoiceHeaderMapping(
+        payload.customerName,
+        payload.subinventory
+      );
+
+      if (Object.keys(headerData).length > 0) {
+        // Merge metadata into payload (existing fields take precedence)
+        payload = {
+          ...headerData,
+          ...payload,
+        };
+        console.log('[AR Invoice Preview] Sales header populated from metadata');
+      } else {
+        console.warn('[AR Invoice Preview] No metadata found, proceeding with provided data');
+      }
+    }
+
+    // Validate required fields in the payload
+    const validationErrors = [];
+
+    if (!payload.BusinessUnit || !payload.TransactionSource || !payload.TransactionType) {
+      validationErrors.push('Missing required fields: BusinessUnit, TransactionSource, or TransactionType');
+    }
+
+    if (!payload.TransactionDate || !payload.AccountingDate) {
+      validationErrors.push('Missing required fields: TransactionDate or AccountingDate');
+    }
+
+    if (!payload.BillToCustomerName || !payload.BillToCustomerNumber || !payload.BillToSite) {
+      validationErrors.push('Missing required fields: BillToCustomerName, BillToCustomerNumber, or BillToSite');
+    }
+
+    if (!payload.PaymentTerms || !payload.InvoiceCurrencyCode) {
+      validationErrors.push('Missing required fields: PaymentTerms or InvoiceCurrencyCode');
+    }
+
+    if (!payload.receivablesInvoiceLines || !Array.isArray(payload.receivablesInvoiceLines) || payload.receivablesInvoiceLines.length === 0) {
+      validationErrors.push('receivablesInvoiceLines must be a non-empty array');
+    } else {
+      // Validate each line item
+      for (const [index, line] of payload.receivablesInvoiceLines.entries()) {
+        if (!line.LineNumber || !line.ItemNumber || !line.Description) {
+          validationErrors.push(`Line ${index + 1}: Missing required fields: LineNumber, ItemNumber, or Description`);
+        }
+        if (!line.Quantity || !line.UnitSellingPrice || !line.TaxClassificationCode) {
+          validationErrors.push(`Line ${index + 1}: Missing required fields: Quantity, UnitSellingPrice, or TaxClassificationCode`);
+        }
+      }
+    }
+
+    // Return validation errors if any
+    if (validationErrors.length > 0) {
+      return res.status(400).json({
+        valid: false,
+        errors: validationErrors,
+        payload,
+      });
+    }
+
+    // Return validated payload
+    return res.json({
+      valid: true,
+      message: 'Payload is valid and ready to send to Oracle',
+      payload,
+      endpoint: process.env.ORACLE_AR_INVOICE_URL || 'https://ehxk-test.fa.em2.oraclecloud.com/fscmRestApi/resources/11.13.18.05/receivablesInvoices',
+    });
+
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * POST /api/ar-invoice/create
  * Creates an AR Invoice in Oracle Fusion and stores the response in the database
  *
@@ -303,6 +388,7 @@ async function listMetadata(req, res, next) {
 }
 
 module.exports = {
+  previewPayload,
   createInvoice,
   listUploads,
   getUpload,

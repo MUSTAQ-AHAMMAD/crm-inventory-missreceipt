@@ -271,3 +271,71 @@ model ArInvoiceData {
   @@index([uploadBatchId])
   @@index([status])
 }
+
+// Fusion Invoice Header - stores header-level responses from Oracle AR Invoice API
+// Corresponds to FUSION_INVOICE_HEADER table in Oracle ODOO_INTEGRATION schema
+model FusionInvoiceHeader {
+  id                  Int      @id @default(autoincrement())
+  rowId               Int?     // ROW_ID from Oracle
+  requestId           Int?     // REQUEST_ID from Oracle
+  status              String?  // Status from Oracle (e.g., "Success", "Failed")
+  message             String?  // MESSAGE from Oracle (error/success message)
+  requestDate         DateTime? // REQUEST_DATE from Oracle
+  billToCustName      String?  // BILL_TO_CUST_NAME
+  billToLocation      String?  // BILL_TO_LOCATION
+  billToAccNumber     Int?     // BILL_TO_ACC_NUMBER
+  businessUnit        String?  // BUSINESS_UNIT
+  paymentTermsName    String?  // PAYMENT_TERMS_NAME
+  txnSource           String?  // TXN_SOURCE
+  txnType             String?  // TXN_TYPE
+  txnDate             DateTime? // TXN_DATE
+  glDate              DateTime? // GL_DATE
+  currencyCode        String?  // CURRENCY_CODE
+  txnNumber           Int?     // TXN_NUMBER
+  customerTxnId       Int?     // CUSTOMER_TXN_ID
+  region              String?  // REGION
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relationship to line items
+  lines               FusionInvoiceLine[]
+
+  @@index([status])
+  @@index([requestId])
+  @@index([txnNumber])
+}
+
+// Fusion Invoice Line - stores line-level responses from Oracle AR Invoice API
+// Corresponds to FUSION_INVOICE_LINE table in Oracle ODOO_INTEGRATION schema
+model FusionInvoiceLine {
+  id                  Int      @id @default(autoincrement())
+  rowId               Int?     // ROW_ID from Oracle
+  requestId           Int?     // REQUEST_ID from Oracle
+  status              String?  // Status from Oracle (e.g., "Success", "Failed")
+  message             String?  // MESSAGE from Oracle (error/success message)
+  requestDate         DateTime? // REQUEST_DATE from Oracle
+  invoiceNumber       String?  // INVOICE_NUMBER
+  lineNumber          Int?     // LINE_NUMBER
+  itemNumber          String?  // ITEM_NUMBER
+  description         String?  // DESCRIPTION
+  uom                 String?  // UOM (Unit of Measure)
+  quantity            Float?   // QUANTITY
+  unitSellingPrice    Float?   // UNIT_SELLING_PRICE
+  currencyCode        String?  // CURRENCY_CODE
+  taxCode             String?  // TAX_CODE
+  version             Int?     // VERSION
+  salesOrder          String?  // SALES_ORDER
+  salesOrderLine      Int?     // SALES_ORDER_LINE
+  region              String?  // REGION
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  // Relationship to header
+  headerId            Int?
+  header              FusionInvoiceHeader? @relation(fields: [headerId], references: [id])
+
+  @@index([status])
+  @@index([requestId])
+  @@index([invoiceNumber])
+  @@index([salesOrder])
+}

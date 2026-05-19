@@ -1,0 +1,4 @@
+INVOICE_NUMBER,LINE_NUMBER,SALES_ORDER,SALES_ORDER_LINE,STATUS,MESSAGE
+INV001,1,SO12345,10,Success,Invoice line created successfully
+INV001,2,SO12345,20,Success,Invoice line created successfully
+INV002,1,SO12346,10,Failed,Item number not found in catalog
