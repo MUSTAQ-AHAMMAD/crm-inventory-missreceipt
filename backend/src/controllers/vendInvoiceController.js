@@ -43,6 +43,13 @@ function normalizeDate(raw, fieldName) {
   const value = String(raw).trim();
   if (!value) throw new Error(`${fieldName} is required`);
 
+  // Check if it's a datetime string (e.g., "2026-04-30 18:11:16") and extract just the date
+  const datetimeMatch = value.match(/^(\d{4}[-\/]\d{2}[-\/]\d{2})\s+\d{2}:\d{2}:\d{2}$/);
+  if (datetimeMatch) {
+    const datePart = datetimeMatch[1].replace(/\//g, '-'); // Normalize slashes to hyphens
+    return datePart;
+  }
+
   // Check if it's already in YYYY-MM-DD format
   const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (isoMatch) return value;
@@ -182,8 +189,8 @@ async function uploadVendInvoice(req, res, next) {
           console.warn(`[Vend Invoice] No subinventory found for store code: ${storeCode}, using store code as fallback`);
         }
 
-        // Extract date from sales lines
-        const saleDate = normalizeDate(row['Order Lines/Date'], 'Sale Date');
+        // Extract date from sales lines (using Order Ref/Date column)
+        const saleDate = normalizeDate(row['Order Lines/Order Ref/Date'], 'Sale Date');
 
         // Extract line item details
         const itemNumber = String(row['Order Lines/Product Barcode'] || '').trim();
