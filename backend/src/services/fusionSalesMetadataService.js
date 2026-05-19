@@ -68,6 +68,25 @@ function mapToArInvoiceHeader(metadata) {
 }
 
 /**
+ * Find metadata by customer name only (for cases where subinventory is not a constraint)
+ * @param {string} customerName - Customer/Bill-To name
+ * @returns {Promise<Object|null>} Metadata record or null if not found
+ */
+async function findByCustomerNameOnly(customerName) {
+  try {
+    const metadata = await prisma.fusionSalesMetadata.findFirst({
+      where: {
+        billToName: customerName,
+      },
+    });
+    return metadata;
+  } catch (error) {
+    console.error('[FusionMetadata] Error finding metadata by customer name only:', error);
+    throw error;
+  }
+}
+
+/**
  * Find and map sales header data for AR invoice
  * @param {string} customerName - Customer/Bill-To name
  * @param {string} subinventory - Subinventory/location code
@@ -113,6 +132,7 @@ async function getAllMetadata(options = {}) {
 module.exports = {
   findBySalesHeader,
   findByCustomerType,
+  findByCustomerNameOnly,
   mapToArInvoiceHeader,
   getArInvoiceHeaderMapping,
   getAllMetadata,

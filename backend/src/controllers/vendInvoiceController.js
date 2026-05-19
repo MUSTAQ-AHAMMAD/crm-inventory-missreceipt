@@ -229,11 +229,33 @@ async function uploadVendInvoice(req, res, next) {
             console.warn(`[Vend Invoice] Could not fetch metadata for ${branch || subinventoryCode}/${subinventoryCode}:`, err.message);
           }
 
+          // Determine final customer name
+          const finalCustomerName = branch || headerData.BillToCustomerName || subinventoryCode;
+
+          // If we have a final customer name but missing customer number or site number,
+          // try to look up by customer name only
+          if (finalCustomerName && (!headerData.BillToCustomerNumber || !headerData.BillToSite)) {
+            try {
+              const customerMetadata = await fusionMetadataService.findByCustomerNameOnly(finalCustomerName);
+              if (customerMetadata) {
+                const mappedData = fusionMetadataService.mapToArInvoiceHeader(customerMetadata);
+                // Fill in missing fields from the customer-only lookup
+                if (!headerData.BillToCustomerNumber) {
+                  headerData.BillToCustomerNumber = mappedData.BillToCustomerNumber;
+                }
+                if (!headerData.BillToSite) {
+                  headerData.BillToSite = mappedData.BillToSite;
+                }
+              }
+            } catch (err) {
+              console.warn(`[Vend Invoice] Could not fetch metadata by customer name only for ${finalCustomerName}:`, err.message);
+            }
+          }
+
           invoiceGroups[groupKey] = {
             subinventoryCode,
             date: saleDate,
-            // Use branch from payment lines if available, otherwise use metadata or subinventory
-            customerName: branch || headerData.BillToCustomerName || subinventoryCode,
+            customerName: finalCustomerName,
             customerNumber: headerData.BillToCustomerNumber || '',
             siteNumber: headerData.BillToSite || '',
             lines: [],
