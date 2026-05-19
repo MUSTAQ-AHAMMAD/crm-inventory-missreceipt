@@ -210,20 +210,37 @@ async function uploadVendInvoice(req, res, next) {
         if (!invoiceGroups[groupKey]) {
           // Get metadata for this branch/subinventory combination
           let headerData = {};
+          let metadata = null;
           try {
             // Try to lookup by branch name first
             if (branch) {
-              headerData = await fusionMetadataService.getArInvoiceHeaderMapping(
+              metadata = await fusionMetadataService.findBySalesHeader(
                 branch,
                 subinventoryCode
               );
+              if (metadata) {
+                headerData = fusionMetadataService.mapToArInvoiceHeader(metadata);
+              }
             }
-            // If no data found and branch is different from subinventory, try subinventory
-            if (!headerData.BillToCustomerName && branch !== subinventoryCode) {
-              headerData = await fusionMetadataService.getArInvoiceHeaderMapping(
+            // If no data found and branch is different from subinventory, try subinventory as customer name
+            if (!metadata && branch !== subinventoryCode) {
+              metadata = await fusionMetadataService.findBySalesHeader(
                 subinventoryCode,
                 subinventoryCode
               );
+              if (metadata) {
+                headerData = fusionMetadataService.mapToArInvoiceHeader(metadata);
+              }
+            }
+            // Final fallback: Find any record with matching subinventory
+            if (!metadata) {
+              metadata = await prisma.fusionSalesMetadata.findFirst({
+                where: { subinventory: subinventoryCode }
+              });
+              if (metadata) {
+                headerData = fusionMetadataService.mapToArInvoiceHeader(metadata);
+                console.log(`[Vend Invoice] Found metadata by subinventory lookup for ${subinventoryCode}: ${metadata.billToName}`);
+              }
             }
           } catch (err) {
             console.warn(`[Vend Invoice] Could not fetch metadata for ${branch || subinventoryCode}/${subinventoryCode}:`, err.message);
