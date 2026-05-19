@@ -190,4 +190,69 @@ describe('vendInvoiceController', () => {
       expect(payload.receivablesInvoiceLines).toHaveLength(1);
     }
   });
+
+  test('maps bill-to metadata and unit prices when files use alternate header names', async () => {
+    XLSX.utils.sheet_to_json
+      .mockImplementationOnce(() => ([
+        { 'order ref ': 'RASHIDMAD2/4014', 'store ': 'RASHIDMAD2', ' subinventory code ': 'RASHIDMAD2', 'payment method details': 'Tamara' },
+      ]))
+      .mockImplementationOnce(() => ([
+        {
+          'order ref': 'RASHIDMAD2/4014',
+          'order ref / date': '2026-04-29 10:00:00',
+          'product barcode': '6287020283482',
+          product: 'Sample Product',
+          quantity: 2,
+          'unit price': 145.5,
+          'payment type': 'Tamara',
+        },
+      ]));
+
+    fusionMetadataService.findByCustomerType.mockResolvedValue({
+      billToName: 'Tamara Customer',
+      billToAccount: 69011,
+      siteNumber: '51050',
+    });
+    fusionMetadataService.mapToArInvoiceHeader.mockReturnValue({
+      BillToCustomerName: 'Tamara Customer',
+      BillToCustomerNumber: '69011',
+      BillToSite: '51050',
+    });
+
+    const req = {
+      files: {
+        paymentLines: { name: 'payment.xlsx', data: Buffer.from('payment') },
+        salesLines: { name: 'sales.xlsx', data: Buffer.from('sales') },
+      },
+    };
+    const res = {
+      json: jest.fn(),
+      status: jest.fn().mockReturnThis(),
+    };
+    const next = jest.fn();
+
+    await uploadVendInvoice(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledTimes(1);
+
+    const response = res.json.mock.calls[0][0];
+    expect(response.payloads).toHaveLength(1);
+    expect(response.payloads[0]).toMatchObject({
+      BillToCustomerName: 'Tamara Customer',
+      BillToCustomerNumber: '69011',
+      BillToSite: '51050',
+    });
+    expect(response.payloads[0].receivablesInvoiceLines[0]).toMatchObject({
+      Quantity: 2,
+      UnitSellingPrice: 145.5,
+      SalesOrder: 'RASHIDMAD2/4014',
+    });
+    expect(response.invoiceTypeStats).toEqual({
+      NORMAL: 0,
+      TABBY: 0,
+      TAMARA: 1,
+    });
+  });
 });
