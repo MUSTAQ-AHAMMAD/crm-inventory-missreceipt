@@ -19,17 +19,40 @@ function normalizeUpper(value) {
 }
 
 function normalizeHeaderKey(value) {
-  return normalizeUpper(value).replace(/[^A-Z0-9]/g, '');
+  return normalizeUpper(value)
+    .replace(/\s*\/\s*/g, '/')
+    .replace(/\s+/g, ' ')
+    .replace(/[.:;,\-_]+$/g, '')
+    .trim();
+}
+
+const HEADER_MAP_CACHE_KEY = Symbol('vendInvoiceHeaderMap');
+
+function getRowHeaderMap(row) {
+  if (!row || typeof row !== 'object') return new Map();
+  if (row[HEADER_MAP_CACHE_KEY]) return row[HEADER_MAP_CACHE_KEY];
+
+  const headerMap = new Map();
+  for (const [key, value] of Object.entries(row)) {
+    const normalizedKey = normalizeHeaderKey(key);
+    const normalizedValue = normalizeCellValue(value);
+    const existingValue = headerMap.get(normalizedKey);
+    if (!existingValue || normalizedValue) {
+      headerMap.set(normalizedKey, normalizedValue);
+    }
+  }
+
+  Object.defineProperty(row, HEADER_MAP_CACHE_KEY, {
+    value: headerMap,
+    enumerable: false,
+  });
+
+  return headerMap;
 }
 
 function getValueByHeaderAlias(row, alias) {
-  const target = normalizeHeaderKey(alias);
-  for (const key of Object.keys(row || {})) {
-    if (normalizeHeaderKey(key) === target) {
-      return normalizeCellValue(row[key]);
-    }
-  }
-  return '';
+  const headerMap = getRowHeaderMap(row);
+  return headerMap.get(normalizeHeaderKey(alias)) || '';
 }
 
 function getFirstNonEmpty(row, keys) {
