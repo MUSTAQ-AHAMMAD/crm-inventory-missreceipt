@@ -192,6 +192,12 @@ async function uploadVendInvoice(req, res, next) {
 
     console.log(`[Vend Invoice] Built store payment map with ${Object.keys(storePaymentMap).length} stores`);
 
+    // Log payment types found per store for debugging
+    for (const [storeCode, storeData] of Object.entries(storePaymentMap)) {
+      const types = Array.from(storeData.paymentTypes).join(', ');
+      console.log(`  - ${storeCode} (${storeData.subinventoryCode}): ${types}`);
+    }
+
     // Process sales lines and group by store + date + payment type
     const invoiceGroups = {}; // Key: `${subinventory}_${date}_${paymentType}`
     const errors = [];
@@ -337,6 +343,11 @@ async function uploadVendInvoice(req, res, next) {
     }
 
     console.log(`✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines`);
+
+    // Log summary of generated invoices
+    for (const payload of payloads) {
+      console.log(`  - ${payload.BillToCustomerName} (${payload.BillToCustomerNumber}): ${payload.receivablesInvoiceLines.length} lines, ${payload.Comments}`);
+    }
 
     return res.json({
       success: true,
