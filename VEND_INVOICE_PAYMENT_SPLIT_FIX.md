@@ -23,18 +23,32 @@ Updated `vendInvoiceController.js` to properly split sales lines by payment meth
    - Changed from array-based mapping to Set-based tracking of payment types per store
    - Now stores: `{ subinventoryCode, branch, paymentTypes: Set<'NORMAL'|'TABBY'|'TAMARA'> }`
    - Only creates invoices for payment types that actually exist for each store
-   - **Payment Method Classification:**
-     - Payment methods containing "TABBY" → TABBY type
-     - Payment methods containing "TAMARA" → TAMARA type
-     - **All other payment methods** (Cash, Mada, Visa, Master, Bank, Card, etc.) → NORMAL type
+   - **Payment Method Classification (Explicit Rules):**
+     - Payment methods containing "TABBY" (case-insensitive) → TABBY type
+     - Payment methods containing "TAMARA" (case-insensitive) → TAMARA type
+     - **All other payment methods** → NORMAL type, including:
+       - Cash
+       - Mada
+       - Visa
+       - Master / Mastercard
+       - Bank / Bank Transfer
+       - Credit Card / Debit Card
+       - Any other payment method not explicitly TABBY or TAMARA
 
 2. **Sales Line Payment Method Detection (Lines 239-250)**
    - Added support for reading payment method from sales lines
    - Checks multiple possible column names: `Payment Method`, `Order Lines/Payment Method`, `Payment Type`
-   - Maps payment methods to types:
-     - Contains "TABBY" → TABBY
-     - Contains "TAMARA" → TAMARA
-     - **Any other value** (Cash, Mada, Visa, Master, Bank, Card, etc.) → NORMAL
+   - Maps payment methods to types using explicit rules:
+     - Contains "TABBY" (case-insensitive) → TABBY
+     - Contains "TAMARA" (case-insensitive) → TAMARA
+     - **Any other value** → NORMAL, including:
+       - Cash
+       - Mada
+       - Visa
+       - Master / Mastercard
+       - Bank / Bank Transfer
+       - Credit Card / Debit Card
+       - Any other payment method not explicitly TABBY or TAMARA
 
 3. **Conditional Invoice Assignment (Lines 244-253)**
    - If sales line has a payment method → adds ONLY to matching invoice
@@ -57,13 +71,16 @@ For YASMEEN subinventory with all 3 payment types:
 - Must have a `Store` column (e.g., "YASMEEN", "AZIZMALL") - this is the store code
 - Optionally has `Subinventory code` column (if not present, `Store` value is used)
 - Has `Payment Method` column indicating payment type
-- Examples of payment method mapping:
+- **Payment method mapping (explicit rules):**
+  - Payment Method: "Tabby" or "TABBY" → TABBY type
+  - Payment Method: "Tamara" or "TAMARA" → TAMARA type
   - Payment Method: "Cash" → NORMAL type
   - Payment Method: "Mada" → NORMAL type
   - Payment Method: "Visa" → NORMAL type
-  - Payment Method: "Master" → NORMAL type
-  - Payment Method: "Tabby" → TABBY type
-  - Payment Method: "Tamara" → TAMARA type
+  - Payment Method: "Master" or "Mastercard" → NORMAL type
+  - Payment Method: "Bank" or "Bank Transfer" → NORMAL type
+  - Payment Method: "Credit Card" or "Debit Card" → NORMAL type
+  - Any other payment method → NORMAL type
 
 **Sales Lines:**
 - Has `Order Lines/Order Ref` column with values like "AZIZMALL/64181"

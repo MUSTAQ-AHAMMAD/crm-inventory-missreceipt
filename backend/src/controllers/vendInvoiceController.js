@@ -170,14 +170,25 @@ async function uploadVendInvoice(req, res, next) {
 
       if (storeCode) {
         // Determine payment method type (NORMAL, TABBY, TAMARA)
-        // Only TABBY and TAMARA get their own types
-        // All other payment methods (Cash, Mada, Visa, Master, Bank, etc.) map to NORMAL
-        let paymentType = 'NORMAL'; // Default for all except TABBY and TAMARA
+        // Payment method categorization rules:
+        // - TABBY: Only payment methods containing "TABBY"
+        // - TAMARA: Only payment methods containing "TAMARA"
+        // - NORMAL: Everything else including Cash, Mada, Visa, Master, Bank, Card, etc.
+        let paymentType = 'NORMAL'; // Default for all payment methods
+
+        // Check for TABBY (case-insensitive)
         if (paymentMethod.includes('TABBY')) {
           paymentType = 'TABBY';
-        } else if (paymentMethod.includes('TAMARA')) {
+        }
+        // Check for TAMARA (case-insensitive)
+        else if (paymentMethod.includes('TAMARA')) {
           paymentType = 'TAMARA';
         }
+        // All other payment methods remain as NORMAL:
+        // - Cash, Mada, Visa, Master, Mastercard
+        // - Bank transfers, Credit Card, Debit Card
+        // - Any other payment method not explicitly TABBY or TAMARA
+
         // Log payment method categorization for debugging
         console.log(`[Vend Invoice] Store: ${storeCode}, Payment Method: "${payment['Payment Method']}" → Type: ${paymentType}`);
 
@@ -237,16 +248,28 @@ async function uploadVendInvoice(req, res, next) {
         ).trim().toUpperCase();
 
         // Determine which payment type this line belongs to
-        // Only TABBY and TAMARA get their own invoice types
-        // All other payment methods (Cash, Mada, Visa, Master, Bank, etc.) map to NORMAL
+        // Payment method categorization rules:
+        // - TABBY: Only payment methods containing "TABBY"
+        // - TAMARA: Only payment methods containing "TAMARA"
+        // - NORMAL: Everything else including Cash, Mada, Visa, Master, Bank, Card, etc.
         let linePaymentType = null;
-        if (linePaymentMethod.includes('TABBY')) {
-          linePaymentType = 'TABBY';
-        } else if (linePaymentMethod.includes('TAMARA')) {
-          linePaymentType = 'TAMARA';
-        } else if (linePaymentMethod) {
-          // Any other payment method (Cash, Mada, Visa, Master, Bank, Card, etc.) maps to NORMAL
-          linePaymentType = 'NORMAL';
+
+        if (linePaymentMethod) {
+          // Check for TABBY (case-insensitive)
+          if (linePaymentMethod.includes('TABBY')) {
+            linePaymentType = 'TABBY';
+          }
+          // Check for TAMARA (case-insensitive)
+          else if (linePaymentMethod.includes('TAMARA')) {
+            linePaymentType = 'TAMARA';
+          }
+          // All other payment methods map to NORMAL:
+          // - Cash, Mada, Visa, Master, Mastercard
+          // - Bank transfers, Credit Card, Debit Card
+          // - Any other payment method not explicitly TABBY or TAMARA
+          else {
+            linePaymentType = 'NORMAL';
+          }
         }
 
         // If line has a specific payment method, only add it to that invoice
