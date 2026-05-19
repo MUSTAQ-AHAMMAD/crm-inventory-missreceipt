@@ -5,6 +5,10 @@
 
 const prisma = require('./prisma');
 
+function normalizeLookupValue(value) {
+  return String(value || '').trim().toUpperCase();
+}
+
 /**
  * Find metadata by customer name and subinventory
  * @param {string} customerName - Customer/Bill-To name
@@ -13,10 +17,12 @@ const prisma = require('./prisma');
  */
 async function findBySalesHeader(customerName, subinventory) {
   try {
+    const normalizedSubinventory = normalizeLookupValue(subinventory);
+
     const metadata = await prisma.fusionSalesMetadata.findFirst({
       where: {
         billToName: customerName,
-        subinventory: subinventory,
+        subinventory: normalizedSubinventory,
       },
     });
     return metadata;
@@ -34,10 +40,13 @@ async function findBySalesHeader(customerName, subinventory) {
  */
 async function findByCustomerType(customerType, subinventory) {
   try {
+    const normalizedCustomerType = normalizeLookupValue(customerType);
+    const normalizedSubinventory = normalizeLookupValue(subinventory);
+
     const metadata = await prisma.fusionSalesMetadata.findFirst({
       where: {
-        customerType: customerType,
-        subinventory: subinventory,
+        customerType: normalizedCustomerType,
+        subinventory: normalizedSubinventory,
       },
     });
     return metadata;
