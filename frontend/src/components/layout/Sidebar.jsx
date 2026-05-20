@@ -6,24 +6,82 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 
-const NAV_ITEMS = [
-  { to: '/', label: 'Dashboard', icon: '📊', exact: true },
-  { to: '/inventory', label: 'Inventory Upload', icon: '📦' },
-  { to: '/inventory-template', label: 'Inventory Template Generation', icon: '🧩' },
-  { to: '/misc-receipt', label: 'Misc Receipt', icon: '🧾' },
-  { to: '/standard-receipt', label: 'Standard Receipt', icon: '💳' },
-  { to: '/apply-receipt', label: 'Apply Receipt', icon: '🔗' },
-  { to: '/ar-invoice', label: 'AR Invoice', icon: '📄' },
-  { to: '/ar-invoice-data', label: 'AR Invoice Data', icon: '📋' },
-  { to: '/vend-invoice', label: 'Vend Invoice', icon: '🏪' },
-  { to: '/vend-sales-metadata', label: 'VendSales Metadata', icon: '🗂️' },
-  { to: '/reports', label: 'Reports', icon: '📈' },
-  { to: '/failures/0', label: 'Logs & Failures', icon: '⚠️' },
+const NAV_GROUPS = [
+  {
+    label: 'Overview',
+    items: [
+      { to: '/', label: 'Dashboard', icon: '📊', exact: true },
+    ],
+  },
+  {
+    label: 'Inventory',
+    items: [
+      { to: '/inventory', label: 'Inventory Upload', icon: '📦' },
+      { to: '/inventory-template', label: 'Template Generation', icon: '🧩' },
+    ],
+  },
+  {
+    label: 'Receipts',
+    items: [
+      { to: '/misc-receipt', label: 'Misc Receipt', icon: '🧾' },
+      { to: '/standard-receipt', label: 'Standard Receipt', icon: '💳' },
+      { to: '/apply-receipt', label: 'Apply Receipt', icon: '🔗' },
+    ],
+  },
+  {
+    label: 'AR Invoice',
+    items: [
+      { to: '/ar-invoice', label: 'AR Invoice Upload', icon: '📄' },
+      { to: '/ar-invoice-data', label: 'AR Invoice Data', icon: '📋' },
+    ],
+  },
+  {
+    label: 'Vend',
+    items: [
+      { to: '/vend-invoice', label: 'Vend Invoice', icon: '🏪' },
+      { to: '/vend-sales-metadata', label: 'Sales Metadata', icon: '🗂️' },
+    ],
+  },
+  {
+    label: 'Reports & Logs',
+    items: [
+      { to: '/reports', label: 'Reports', icon: '📈' },
+      { to: '/failures/0', label: 'Logs & Failures', icon: '⚠️' },
+    ],
+  },
 ]
 
 const ADMIN_ITEMS = [
   { to: '/admin/users', label: 'User Management', icon: '👥' },
 ]
+
+function NavItem({ to, label, icon, exact, onClose }) {
+  return (
+    <NavLink
+      to={to}
+      end={exact}
+      onClick={onClose}
+      className={({ isActive }) =>
+        `flex items-center gap-3 px-3 py-2.5 rounded-lg mb-1 text-sm font-medium transition-colors ${
+          isActive
+            ? 'bg-blue-600 text-white'
+            : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+        }`
+      }
+    >
+      <span>{icon}</span>
+      {label}
+    </NavLink>
+  )
+}
+
+function SectionLabel({ children, className = '' }) {
+  return (
+    <div className={`text-xs font-semibold text-gray-400 uppercase tracking-wider px-3 mb-2 ${className}`}>
+      {children}
+    </div>
+  )
+}
 
 export default function Sidebar({ open, onClose }) {
   const { user } = useAuth()
@@ -43,53 +101,24 @@ export default function Sidebar({ open, onClose }) {
       </div>
 
       {/* Navigation */}
-      <nav className="mt-4 px-3">
-        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-3 mb-2">
-          Main Menu
-        </div>
-        {NAV_ITEMS.map(({ to, label, icon, exact }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={exact}
-            onClick={onClose}
-            className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2.5 rounded-lg mb-1 text-sm font-medium transition-colors ${
-                isActive
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-              }`
-            }
-          >
-            <span>{icon}</span>
-            {label}
-          </NavLink>
+      <nav className="mt-4 px-3 overflow-y-auto pb-24">
+        {NAV_GROUPS.map((group, i) => (
+          <div key={group.label} className={i > 0 ? 'mt-5' : ''}>
+            <SectionLabel>{group.label}</SectionLabel>
+            {group.items.map(({ to, label, icon, exact }) => (
+              <NavItem key={to} to={to} label={label} icon={icon} exact={exact} onClose={onClose} />
+            ))}
+          </div>
         ))}
 
         {/* Admin-only items */}
         {user?.role === 'ADMIN' && (
-          <>
-            <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-3 mt-6 mb-2">
-              Administration
-            </div>
+          <div className="mt-5">
+            <SectionLabel>Administration</SectionLabel>
             {ADMIN_ITEMS.map(({ to, label, icon }) => (
-              <NavLink
-                key={to}
-                to={to}
-                onClick={onClose}
-                className={({ isActive }) =>
-                  `flex items-center gap-3 px-3 py-2.5 rounded-lg mb-1 text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-300 hover:bg-gray-700 hover:text-white'
-                  }`
-                }
-              >
-                <span>{icon}</span>
-                {label}
-              </NavLink>
+              <NavItem key={to} to={to} label={label} icon={icon} onClose={onClose} />
             ))}
-          </>
+          </div>
         )}
       </nav>
 
