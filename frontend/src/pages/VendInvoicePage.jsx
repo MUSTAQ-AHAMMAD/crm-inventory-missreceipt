@@ -362,9 +362,10 @@ export default function VendInvoicePage() {
                     </p>
                     <p className="text-xs text-gray-600">
                       Date: {payload.TransactionDate} | CrossRef: {payload.CrossReference} | Lines: {payload.receivablesInvoiceLines.length}
-                      {payload.invoiceTotal != null && (
-                        <> | <span className="font-semibold text-gray-800">Total: SAR {Number(payload.invoiceTotal).toLocaleString('en-SA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></>
-                      )}
+                      {(() => {
+                        const total = payload.receivablesInvoiceLines.reduce((s, l) => s + (l.Quantity || 0) * (l.UnitSellingPrice || 0), 0)
+                        return <> | <span className="font-semibold text-gray-800">Total: SAR {Number(total).toLocaleString('en-SA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></>
+                      })()}
                     </p>
                   </div>
                   <button
@@ -400,7 +401,7 @@ export default function VendInvoicePage() {
                   {/* Invoice grand total row */}
                   <div className="mt-2 pt-2 border-t border-gray-200 text-xs flex justify-between font-semibold text-gray-700">
                     <span>Invoice Total</span>
-                    <span className="font-mono">SAR {Number(payload.invoiceTotal || 0).toLocaleString('en-SA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                    <span className="font-mono">SAR {Number(payload.receivablesInvoiceLines.reduce((s, l) => s + (l.Quantity || 0) * (l.UnitSellingPrice || 0), 0)).toLocaleString('en-SA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                 </div>
 

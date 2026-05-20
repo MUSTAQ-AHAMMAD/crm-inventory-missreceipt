@@ -491,14 +491,6 @@ async function uploadVendInvoice(req, res, next) {
       payloadTotalAmount += groupTotal;
     }
 
-    // Attach invoice-level total to each payload for the frontend
-    for (const payload of payloads) {
-      payload.invoiceTotal = payload.receivablesInvoiceLines.reduce(
-        (sum, line) => sum + (line.Quantity || 0) * (line.UnitSellingPrice || 0),
-        0
-      );
-    }
-
     const roundToCents = (n) => Math.round(n * 100) / 100;
     const salesLinesRoundedTotal = roundToCents(salesLinesRawTotal);
     const payloadRoundedTotal = roundToCents(payloadTotalAmount);
