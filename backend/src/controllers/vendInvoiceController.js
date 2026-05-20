@@ -390,11 +390,12 @@ async function uploadVendInvoice(req, res, next) {
           // Add line item to this payment type's invoice
           const lineNumber = invoiceGroups[groupKey].lines.length + 1;
 
-           // If itemNumber is empty, always use fixed discount item text
+           // If itemNumber is empty, always use fixed discount item text.
+           // Omit ItemNumber entirely so Oracle does not receive both ItemNumber
+           // and MemoLine in the same line (AR-855636).
            if (!itemNumber) {
              invoiceGroups[groupKey].lines.push({
                LineNumber: lineNumber,
-               ItemNumber: '',
                Description: 'Disscount Item',
                Quantity: quantity,
                UnitSellingPrice: unitSellingPrice,
@@ -403,17 +404,18 @@ async function uploadVendInvoice(req, res, next) {
                MemoLine: 'Disscount Item',
              });
            } else {
-            invoiceGroups[groupKey].lines.push({
-              LineNumber: lineNumber,
-              ItemNumber: itemNumber,
-              Description: description,
-              Quantity: quantity,
-              UnitSellingPrice: unitSellingPrice,
-              TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
-              SalesOrder: salesOrderRef,
-              MemoLine: null,
-            });
-          }
+             // Omit MemoLine entirely for regular item lines; sending MemoLine: null
+             // alongside ItemNumber causes Oracle error AR-855636.
+             invoiceGroups[groupKey].lines.push({
+               LineNumber: lineNumber,
+               ItemNumber: itemNumber,
+               Description: description,
+               Quantity: quantity,
+               UnitSellingPrice: unitSellingPrice,
+               TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
+               SalesOrder: salesOrderRef,
+             });
+           }
         }
       } catch (err) {
         errors.push({ row: i + 2, error: err.message });
