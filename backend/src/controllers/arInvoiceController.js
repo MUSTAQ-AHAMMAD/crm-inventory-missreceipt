@@ -425,7 +425,7 @@ async function getResponseHeader(req, res, next) {
   try {
     const headerId = parseInt(req.params.id);
     if (isNaN(headerId)) {
-      return res.status(400).json({ error: 'Invalid header ID.' });
+      return res.status(400).json({ error: `Invalid header ID: expected a valid integer, received '${req.params.id}'.` });
     }
 
     const header = await prisma.fusionInvoiceHeader.findUnique({
@@ -434,7 +434,7 @@ async function getResponseHeader(req, res, next) {
     });
 
     if (!header) {
-      return res.status(404).json({ error: 'Header not found.' });
+      return res.status(404).json({ error: `Header not found with ID: ${headerId}.` });
     }
 
     return res.json(header);
