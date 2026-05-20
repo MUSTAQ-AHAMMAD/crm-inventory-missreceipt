@@ -23,6 +23,7 @@ import ReportsPage from './pages/ReportsPage'
 import FailureDetailsPage from './pages/FailureDetailsPage'
 import UploadDetailPage from './pages/UploadDetailPage'
 import ReceiptUploadDetailPage from './pages/ReceiptUploadDetailPage'
+import ArInvoiceResponsePage from './pages/ArInvoiceResponsePage'
 
 /** Route guard – redirects unauthenticated users to /login */
 function PrivateRoute({ children }) {
@@ -65,6 +66,7 @@ export default function App() {
             <Route path="ar-invoice" element={<ArInvoicePage />} />
             <Route path="ar-invoice-data" element={<ArInvoiceDataPage />} />
             <Route path="ar-invoice/uploads/:uploadId" element={<ArInvoiceDetailPage />} />
+            <Route path="ar-invoice-response" element={<ArInvoiceResponsePage />} />
             <Route path="vend-invoice" element={<VendInvoicePage />} />
             <Route path="vend-sales-metadata" element={<VendSalesMetadataPage />} />
             <Route

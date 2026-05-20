@@ -387,6 +387,96 @@ async function listMetadata(req, res, next) {
   }
 }
 
+/**
+ * GET /api/ar-invoice/response-headers
+ * Lists AR Invoice response headers from Oracle (FusionInvoiceHeader table), paginated.
+ */
+async function listResponseHeaders(req, res, next) {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 20);
+    const skip = (page - 1) * limit;
+    const status = req.query.status || undefined;
+
+    const where = status ? { status } : {};
+
+    const [headers, total] = await Promise.all([
+      prisma.fusionInvoiceHeader.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: { _count: { select: { lines: true } } },
+      }),
+      prisma.fusionInvoiceHeader.count({ where }),
+    ]);
+
+    return res.json({ headers, total, page, limit });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/ar-invoice/response-headers/:id
+ * Gets a single AR Invoice response header with its line items.
+ */
+async function getResponseHeader(req, res, next) {
+  try {
+    const headerId = parseInt(req.params.id);
+    if (isNaN(headerId)) {
+      return res.status(400).json({ error: `Invalid header ID: expected a valid integer, received '${req.params.id}'.` });
+    }
+
+    const header = await prisma.fusionInvoiceHeader.findUnique({
+      where: { id: headerId },
+      include: { lines: { orderBy: { lineNumber: 'asc' } } },
+    });
+
+    if (!header) {
+      return res.status(404).json({ error: `Header not found with ID: ${headerId}.` });
+    }
+
+    return res.json(header);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /api/ar-invoice/response-lines
+ * Lists AR Invoice response lines (FusionInvoiceLine table), paginated.
+ * Optionally filtered by headerId.
+ */
+async function listResponseLines(req, res, next) {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.min(100, parseInt(req.query.limit) || 50);
+    const skip = (page - 1) * limit;
+    const headerId = req.query.headerId ? parseInt(req.query.headerId) : undefined;
+    const status = req.query.status || undefined;
+
+    const where = {
+      ...(headerId ? { headerId } : {}),
+      ...(status ? { status } : {}),
+    };
+
+    const [lines, total] = await Promise.all([
+      prisma.fusionInvoiceLine.findMany({
+        where,
+        orderBy: [{ headerId: 'asc' }, { lineNumber: 'asc' }],
+        skip,
+        take: limit,
+      }),
+      prisma.fusionInvoiceLine.count({ where }),
+    ]);
+
+    return res.json({ lines, total, page, limit });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   previewPayload,
   createInvoice,
@@ -394,4 +484,7 @@ module.exports = {
   getUpload,
   getMetadata,
   listMetadata,
+  listResponseHeaders,
+  getResponseHeader,
+  listResponseLines,
 };
