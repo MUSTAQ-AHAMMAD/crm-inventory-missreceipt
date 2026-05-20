@@ -42,7 +42,7 @@ describe('vendInvoiceController', () => {
     });
   });
 
-  test('forces Disscount Item for empty SKU lines and returns payment type stats', async () => {
+  test('forces Discount Item for empty SKU lines and returns payment type stats', async () => {
     XLSX.utils.sheet_to_json
       .mockImplementationOnce(() => ([
         { Store: 'YASMEEN', 'Subinventory code': 'yasmeen', Branch: 'Yasmeen Mall', 'Payment Method': 'Cash' },
@@ -96,8 +96,8 @@ describe('vendInvoiceController', () => {
       // Discount lines must not include ItemNumber (causes Oracle AR-855636)
       expect(line).not.toHaveProperty('ItemNumber');
       expect(line).toMatchObject({
-        Description: 'Disscount Item',
-        MemoLine: 'Disscount Item',
+        Description: 'Discount Item',
+        MemoLine: 'Discount Item',
       });
     }
   });

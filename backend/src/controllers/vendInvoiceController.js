@@ -396,12 +396,12 @@ async function uploadVendInvoice(req, res, next) {
            if (!itemNumber) {
              invoiceGroups[groupKey].lines.push({
                LineNumber: lineNumber,
-               Description: 'Disscount Item',
+               Description: 'Discount Item',
                Quantity: quantity,
                UnitSellingPrice: unitSellingPrice,
                TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
                SalesOrder: salesOrderRef,
-               MemoLine: 'Disscount Item',
+               MemoLine: 'Discount Item',
              });
            } else {
              // Omit MemoLine entirely for regular item lines; sending MemoLine: null
