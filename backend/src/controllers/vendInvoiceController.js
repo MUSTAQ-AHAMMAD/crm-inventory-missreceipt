@@ -492,6 +492,9 @@ async function uploadVendInvoice(req, res, next) {
     }
 
     const roundToCents = (n) => Math.round(n * 100) / 100;
+    const payloadTotals = payloads.map((p) =>
+      roundToCents(p.receivablesInvoiceLines.reduce((sum, l) => sum + (l.Quantity || 0) * (l.UnitSellingPrice || 0), 0))
+    );
     const salesLinesRoundedTotal = roundToCents(salesLinesRawTotal);
     const payloadRoundedTotal = roundToCents(payloadTotalAmount);
     const amountDifference = roundToCents(payloadRoundedTotal - salesLinesRoundedTotal);
@@ -518,6 +521,7 @@ async function uploadVendInvoice(req, res, next) {
       totalLines: salesLines.length,
       invoiceTypeStats,
       amountValidation,
+      payloadTotals,
       payloads,
     });
 
