@@ -268,6 +268,90 @@ export default function VendInvoicePage() {
             </p>
           </div>
 
+          {/* Amount Validation Report */}
+          {result.amountValidation && (() => {
+            const av = result.amountValidation
+            const isMatch = av.isMatch
+            const fmt = (n) => Number(n).toLocaleString('en-SA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+            return (
+              <div className={`p-4 rounded-lg border ${isMatch ? 'bg-blue-50 border-blue-200' : 'bg-red-50 border-red-200'}`}>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="font-semibold text-gray-800">📊 Amount Validation Report</span>
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${isMatch ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                    {isMatch ? '✅ AMOUNTS MATCH' : '⚠️ AMOUNT MISMATCH'}
+                  </span>
+                </div>
+
+                {/* Totals comparison */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border-collapse mb-3">
+                    <thead>
+                      <tr className="bg-gray-100">
+                        <th className="text-left px-3 py-2 border border-gray-200 text-gray-700">Source</th>
+                        <th className="text-right px-3 py-2 border border-gray-200 text-gray-700">Total Amount (SAR)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td className="px-3 py-2 border border-gray-200 text-gray-600">Sales Lines File (raw input)</td>
+                        <td className="px-3 py-2 border border-gray-200 text-right font-mono text-gray-800">{fmt(av.salesLinesTotal)}</td>
+                      </tr>
+                      <tr>
+                        <td className="px-3 py-2 border border-gray-200 text-gray-600">Generated Payloads Total</td>
+                        <td className="px-3 py-2 border border-gray-200 text-right font-mono text-gray-800">{fmt(av.payloadTotal)}</td>
+                      </tr>
+                      <tr className={isMatch ? 'bg-green-50' : 'bg-red-50'}>
+                        <td className={`px-3 py-2 border border-gray-200 font-semibold ${isMatch ? 'text-green-700' : 'text-red-700'}`}>Difference</td>
+                        <td className={`px-3 py-2 border border-gray-200 text-right font-mono font-bold ${isMatch ? 'text-green-700' : 'text-red-700'}`}>
+                          {av.difference > 0 ? '+' : ''}{fmt(av.difference)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Per payment type breakdown */}
+                <p className="text-xs font-medium text-gray-700 mb-1">Payload Amount by Payment Type:</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="bg-gray-100">
+                        <th className="text-left px-3 py-2 border border-gray-200 text-gray-700">Payment Type</th>
+                        <th className="text-right px-3 py-2 border border-gray-200 text-gray-700">Amount (SAR)</th>
+                        <th className="text-right px-3 py-2 border border-gray-200 text-gray-700">% of Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {['NORMAL', 'TABBY', 'TAMARA'].map((pt) => {
+                        const amt = av.byPaymentType[pt] || 0
+                        const pct = av.payloadTotal > 0 ? ((amt / av.payloadTotal) * 100).toFixed(1) : '0.0'
+                        if (amt === 0) return null
+                        return (
+                          <tr key={pt}>
+                            <td className="px-3 py-2 border border-gray-200 text-gray-600">{pt === 'NORMAL' ? 'Cash/Bank/Card (Normal)' : pt}</td>
+                            <td className="px-3 py-2 border border-gray-200 text-right font-mono text-gray-800">{fmt(amt)}</td>
+                            <td className="px-3 py-2 border border-gray-200 text-right text-gray-600">{pct}%</td>
+                          </tr>
+                        )
+                      })}
+                      <tr className="bg-gray-50 font-semibold">
+                        <td className="px-3 py-2 border border-gray-200 text-gray-700">Total</td>
+                        <td className="px-3 py-2 border border-gray-200 text-right font-mono text-gray-800">{fmt(av.payloadTotal)}</td>
+                        <td className="px-3 py-2 border border-gray-200 text-right text-gray-600">100%</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {!isMatch && (
+                  <p className="text-xs text-red-600 mt-2">
+                    ⚠️ The payload total differs from the sales lines total. This may occur when one sales order has multiple payment types (e.g., split between NORMAL and TABBY), causing lines to appear in more than one invoice. Please review the payloads below.
+                  </p>
+                )}
+              </div>
+            )
+          })()}
+
           <div className="space-y-4">
             {result.payloads?.map((payload, index) => (
               <div key={index} className="bg-gray-50 rounded-lg p-4">
@@ -278,6 +362,9 @@ export default function VendInvoicePage() {
                     </p>
                     <p className="text-xs text-gray-600">
                       Date: {payload.TransactionDate} | CrossRef: {payload.CrossReference} | Lines: {payload.receivablesInvoiceLines.length}
+                      {payload.invoiceTotal != null && (
+                        <> | <span className="font-semibold text-gray-800">Total: SAR {Number(payload.invoiceTotal).toLocaleString('en-SA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span></>
+                      )}
                     </p>
                   </div>
                   <button
@@ -295,17 +382,25 @@ export default function VendInvoicePage() {
                 <div className="mt-3 p-3 bg-white rounded border border-gray-200">
                   <p className="text-xs font-medium text-gray-700 mb-2">Line Items Summary:</p>
                   <div className="space-y-1 max-h-40 overflow-y-auto">
-                    {payload.receivablesInvoiceLines.map((line, lineIdx) => (
-                      <div key={lineIdx} className="text-xs text-gray-600 flex justify-between">
-                        <span>
-                          {line.LineNumber}. {line.ItemNumber || <em className="text-gray-500">(MemoLine)</em>} - {line.Description.substring(0, 40)}
-                          {line.Description.length > 40 ? '...' : ''}
-                        </span>
-                        <span className="font-mono">
-                          {line.Quantity} × {line.UnitSellingPrice}
-                        </span>
-                      </div>
-                    ))}
+                    {payload.receivablesInvoiceLines.map((line, lineIdx) => {
+                      const lineTotal = (line.Quantity || 0) * (line.UnitSellingPrice || 0)
+                      return (
+                        <div key={lineIdx} className="text-xs text-gray-600 flex justify-between gap-2">
+                          <span className="truncate">
+                            {line.LineNumber}. {line.ItemNumber || <em className="text-gray-500">(MemoLine)</em>} - {line.Description.substring(0, 35)}
+                            {line.Description.length > 35 ? '...' : ''}
+                          </span>
+                          <span className="font-mono whitespace-nowrap">
+                            {line.Quantity} × {line.UnitSellingPrice} = <span className="font-semibold">{Number(lineTotal).toLocaleString('en-SA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {/* Invoice grand total row */}
+                  <div className="mt-2 pt-2 border-t border-gray-200 text-xs flex justify-between font-semibold text-gray-700">
+                    <span>Invoice Total</span>
+                    <span className="font-mono">SAR {Number(payload.invoiceTotal || 0).toLocaleString('en-SA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                   </div>
                 </div>
 
