@@ -90,14 +90,6 @@ describe('vendInvoiceController', () => {
     expect(res.json).toHaveBeenCalledTimes(1);
 
     const response = res.json.mock.calls[0][0];
-    expect(response.invoiceTypeStats).toEqual({
-      NORMAL: 1,
-      TABBY: 1,
-      TAMARA: 1,
-    });
-    expect(response.message).toContain('NORMAL: 1');
-    expect(response.message).toContain('TABBY: 1');
-    expect(response.message).toContain('TAMARA: 1');
 
     for (const payload of response.payloads) {
       expect(payload.receivablesInvoiceLines[0]).toMatchObject({
@@ -172,11 +164,6 @@ describe('vendInvoiceController', () => {
     expect(res.json).toHaveBeenCalledTimes(1);
 
     const response = res.json.mock.calls[0][0];
-    expect(response.invoiceTypeStats).toEqual({
-      NORMAL: 1,
-      TABBY: 1,
-      TAMARA: 1,
-    });
 
     expect(response.payloads).toHaveLength(3);
     const comments = response.payloads.map((p) => p.Comments);
@@ -248,11 +235,6 @@ describe('vendInvoiceController', () => {
       Quantity: 2,
       UnitSellingPrice: 145.5,
       SalesOrder: 'RASHIDMAD2/4014',
-    });
-    expect(response.invoiceTypeStats).toEqual({
-      NORMAL: 0,
-      TABBY: 0,
-      TAMARA: 1,
     });
   });
 });

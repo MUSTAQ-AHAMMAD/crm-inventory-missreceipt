@@ -271,8 +271,6 @@ async function uploadVendInvoice(req, res, next) {
     // Process sales lines and group by store + date + payment type
     const invoiceGroups = {}; // Key: `${subinventory}_${date}_${paymentType}`
     const errors = [];
-    let salesLinesRawTotal = 0;
-
     for (let i = 0; i < salesLines.length; i++) {
       try {
         const row = salesLines[i];
@@ -321,9 +319,6 @@ async function uploadVendInvoice(req, res, next) {
           'Tax Incl',
           'Total',
         ]);
-
-        // Accumulate raw total from sales lines (before payment-type grouping)
-        salesLinesRawTotal += quantity * unitSellingPrice;
 
         // Try to extract payment method from sales line (if available)
         // Payment method field might be named: "Payment Method", "Order Lines/Payment Method", etc.
@@ -463,69 +458,11 @@ async function uploadVendInvoice(req, res, next) {
       });
     }
 
-    const invoiceTypeStats = {
-      NORMAL: 0,
-      TABBY: 0,
-      TAMARA: 0,
-    };
-
-    // Compute payload amounts per payment type and per invoice for validation report
-    const payloadAmountByPaymentType = { NORMAL: 0, TABBY: 0, TAMARA: 0 };
-    let payloadTotalAmount = 0;
-
-    for (const group of Object.values(invoiceGroups)) {
-      if (group.paymentType === 'TABBY') {
-        invoiceTypeStats.TABBY += 1;
-      } else if (group.paymentType === 'TAMARA') {
-        invoiceTypeStats.TAMARA += 1;
-      } else {
-        invoiceTypeStats.NORMAL += 1;
-      }
-
-      const groupTotal = group.lines.reduce(
-        (sum, line) => sum + (line.Quantity || 0) * (line.UnitSellingPrice || 0),
-        0
-      );
-      const pt = group.paymentType in payloadAmountByPaymentType ? group.paymentType : 'NORMAL';
-      payloadAmountByPaymentType[pt] += groupTotal;
-      payloadTotalAmount += groupTotal;
-    }
-
-    // Attach invoice-level total to each payload for the frontend
-    for (const payload of payloads) {
-      payload.invoiceTotal = payload.receivablesInvoiceLines.reduce(
-        (sum, line) => sum + (line.Quantity || 0) * (line.UnitSellingPrice || 0),
-        0
-      );
-    }
-
-    const roundToCents = (n) => Math.round(n * 100) / 100;
-    const salesLinesRoundedTotal = roundToCents(salesLinesRawTotal);
-    const payloadRoundedTotal = roundToCents(payloadTotalAmount);
-    const amountDifference = roundToCents(payloadRoundedTotal - salesLinesRoundedTotal);
-
-    const amountValidation = {
-      salesLinesTotal: salesLinesRoundedTotal,
-      payloadTotal: payloadRoundedTotal,
-      difference: amountDifference,
-      isMatch: Math.abs(amountDifference) < 0.01,
-      byPaymentType: {
-        NORMAL: roundToCents(payloadAmountByPaymentType.NORMAL),
-        TABBY: roundToCents(payloadAmountByPaymentType.TABBY),
-        TAMARA: roundToCents(payloadAmountByPaymentType.TAMARA),
-      },
-    };
-
-    console.log(`✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines (NORMAL=${invoiceTypeStats.NORMAL}, TABBY=${invoiceTypeStats.TABBY}, TAMARA=${invoiceTypeStats.TAMARA})`);
-    console.log(`[Vend Invoice] Amount validation — Sales Lines Total: ${salesLinesRoundedTotal}, Payload Total: ${payloadRoundedTotal}, Difference: ${amountDifference}, Match: ${amountValidation.isMatch}`);
+    console.log(`✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines`);
 
     return res.json({
       success: true,
-      message: `Generated ${payloads.length} invoice(s) from ${salesLines.length} sales line(s) [NORMAL: ${invoiceTypeStats.NORMAL}, TABBY: ${invoiceTypeStats.TABBY}, TAMARA: ${invoiceTypeStats.TAMARA}]`,
-      invoiceCount: payloads.length,
-      totalLines: salesLines.length,
-      invoiceTypeStats,
-      amountValidation,
+      message: `Generated ${payloads.length} invoice(s) from ${salesLines.length} sales line(s)`,
       payloads,
     });
 
