@@ -92,8 +92,10 @@ describe('vendInvoiceController', () => {
     const response = res.json.mock.calls[0][0];
 
     for (const payload of response.payloads) {
-      expect(payload.receivablesInvoiceLines[0]).toMatchObject({
-        ItemNumber: '',
+      const line = payload.receivablesInvoiceLines[0];
+      // Discount lines must not include ItemNumber (causes Oracle AR-855636)
+      expect(line).not.toHaveProperty('ItemNumber');
+      expect(line).toMatchObject({
         Description: 'Disscount Item',
         MemoLine: 'Disscount Item',
       });
