@@ -110,11 +110,16 @@ async function seedMetadata() {
   console.log(`Errors: ${errorCount}`);
 }
 
-seedMetadata()
-  .catch((error) => {
-    console.error('[Seed] Fatal error:', error);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+module.exports = { seedMetadata };
+
+// Run directly when called as a standalone script
+if (require.main === module) {
+  seedMetadata()
+    .catch((error) => {
+      console.error('[Seed] Fatal error:', error);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}
