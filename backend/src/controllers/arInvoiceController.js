@@ -64,7 +64,7 @@ async function previewPayload(req, res, next) {
         // ItemNumber may be empty for discount/memo lines that supply MemoLine instead
         const hasItemIdentifier = line.ItemNumber || line.MemoLine;
         if (!line.LineNumber || !hasItemIdentifier || !line.Description) {
-          validationErrors.push(`Line ${index + 1}: Missing required fields: LineNumber, ItemNumber, or Description`);
+          validationErrors.push(`Line ${index + 1}: Missing required fields: LineNumber, ItemNumber or MemoLine, and Description`);
         }
         // Quantity and UnitSellingPrice can legitimately be 0 (free/zero-price items)
         if (line.Quantity == null || line.UnitSellingPrice == null || !line.TaxClassificationCode) {
@@ -165,7 +165,7 @@ async function createInvoice(req, res, next) {
       const hasItemIdentifier = line.ItemNumber || line.MemoLine;
       if (!line.LineNumber || !hasItemIdentifier || !line.Description) {
         return res.status(400).json({
-          error: `Line ${index + 1}: Missing required fields: LineNumber, ItemNumber, Description`
+          error: `Line ${index + 1}: Missing required fields: LineNumber, ItemNumber or MemoLine, Description`
         });
       }
       // Quantity and UnitSellingPrice can legitimately be 0 (free/zero-price items)
