@@ -18,6 +18,9 @@ const {
   getUpload,
   getMetadata,
   listMetadata,
+  listResponseHeaders,
+  getResponseHeader,
+  listResponseLines,
 } = require('../controllers/arInvoiceController');
 
 const router = express.Router();
@@ -261,5 +264,79 @@ router.get('/metadata', getMetadata);
  *         description: Paginated list of metadata records
  */
 router.get('/metadata/list', listMetadata);
+
+/**
+ * @swagger
+ * /ar-invoice/response-headers:
+ *   get:
+ *     tags: [ARInvoice]
+ *     summary: List AR Invoice response headers (FusionInvoiceHeader)
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Paginated list of invoice response headers
+ */
+router.get('/response-headers', listResponseHeaders);
+
+/**
+ * @swagger
+ * /ar-invoice/response-headers/{id}:
+ *   get:
+ *     tags: [ARInvoice]
+ *     summary: Get a single AR Invoice response header with its line items
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Header with nested lines
+ *       404:
+ *         description: Header not found
+ */
+router.get('/response-headers/:id', getResponseHeader);
+
+/**
+ * @swagger
+ * /ar-invoice/response-lines:
+ *   get:
+ *     tags: [ARInvoice]
+ *     summary: List AR Invoice response lines (FusionInvoiceLine)
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: headerId
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Paginated list of invoice response lines
+ */
+router.get('/response-lines', listResponseLines);
 
 module.exports = router;
