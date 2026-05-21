@@ -1,0 +1,1450 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CRM Portal – Visual Feature Documentation</title>
+  <style>
+    /* ── Reset & base ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #f0f2f5;
+      color: #1a202c;
+      line-height: 1.6;
+    }
+
+    /* ── Sidebar ──────────────────────────────────────────────────────────── */
+    .layout { display: flex; min-height: 100vh; }
+    .sidebar {
+      width: 240px; min-width: 240px;
+      background: #1a202c;
+      color: #e2e8f0;
+      padding: 0;
+      position: sticky; top: 0; height: 100vh; overflow-y: auto;
+    }
+    .sidebar-logo {
+      display: flex; align-items: center;
+      padding: 18px 20px; border-bottom: 1px solid #2d3748;
+      font-size: 1.1rem; font-weight: 700; color: #63b3ed;
+    }
+    .sidebar-section { margin-top: 18px; padding: 0 10px; }
+    .sidebar-section-label {
+      font-size: 0.65rem; font-weight: 700; letter-spacing: 0.1em;
+      text-transform: uppercase; color: #718096;
+      padding: 0 8px 6px;
+    }
+    .sidebar-link {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 10px; border-radius: 8px; margin-bottom: 2px;
+      text-decoration: none; color: #cbd5e0; font-size: 0.83rem; font-weight: 500;
+      transition: background 0.15s;
+    }
+    .sidebar-link:hover { background: #2d3748; color: #fff; }
+    .sidebar-link.active { background: #3182ce; color: #fff; }
+
+    /* ── Main content ─────────────────────────────────────────────────────── */
+    .main { flex: 1; padding: 32px 36px 60px; max-width: calc(100vw - 240px); }
+
+    /* ── Page header ──────────────────────────────────────────────────────── */
+    .doc-header {
+      text-align: center; margin-bottom: 48px;
+      background: linear-gradient(135deg, #1a365d 0%, #2b6cb0 100%);
+      color: #fff; border-radius: 16px; padding: 40px 32px;
+    }
+    .doc-header h1 { font-size: 2rem; font-weight: 800; }
+    .doc-header p  { margin-top: 8px; font-size: 1rem; opacity: 0.85; }
+
+    /* ── Section anchors ──────────────────────────────────────────────────── */
+    .section { margin-bottom: 56px; scroll-margin-top: 24px; }
+    .section-group-label {
+      font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em;
+      text-transform: uppercase; color: #718096; margin-bottom: 14px;
+    }
+
+    /* ── Feature card ─────────────────────────────────────────────────────── */
+    .feature-card {
+      background: #fff; border-radius: 14px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.06);
+      overflow: hidden; margin-bottom: 28px;
+    }
+    .card-header {
+      display: flex; align-items: center; gap: 14px;
+      padding: 18px 24px; border-bottom: 1px solid #e2e8f0;
+    }
+    .card-icon { font-size: 1.6rem; }
+    .card-title { font-size: 1.1rem; font-weight: 700; color: #1a202c; }
+    .card-route { font-size: 0.72rem; color: #718096; font-family: monospace; margin-top: 2px; }
+    .card-body { padding: 22px 24px; }
+
+    /* ── Sub-sections inside a card ──────────────────────────────────────── */
+    .sub-section { margin-top: 20px; }
+    .sub-section:first-child { margin-top: 0; }
+    .sub-title {
+      font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: #2b6cb0; margin-bottom: 8px;
+    }
+
+    /* ── Description ──────────────────────────────────────────────────────── */
+    p.desc { font-size: 0.9rem; color: #4a5568; margin-bottom: 10px; }
+
+    /* ── Step list ────────────────────────────────────────────────────────── */
+    ol.steps, ul.bullets { padding-left: 20px; font-size: 0.88rem; color: #4a5568; }
+    ol.steps li, ul.bullets li { margin-bottom: 5px; }
+    ol.steps li strong, ul.bullets li strong { color: #1a202c; }
+
+    /* ── Tag pills ────────────────────────────────────────────────────────── */
+    .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .tag {
+      display: inline-block; padding: 2px 9px; border-radius: 999px;
+      font-size: 0.7rem; font-weight: 600; font-family: monospace;
+    }
+    .tag-blue   { background: #ebf8ff; color: #2b6cb0; border: 1px solid #bee3f8; }
+    .tag-purple { background: #faf5ff; color: #6b46c1; border: 1px solid #e9d8fd; }
+    .tag-green  { background: #f0fff4; color: #276749; border: 1px solid #c6f6d5; }
+    .tag-orange { background: #fffaf0; color: #c05621; border: 1px solid #fbd38d; }
+    .tag-gray   { background: #f7fafc; color: #4a5568; border: 1px solid #e2e8f0; }
+
+    /* ── Mock UI widgets ──────────────────────────────────────────────────── */
+    /* Progress bar */
+    .progress-wrap {
+      background: #e2e8f0; border-radius: 999px;
+      height: 10px; overflow: hidden; margin: 6px 0;
+    }
+    .progress-bar {
+      height: 100%; border-radius: 999px;
+      background: linear-gradient(90deg, #48bb78, #ecc94b);
+    }
+
+    /* Stat row */
+    .stat-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+    .stat-box {
+      flex: 1; min-width: 90px; padding: 10px 14px;
+      background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+      text-align: center;
+    }
+    .stat-box .stat-val { font-size: 1.4rem; font-weight: 800; }
+    .stat-box .stat-lbl { font-size: 0.65rem; color: #718096; text-transform: uppercase; letter-spacing: 0.06em; }
+    .green { color: #38a169; }
+    .red   { color: #e53e3e; }
+    .blue  { color: #3182ce; }
+    .gray  { color: #718096; }
+
+    /* Mock table */
+    .mock-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; margin-top: 8px; }
+    .mock-table th {
+      background: #f7fafc; color: #718096; font-weight: 700;
+      text-transform: uppercase; font-size: 0.65rem; letter-spacing: 0.06em;
+      padding: 7px 12px; text-align: left; border-bottom: 2px solid #e2e8f0;
+    }
+    .mock-table td {
+      padding: 8px 12px; border-bottom: 1px solid #e2e8f0; color: #4a5568;
+    }
+    .mock-table tr:hover td { background: #f7fafc; }
+    .badge {
+      display: inline-block; padding: 1px 8px; border-radius: 999px;
+      font-size: 0.68rem; font-weight: 600;
+    }
+    .badge-green  { background: #c6f6d5; color: #276749; }
+    .badge-red    { background: #fed7d7; color: #9b2c2c; }
+    .badge-yellow { background: #fefcbf; color: #744210; }
+    .badge-blue   { background: #bee3f8; color: #2a4365; }
+    .badge-gray   { background: #e2e8f0; color: #4a5568; }
+    .badge-indigo { background: #ebf4ff; color: #434190; }
+    .badge-purple { background: #faf5ff; color: #553c9a; }
+
+    /* Mock form elements */
+    .mock-input {
+      width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0;
+      border-radius: 8px; font-size: 0.82rem; color: #a0aec0;
+      background: #f7fafc; margin-bottom: 8px;
+    }
+    .mock-textarea {
+      width: 100%; min-height: 80px; padding: 8px 12px;
+      border: 1px solid #e2e8f0; border-radius: 8px;
+      font-size: 0.75rem; font-family: monospace;
+      color: #276749; background: #1a202c; resize: none;
+      margin-bottom: 8px;
+    }
+    .mock-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 8px 18px; border-radius: 8px; font-size: 0.82rem;
+      font-weight: 600; border: none; cursor: default;
+    }
+    .btn-blue   { background: #3182ce; color: #fff; }
+    .btn-gray   { background: #e2e8f0; color: #4a5568; }
+    .btn-purple { background: #805ad5; color: #fff; }
+    .btn-green  { background: #38a169; color: #fff; }
+    .btn-red    { background: #e53e3e; color: #fff; }
+    .btn-row    { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+
+    /* Dropzone */
+    .mock-dropzone {
+      border: 2px dashed #bee3f8; border-radius: 10px; padding: 28px;
+      text-align: center; background: #ebf8ff; color: #2b6cb0;
+      font-size: 0.82rem; margin: 8px 0;
+    }
+    .mock-dropzone .drop-icon { font-size: 2rem; margin-bottom: 6px; }
+
+    /* Chart placeholder */
+    .mock-chart {
+      background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 10px;
+      height: 130px; display: flex; align-items: center; justify-content: center;
+      color: #a0aec0; font-size: 0.82rem; gap: 8px;
+    }
+
+    /* Column reference box */
+    .col-ref-box {
+      background: #ebf8ff; border: 1px solid #bee3f8;
+      border-radius: 10px; padding: 14px 16px; margin: 8px 0;
+      font-size: 0.8rem;
+    }
+    .col-ref-box .col-ref-title { color: #2b6cb0; font-weight: 700; margin-bottom: 8px; }
+
+    /* Info note */
+    .info-note {
+      background: #fffaf0; border: 1px solid #fbd38d;
+      border-radius: 8px; padding: 10px 14px;
+      font-size: 0.8rem; color: #7b341e; margin: 8px 0;
+    }
+    .info-note strong { color: #c05621; }
+
+    /* Two-col layout */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 700px) { .two-col { grid-template-columns: 1fr; } }
+
+    /* XML / JSON preview */
+    .code-block {
+      background: #1a202c; color: #68d391;
+      border-radius: 10px; padding: 14px 16px;
+      font-family: monospace; font-size: 0.72rem;
+      overflow-x: auto; white-space: pre; line-height: 1.5;
+      margin: 8px 0;
+    }
+
+    /* Tab bar */
+    .tab-bar { display: flex; border-bottom: 2px solid #e2e8f0; margin-bottom: 14px; }
+    .tab-item {
+      padding: 8px 18px; font-size: 0.82rem; font-weight: 600;
+      color: #718096; border-bottom: 2px solid transparent;
+      margin-bottom: -2px; cursor: default;
+    }
+    .tab-item.tab-active { color: #3182ce; border-bottom-color: #3182ce; }
+
+    /* Admin badge */
+    .admin-only {
+      display: inline-block; background: #fed7d7; color: #9b2c2c;
+      font-size: 0.65rem; font-weight: 700; padding: 2px 8px; border-radius: 999px;
+      vertical-align: middle; margin-left: 8px;
+    }
+
+    /* ── Table of contents ────────────────────────────────────────────────── */
+    .toc {
+      background: #fff; border-radius: 14px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+      padding: 24px 28px; margin-bottom: 40px;
+    }
+    .toc h2 { font-size: 1rem; font-weight: 700; margin-bottom: 14px; color: #1a202c; }
+    .toc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; }
+    .toc-item {
+      display: flex; align-items: center; gap: 8px;
+      text-decoration: none; color: #3182ce;
+      font-size: 0.82rem; padding: 5px 8px; border-radius: 6px;
+      transition: background 0.1s;
+    }
+    .toc-item:hover { background: #ebf8ff; }
+
+    /* ── HR divider ───────────────────────────────────────────────────────── */
+    hr.divider { border: none; border-top: 1px solid #e2e8f0; margin: 32px 0; }
+  </style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- ── Sidebar (navigation replica) ──────────────────────────────────── -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">🏢 CRM Portal</div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Overview</div>
+      <a href="#dashboard" class="sidebar-link active">📊 Dashboard</a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Inventory</div>
+      <a href="#inventory-upload" class="sidebar-link">📦 Inventory Upload</a>
+      <a href="#template-gen" class="sidebar-link">🧩 Template Generation</a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Receipts</div>
+      <a href="#misc-receipt" class="sidebar-link">🧾 Misc Receipt</a>
+      <a href="#standard-receipt" class="sidebar-link">💳 Standard Receipt</a>
+      <a href="#apply-receipt" class="sidebar-link">🔗 Apply Receipt</a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">AR Invoice</div>
+      <a href="#ar-invoice-upload" class="sidebar-link">📄 AR Invoice Upload</a>
+      <a href="#ar-invoice-data" class="sidebar-link">📋 AR Invoice Data</a>
+      <a href="#ar-invoice-response" class="sidebar-link">📨 AR Invoice Response</a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Vend</div>
+      <a href="#vend-invoice" class="sidebar-link">🏪 Vend Invoice</a>
+      <a href="#vend-metadata" class="sidebar-link">🗂️ Sales Metadata</a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Reports &amp; Logs</div>
+      <a href="#reports" class="sidebar-link">📈 Reports</a>
+      <a href="#logs-failures" class="sidebar-link">⚠️ Logs &amp; Failures</a>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-section-label">Administration</div>
+      <a href="#user-management" class="sidebar-link">👥 User Management</a>
+    </div>
+  </nav>
+
+  <!-- ── Main content ──────────────────────────────────────────────────── -->
+  <main class="main">
+
+    <!-- Page header -->
+    <div class="doc-header">
+      <h1>📖 CRM Portal – Visual Feature Documentation</h1>
+      <p>A complete visual guide to every sub-menu item: what it does and how to use it.</p>
+    </div>
+
+    <!-- Table of contents -->
+    <div class="toc">
+      <h2>📑 Table of Contents</h2>
+      <div class="toc-grid">
+        <a href="#dashboard"          class="toc-item">📊 Dashboard</a>
+        <a href="#inventory-upload"   class="toc-item">📦 Inventory Upload</a>
+        <a href="#template-gen"       class="toc-item">🧩 Template Generation</a>
+        <a href="#misc-receipt"       class="toc-item">🧾 Misc Receipt</a>
+        <a href="#standard-receipt"   class="toc-item">💳 Standard Receipt</a>
+        <a href="#apply-receipt"      class="toc-item">🔗 Apply Receipt</a>
+        <a href="#ar-invoice-upload"  class="toc-item">📄 AR Invoice Upload</a>
+        <a href="#ar-invoice-data"    class="toc-item">📋 AR Invoice Data</a>
+        <a href="#ar-invoice-response" class="toc-item">📨 AR Invoice Response</a>
+        <a href="#vend-invoice"       class="toc-item">🏪 Vend Invoice</a>
+        <a href="#vend-metadata"      class="toc-item">🗂️ Sales Metadata</a>
+        <a href="#reports"            class="toc-item">📈 Reports</a>
+        <a href="#logs-failures"      class="toc-item">⚠️ Logs &amp; Failures</a>
+        <a href="#user-management"    class="toc-item">👥 User Management</a>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════
+         SECTION 1 – OVERVIEW
+         ════════════════════════════════════════════════════════ -->
+    <div class="section-group-label">📂 Section 1 – Overview</div>
+
+    <!-- Dashboard -->
+    <div class="feature-card section" id="dashboard">
+      <div class="card-header">
+        <span class="card-icon">📊</span>
+        <div>
+          <div class="card-title">Dashboard</div>
+          <div class="card-route">Route: /  (Home)</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="desc">
+          The Dashboard is the <strong>first screen</strong> you see after login. It gives a real-time
+          bird's-eye view of all upload activity, success rates, and recent user actions.
+        </p>
+
+        <div class="sub-section">
+          <div class="sub-title">What you see</div>
+          <!-- Stat cards row -->
+          <div class="stat-row">
+            <div class="stat-box"><div class="stat-val blue">24</div><div class="stat-lbl">Inventory Uploads</div></div>
+            <div class="stat-box"><div class="stat-val" style="color:#805ad5">18</div><div class="stat-lbl">Misc Uploads</div></div>
+            <div class="stat-box"><div class="stat-val" style="color:#4c51bf">12</div><div class="stat-lbl">Standard Uploads</div></div>
+            <div class="stat-box"><div class="stat-val green">94%</div><div class="stat-lbl">Success Rate</div></div>
+            <div class="stat-box"><div class="stat-val red">7</div><div class="stat-lbl">Failed Records</div></div>
+          </div>
+        </div>
+
+        <div class="two-col" style="margin-top:14px;">
+          <div>
+            <div class="sub-title">Upload Trend Chart (Last 30 Days)</div>
+            <div class="mock-chart">
+              📈 Line chart — Inventory Success vs Failure over 30 days
+            </div>
+          </div>
+          <div>
+            <div class="sub-title">Success vs Failure Bar Chart</div>
+            <div class="mock-chart">
+              📊 Bar chart — Daily success (green) and failure (red) counts
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">Recent Activity Table</div>
+          <table class="mock-table">
+            <thead><tr><th>User</th><th>Action</th><th>Details</th><th>Time</th></tr></thead>
+            <tbody>
+              <tr><td>admin@crm.com</td><td><span class="badge badge-blue">INVENTORY_UPLOAD</span></td><td>Uploaded 120 rows – VisionOps</td><td>5 min ago</td></tr>
+              <tr><td>user@crm.com</td><td><span class="badge badge-blue">MISC_RECEIPT_UPLOAD</span></td><td>12 receipts sent to Oracle</td><td>22 min ago</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">How to use</div>
+          <ol class="steps">
+            <li>Navigate to <strong>/</strong> (home) from the sidebar — it opens automatically after login.</li>
+            <li>Review the <strong>summary stat cards</strong> for a quick health check.</li>
+            <li>Inspect the <strong>line/bar charts</strong> to spot trends over the last 30 days.</li>
+            <li>Scroll down to the <strong>Recent Activity</strong> table to audit who did what and when.</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════
+         SECTION 2 – INVENTORY
+         ════════════════════════════════════════════════════════ -->
+    <hr class="divider" />
+    <div class="section-group-label">📂 Section 2 – Inventory</div>
+
+    <!-- Inventory Upload -->
+    <div class="feature-card section" id="inventory-upload">
+      <div class="card-header">
+        <span class="card-icon">📦</span>
+        <div>
+          <div class="card-title">Inventory Upload</div>
+          <div class="card-route">Route: /inventory</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="desc">
+          Bulk-upload inventory transaction records from a CSV file directly into Oracle Fusion.
+          The system validates each row, streams them to Oracle, and tracks success/failure in real time.
+        </p>
+
+        <div class="sub-section">
+          <div class="sub-title">Step-by-step workflow</div>
+          <ol class="steps">
+            <li>Click <strong>⬇️ Download Template</strong> (top-right) to get the pre-formatted CSV.</li>
+            <li>Fill the CSV with your inventory data and save it.</li>
+            <li>Type the <strong>Organization Name</strong> (e.g. <em>Vision Operations</em>) in the text field.</li>
+            <li><strong>Drag &amp; drop</strong> or click the dropzone to select your CSV file.</li>
+            <li>Click <strong>📤 Upload &amp; Process</strong> — a progress panel appears while Oracle processes each record.</li>
+            <li>When done, review the <strong>result summary</strong>. If there are failures, click "View failure details →".</li>
+          </ol>
+        </div>
+
+        <!-- Mock upload UI -->
+        <div style="margin-top:14px;">
+          <input class="mock-input" type="text" value="Vision Operations" readonly />
+          <div class="mock-dropzone">
+            <div class="drop-icon">📂</div>
+            <div>inventory_data.csv selected (4.2 KB)</div>
+            <div style="font-size:0.7rem;margin-top:4px;color:#3182ce;">✓ File ready</div>
+          </div>
+          <!-- Real-time progress -->
+          <div style="background:#eff8ff;border:1px solid #bee3f8;border-radius:10px;padding:14px;margin:8px 0;">
+            <div style="font-weight:700;color:#2b6cb0;margin-bottom:8px;">⏳ Processing Records… 73%</div>
+            <div class="progress-wrap"><div class="progress-bar" style="width:73%"></div></div>
+            <div class="stat-row" style="margin-top:10px;">
+              <div class="stat-box"><div class="stat-val gray">150</div><div class="stat-lbl">Total</div></div>
+              <div class="stat-box"><div class="stat-val green">109</div><div class="stat-lbl">Completed</div></div>
+              <div class="stat-box"><div class="stat-val red">2</div><div class="stat-lbl">Failed</div></div>
+              <div class="stat-box"><div class="stat-val blue">39</div><div class="stat-lbl">In Progress</div></div>
+            </div>
+          </div>
+          <div class="btn-row">
+            <div class="mock-btn btn-blue">📤 Upload &amp; Process</div>
+            <div class="mock-btn btn-gray">⬇️ Download Template</div>
+          </div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">Required CSV columns</div>
+          <div class="tags">
+            <span class="tag tag-blue">TransactionTypeName</span>
+            <span class="tag tag-blue">ItemNumber</span>
+            <span class="tag tag-blue">SubinventoryCode</span>
+            <span class="tag tag-blue">TransactionDate</span>
+            <span class="tag tag-blue">TransactionQuantity</span>
+            <span class="tag tag-blue">TransactionReference</span>
+            <span class="tag tag-blue">TransactionUnitOfMeasure</span>
+          </div>
+          <div class="info-note" style="margin-top:8px;">
+            <strong>💡 Tip:</strong> Alternative column names are accepted — e.g. <em>Order Lines/Product/Barcode</em>
+            maps to <em>ItemNumber</em>; <em>Order Lines/Branch/Name</em> maps to <em>SubinventoryCode</em>.
+            UOM defaults to <em>Each</em> when omitted.
+          </div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">Recent uploads table</div>
+          <table class="mock-table">
+            <thead><tr><th>ID</th><th>Filename</th><th>Org</th><th>Total</th><th>✓</th><th>✗</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead>
+            <tbody>
+              <tr><td>#42</td><td>inv_may.csv</td><td>VisionOps</td><td>200</td><td class="green">198</td><td class="red">2</td><td><span class="badge badge-yellow">PARTIAL</span></td><td>2025-05-20</td><td><a style="color:#3182ce;font-size:0.75rem;">View details / Failures</a></td></tr>
+              <tr><td>#41</td><td>inv_apr.csv</td><td>AlQurashi</td><td>85</td><td class="green">85</td><td class="red">0</td><td><span class="badge badge-green">COMPLETED</span></td><td>2025-04-18</td><td><a style="color:#3182ce;font-size:0.75rem;">View details</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Template Generation -->
+    <div class="feature-card section" id="template-gen">
+      <div class="card-header">
+        <span class="card-icon">🧩</span>
+        <div>
+          <div class="card-title">Inventory Template Generation</div>
+          <div class="card-route">Route: /inventory-template</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="desc">
+          Converts a raw <strong>Amro inventory export CSV</strong> into a correctly formatted
+          Oracle inventory transaction CSV — inverting quantities, deriving transaction types,
+          and summing lines per Branch + Barcode + Order Ref.
+        </p>
+
+        <div class="sub-section">
+          <div class="sub-title">Step-by-step workflow</div>
+          <ol class="steps">
+            <li>Export the inventory data from the Amro system as CSV.</li>
+            <li>Drag &amp; drop the file onto the dropzone.</li>
+            <li>Click <strong>👁️ Preview conversion</strong> to see the first 50 converted rows immediately — no Oracle call yet.</li>
+            <li>Review warnings (skipped rows with missing data appear in a yellow box).</li>
+            <li>Click <strong>⬇️ Download template CSV</strong> to save the converted file.</li>
+            <li>Use the downloaded CSV as input for the <a href="#inventory-upload" style="color:#3182ce;">Inventory Upload</a> page.</li>
+          </ol>
+        </div>
+
+        <div class="two-col" style="margin-top:12px;">
+          <div>
+            <div class="sub-title">Mapping rules</div>
+            <ul class="bullets">
+              <li><strong>Branch/Name</strong> (text before "/") → SubinventoryCode</li>
+              <li><strong>Product/Barcode</strong> → ItemNumber</li>
+              <li><strong>Order Ref</strong> → TransactionReference</li>
+              <li><strong>Total</strong> (inverted) → TransactionQuantity</li>
+              <li><strong>Base UoM</strong> → UOM (default: <em>Each</em>)</li>
+            </ul>
+          </div>
+          <div>
+            <div class="sub-title">Derived values</div>
+            <ul class="bullets">
+              <li>Qty inverted: positive → negative, negative → positive (REFUND keeps positive)</li>
+              <li>Type: <strong>Vend Sales Issue</strong> when qty &lt; 0; <strong>Vendor RMA</strong> when qty &gt; 0</li>
+              <li>Date: uses Order Ref date if present, else today</li>
+            </ul>
+          </div>
+        </div>
+
+        <!-- Preview table mock -->
+        <div class="sub-section">
+          <div class="sub-title">Converted preview (first 50 rows)</div>
+          <table class="mock-table">
+            <thead><tr><th>TransactionTypeName</th><th>ItemNumber</th><th>SubinventoryCode</th><th>TransactionDate</th><th>TransactionQuantity</th><th>TransactionReference</th><th>UOM</th></tr></thead>
+            <tbody>
+              <tr><td>Vend Sales Issue</td><td>6281074736314</td><td>AZIZMALL</td><td>2025-05-01</td><td>-2</td><td>64181</td><td>Each</td></tr>
+              <tr><td>Vendor RMA</td><td>6281074736315</td><td>RIYADH01</td><td>2025-05-01</td><td>1</td><td>64182</td><td>Each</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="btn-row">
+          <div class="mock-btn btn-gray">👁️ Preview conversion</div>
+          <div class="mock-btn btn-blue">⬇️ Download template CSV</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════
+         SECTION 3 – RECEIPTS
+         ════════════════════════════════════════════════════════ -->
+    <hr class="divider" />
+    <div class="section-group-label">📂 Section 3 – Receipts</div>
+
+    <!-- Misc Receipt -->
+    <div class="feature-card section" id="misc-receipt">
+      <div class="card-header">
+        <span class="card-icon">🧾</span>
+        <div>
+          <div class="card-title">Misc Receipt</div>
+          <div class="card-route">Route: /misc-receipt</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="desc">
+          Upload a CSV of miscellaneous (non-trade) receipts and send each one to Oracle Fusion
+          via <strong>SOAP XML</strong>. The page supports XML preview before sending, real-time
+          progress tracking, and a detailed response log.
+        </p>
+
+        <div class="sub-section">
+          <div class="sub-title">Step-by-step workflow</div>
+          <ol class="steps">
+            <li>Click <strong>⬇️ Download Template</strong> to get the required CSV structure.</li>
+            <li>Fill in your misc receipt data (amounts, dates, bank account numbers, etc.).</li>
+            <li>Drop the CSV onto the dropzone.</li>
+            <li><em>(Optional)</em> Click <strong>👁️ Preview XML</strong> to review the SOAP payloads that will be sent — useful for debugging.</li>
+            <li>Click <strong>📤 Upload &amp; Send to Oracle</strong> to begin submission.</li>
+            <li>Watch the <strong>live progress panel</strong> — it shows Total / Success / Failed counts as each receipt is processed.</li>
+            <li>After completion, expand <strong>View Detailed Response Log</strong> to see Oracle's raw responses.</li>
+          </ol>
+        </div>
+
+        <!-- SOAP XML preview mock -->
+        <div class="sub-section">
+          <div class="sub-title">SOAP XML preview example</div>
+          <div class="code-block">&lt;soapenv:Envelope xmlns:soapenv="..."&gt;
+  &lt;soapenv:Body&gt;
+    &lt;tns:createMiscellaneousReceipt&gt;
+      &lt;ReceiptNumber&gt;MISC-2025-001&lt;/ReceiptNumber&gt;
+      &lt;Amount&gt;5000.00&lt;/Amount&gt;
+      &lt;CurrencyCode&gt;SAR&lt;/CurrencyCode&gt;
+      &lt;ReceiptDate&gt;2025/05/01&lt;/ReceiptDate&gt;
+      &lt;BankAccountNumber&gt;SA12345678&lt;/BankAccountNumber&gt;
+    &lt;/tns:createMiscellaneousReceipt&gt;
+  &lt;/soapenv:Body&gt;
+&lt;/soapenv:Envelope&gt;</div>
+        </div>
+
+        <!-- Progress panel mock -->
+        <div style="background:#faf5ff;border:1px solid #e9d8fd;border-radius:10px;padding:14px;margin:8px 0;">
+          <div style="font-weight:700;color:#805ad5;margin-bottom:8px;">⏳ Processing Misc Receipt Requests...</div>
+          <div class="progress-wrap"><div class="progress-bar" style="width:60%;background:linear-gradient(90deg,#805ad5,#d6bcfa)"></div></div>
+          <div class="stat-row" style="margin-top:10px;">
+            <div class="stat-box"><div class="stat-val gray">10</div><div class="stat-lbl">Total Records</div></div>
+            <div class="stat-box"><div class="stat-val green">6</div><div class="stat-lbl">Success</div></div>
+            <div class="stat-box"><div class="stat-val red">0</div><div class="stat-lbl">Failed</div></div>
+            <div class="stat-box"><div class="stat-val" style="color:#805ad5">4</div><div class="stat-lbl">In Progress</div></div>
+          </div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">Required CSV columns</div>
+          <div class="tags">
+            <span class="tag tag-purple">Amount</span>
+            <span class="tag tag-purple">CurrencyCode</span>
+            <span class="tag tag-purple">DepositDate</span>
+            <span class="tag tag-purple">ReceiptDate</span>
+            <span class="tag tag-purple">GlDate</span>
+            <span class="tag tag-purple">OrgId</span>
+            <span class="tag tag-purple">ReceiptNumber</span>
+            <span class="tag tag-purple">ReceivableActivityName</span>
+            <span class="tag tag-purple">BankAccountNumber</span>
+          </div>
+          <div class="tags" style="margin-top:6px;">
+            <span class="tag tag-gray">ReceiptMethodId (optional)</span>
+            <span class="tag tag-gray">ReceiptMethodName (optional)</span>
+          </div>
+          <div class="info-note" style="margin-top:8px;">
+            <strong>⚠️ Note:</strong> <em>OrgId</em> in the CSV is ignored — the system always uses the
+            static Oracle OrgId <code>300000001421038</code> to prevent scientific notation issues.<br/>
+            Dates are auto-converted from DD-MM-YYYY, YYYY/MM/DD, or Excel serial numbers.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Standard Receipt -->
+    <div class="feature-card section" id="standard-receipt">
+      <div class="card-header">
+        <span class="card-icon">💳</span>
+        <div>
+          <div class="card-title">Standard Receipt</div>
+          <div class="card-route">Route: /standard-receipt</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="desc">
+          Upload customer cash/payment receipts from a CSV and submit them to Oracle Fusion
+          via <strong>REST API</strong>. Supports payload preview (JSON), real-time progress,
+          and Oracle response logging.
+        </p>
+
+        <div class="sub-section">
+          <div class="sub-title">Step-by-step workflow</div>
+          <ol class="steps">
+            <li>Click <strong>⬇️ Download Template</strong> and prepare your standard receipt CSV.</li>
+            <li>Drop or select the CSV file.</li>
+            <li><em>(Optional)</em> Click <strong>👁️ Preview Payload</strong> to review the JSON that will be POSTed to Oracle.</li>
+            <li>Click <strong>📤 Upload &amp; Send to Oracle</strong>.</li>
+            <li>Monitor the progress panel and expand the response log if needed.</li>
+            <li>Click <strong>View Details</strong> in the history table to see row-by-row results.</li>
+          </ol>
+        </div>
+
+        <!-- JSON Payload preview mock -->
+        <div class="sub-section">
+          <div class="sub-title">JSON payload preview example (Row 1)</div>
+          <div class="code-block">{
+  "ReceiptNumber": "RCPT-2025-0042",
+  "ReceiptMethod": "CASH",
+  "ReceiptDate": "2025/05/01",
+  "BusinessUnit": "AlQurashi-KSA",
+  "CustomerAccountNumber": "C-00123",
+  "Amount": 1200.00,
+  "Currency": "SAR",
+  "AccountingDate": "2025/05/01"
+}</div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">Required CSV columns</div>
+          <div class="tags">
+            <span class="tag tag-blue">ReceiptNumber</span>
+            <span class="tag tag-blue">ReceiptMethod</span>
+            <span class="tag tag-blue">ReceiptDate</span>
+            <span class="tag tag-blue">BusinessUnit</span>
+            <span class="tag tag-blue">CustomerAccountNumber</span>
+            <span class="tag tag-blue">CustomerSite</span>
+            <span class="tag tag-blue">Amount</span>
+            <span class="tag tag-blue">Currency</span>
+            <span class="tag tag-blue">RemittanceBankAccountNumber</span>
+            <span class="tag tag-blue">AccountingDate</span>
+          </div>
+          <div class="info-note" style="margin-top:8px;">
+            <strong>💡 Tip:</strong> Dates are auto-normalised to <code>YYYY/MM/DD</code> — you can supply
+            DD-MM-YYYY, YYYY-MM-DD, or Excel serial numbers and they'll be converted automatically.
+          </div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">Upload history table</div>
+          <table class="mock-table">
+            <thead><tr><th>ID</th><th>Filename</th><th>Status</th><th>Records</th><th>Response</th><th>Date</th><th>Actions</th></tr></thead>
+            <tbody>
+              <tr><td>#9</td><td>rcpt_may.csv</td><td><span class="badge badge-green">SUCCESS</span></td><td>✓ 30 / ✗ 0</td><td>Created successfully</td><td>2025-05-19</td><td><a style="color:#3182ce;font-size:0.75rem;">View Details</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Apply Receipt -->
+    <div class="feature-card section" id="apply-receipt">
+      <div class="card-header">
+        <span class="card-icon">🔗</span>
+        <div>
+          <div class="card-title">Apply Receipt</div>
+          <div class="card-route">Route: /apply-receipt</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="desc">
+          Links existing Oracle receipts to their corresponding invoices by uploading a CSV that
+          maps <strong>InvoiceNumber → ReceiptNumber(s)</strong>. Sends SOAP requests to Oracle
+          and tracks each application with live progress.
+        </p>
+
+        <div class="sub-section">
+          <div class="sub-title">Step-by-step workflow</div>
+          <ol class="steps">
+            <li>Click <strong>⬇️ Download Template</strong> and fill in invoice-to-receipt mappings.</li>
+            <li>Drop or select the CSV file.</li>
+            <li><em>(Optional)</em> Click <strong>👁️ Preview Payload</strong> to review what will be sent to Oracle.</li>
+            <li><em>(Optional)</em> Click <strong>✅ Verify Receipts</strong> to validate that every receipt exists in Oracle before applying.</li>
+            <li>Click <strong>📤 Upload &amp; Send to Oracle</strong> to apply all receipts.</li>
+            <li>Monitor the progress panel; expand response log for Oracle feedback.</li>
+          </ol>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">CSV structure</div>
+          <div class="tags">
+            <span class="tag tag-blue">InvoiceNumber</span>
+            <span class="tag tag-gray">ReceiptNumber1</span>
+            <span class="tag tag-gray">ReceiptNumber2</span>
+            <span class="tag tag-gray">ReceiptNumber3 …</span>
+          </div>
+          <div class="info-note" style="margin-top:8px;">
+            <strong>💡 Tip:</strong> You can have unlimited <em>ReceiptNumberN</em> columns — the system
+            detects them all automatically. One invoice may be linked to multiple receipts.
+          </div>
+        </div>
+
+        <!-- Example CSV mock -->
+        <div class="sub-section">
+          <div class="sub-title">Example CSV rows</div>
+          <table class="mock-table">
+            <thead><tr><th>InvoiceNumber</th><th>ReceiptNumber1</th><th>ReceiptNumber2</th></tr></thead>
+            <tbody>
+              <tr><td>INV-2025-001</td><td>RCPT-0042</td><td>RCPT-0043</td></tr>
+              <tr><td>INV-2025-002</td><td>RCPT-0099</td><td></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="btn-row">
+          <div class="mock-btn btn-gray">👁️ Preview Payload</div>
+          <div class="mock-btn btn-gray" style="background:#e9d8fd;color:#553c9a;">✅ Verify Receipts</div>
+          <div class="mock-btn btn-blue">📤 Upload &amp; Send to Oracle</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════
+         SECTION 4 – AR INVOICE
+         ════════════════════════════════════════════════════════ -->
+    <hr class="divider" />
+    <div class="section-group-label">📂 Section 4 – AR Invoice</div>
+
+    <!-- AR Invoice Upload -->
+    <div class="feature-card section" id="ar-invoice-upload">
+      <div class="card-header">
+        <span class="card-icon">📄</span>
+        <div>
+          <div class="card-title">AR Invoice Upload (Creation)</div>
+          <div class="card-route">Route: /ar-invoice</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="desc">
+          Create a single AR Invoice in Oracle Fusion by pasting a <strong>JSON payload</strong>
+          directly. Also supports <strong>bulk submission</strong> of multiple payloads generated
+          from the AR Invoice Data page or the Vend Invoice page.
+        </p>
+
+        <div class="sub-section">
+          <div class="sub-title">Single invoice – step-by-step</div>
+          <ol class="steps">
+            <li>Click <strong>📋 Load Sample</strong> to populate a pre-filled example payload.</li>
+            <li>Edit the JSON in the textarea: set BusinessUnit, BillTo fields, invoice lines, etc.</li>
+            <li>Click <strong>✨ Format JSON</strong> to auto-indent the payload for readability.</li>
+            <li>Click <strong>🚀 Create AR Invoice</strong> — Oracle's response (including the new Invoice Number) appears below.</li>
+            <li>Click <strong>View Full Details →</strong> to see the stored response record.</li>
+          </ol>
+        </div>
+
+        <!-- JSON editor mock -->
+        <div class="sub-section">
+          <div class="sub-title">JSON editor</div>
+          <textarea class="mock-textarea" readonly>{
+  "BusinessUnit": "AlQurashi-KSA",
+  "TransactionSource": "Vend",
+  "TransactionType": "Vend Invoice",
+  "TransactionDate": "2025-05-01",
+  "BillToCustomerName": "Aziz Mall",
+  "BillToCustomerNumber": "13",
+  "BillToSite": "13",
+  "PaymentTerms": "IMMEDIATE",
+  "InvoiceCurrencyCode": "SAR",
+  "CrossReference": "32886",
+  "receivablesInvoiceLines": [...]
+}</textarea>
+          <div class="btn-row">
+            <div class="mock-btn btn-gray">📋 Load Sample</div>
+            <div class="mock-btn btn-gray">✨ Format JSON</div>
+            <div class="mock-btn btn-blue">🚀 Create AR Invoice</div>
+          </div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">Bulk invoice submission</div>
+          <p class="desc">
+            When payloads are passed from <a href="#ar-invoice-data" style="color:#3182ce;">AR Invoice Data</a>
+            or <a href="#vend-invoice" style="color:#3182ce;">Vend Invoice</a>, a <strong>Bulk Invoice Submission</strong>
+            banner appears at the top showing the number of queued invoices.
+            Click <strong>🚀 Submit All Invoices</strong> — each invoice is submitted sequentially,
+            and results (✅ / ❌) are listed below in real time.
+          </p>
+          <div style="background:#ebf8ff;border:1px solid #bee3f8;border-radius:10px;padding:14px;margin:8px 0;">
+            <div style="font-weight:700;color:#2b6cb0;margin-bottom:6px;">Bulk Invoice Submission (3 invoices)</div>
+            <div style="font-size:0.8rem;color:#3182ce;">Ready to submit 3 invoice(s) to Oracle Fusion</div>
+            <div style="font-size:0.75rem;color:#2c5282;margin-top:3px;">Each invoice will be submitted sequentially.</div>
+          </div>
+          <div style="margin-top:8px;">
+            <div style="background:#f0fff4;border:1px solid #c6f6d5;border-radius:8px;padding:10px 14px;font-size:0.8rem;color:#276749;">✅ Invoice #1 – Aziz Mall | CrossRef: 32886</div>
+            <div style="background:#fff5f5;border:1px solid #fed7d7;border-radius:8px;padding:10px 14px;font-size:0.8rem;color:#9b2c2c;margin-top:4px;">❌ Invoice #2 – Al Nakheel | Field BillToSite is required</div>
+          </div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">Required JSON fields</div>
+          <div class="col-ref-box">
+            <div class="col-ref-title">Header fields</div>
+            <div class="tags">
+              <span class="tag tag-blue">BusinessUnit</span>
+              <span class="tag tag-blue">TransactionSource</span>
+              <span class="tag tag-blue">TransactionType</span>
+              <span class="tag tag-blue">TransactionDate</span>
+              <span class="tag tag-blue">AccountingDate</span>
+              <span class="tag tag-blue">BillToCustomerName</span>
+              <span class="tag tag-blue">BillToCustomerNumber</span>
+              <span class="tag tag-blue">BillToSite</span>
+              <span class="tag tag-blue">PaymentTerms</span>
+              <span class="tag tag-blue">InvoiceCurrencyCode</span>
+            </div>
+            <div class="col-ref-title" style="margin-top:10px;">receivablesInvoiceLines array (per line)</div>
+            <div class="tags">
+              <span class="tag tag-green">LineNumber</span>
+              <span class="tag tag-green">ItemNumber</span>
+              <span class="tag tag-green">Description</span>
+              <span class="tag tag-green">Quantity</span>
+              <span class="tag tag-green">UnitSellingPrice</span>
+              <span class="tag tag-green">TaxClassificationCode</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AR Invoice Data -->
+    <div class="feature-card section" id="ar-invoice-data">
+      <div class="card-header">
+        <span class="card-icon">📋</span>
+        <div>
+          <div class="card-title">AR Invoice Data</div>
+          <div class="card-route">Route: /ar-invoice-data</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="desc">
+          A <strong>staging area</strong> for AR invoice line items. Upload invoice data from CSV
+          into the database, review it, then auto-generate Oracle-ready JSON payloads — without
+          sending anything to Oracle yet. Use this when you want to stage and review data before committing.
+        </p>
+
+        <div class="sub-section">
+          <div class="sub-title">Step-by-step workflow</div>
+          <ol class="steps">
+            <li>Click <strong>📥 Download Template</strong> and fill in invoice line items.</li>
+            <li>Drop or select the CSV file and click <strong>📤 Upload CSV</strong> — records are stored in the database as a <em>batch</em>.</li>
+            <li>The new batch appears in the <strong>Uploaded Batches</strong> table. Click <strong>View Records</strong> to inspect all lines.</li>
+            <li>Click <strong>Generate Payload</strong> next to a batch — the system groups lines by customer into one invoice per customer.</li>
+            <li>Review the generated JSON payloads. Click <strong>📋 Copy JSON</strong> or click <strong>→ Use this payload in AR Invoice Creation</strong> to send it to Oracle.</li>
+            <li>To clean up, click <strong>Delete</strong> on any batch you no longer need.</li>
+          </ol>
+        </div>
+
+        <div class="two-col" style="margin-top:12px;">
+          <div>
+            <div class="sub-title">Required CSV columns</div>
+            <div class="tags">
+              <span class="tag tag-blue">customerName</span>
+              <span class="tag tag-blue">itemNumber</span>
+              <span class="tag tag-blue">description</span>
+              <span class="tag tag-blue">quantity</span>
+              <span class="tag tag-blue">unitSellingPrice</span>
+              <span class="tag tag-blue">taxClassificationCode</span>
+              <span class="tag tag-blue">transactionDate</span>
+              <span class="tag tag-blue">accountingDate</span>
+              <span class="tag tag-blue">paymentTerms</span>
+              <span class="tag tag-blue">invoiceCurrencyCode</span>
+            </div>
+          </div>
+          <div>
+            <div class="sub-title">Optional CSV columns</div>
+            <div class="tags">
+              <span class="tag tag-gray">customerNumber</span>
+              <span class="tag tag-gray">siteNumber</span>
+              <span class="tag tag-gray">subinventory</span>
+              <span class="tag tag-gray">businessUnit</span>
+              <span class="tag tag-gray">transactionSource</span>
+              <span class="tag tag-gray">crossReference</span>
+              <span class="tag tag-gray">salesOrder</span>
+              <span class="tag tag-gray">memoLine</span>
+            </div>
+            <div class="info-note" style="margin-top:6px;">
+              <strong>💡</strong> If <em>customerName</em> + <em>subinventory</em> are provided,
+              header fields are auto-populated from the FusionSalesMetadata table.
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">Batches &amp; records tables</div>
+          <table class="mock-table">
+            <thead><tr><th>Batch ID</th><th>Records</th><th>Created At</th><th>Actions</th></tr></thead>
+            <tbody>
+              <tr>
+                <td style="font-family:monospace">a3f29b1c…</td>
+                <td>45</td>
+                <td>2025-05-20 09:14</td>
+                <td>
+                  <a style="color:#3182ce;font-size:0.75rem;">View Records</a> &nbsp;
+                  <a style="color:#38a169;font-size:0.75rem;">Generate Payload</a> &nbsp;
+                  <a style="color:#e53e3e;font-size:0.75rem;">Delete</a>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- AR Invoice Response -->
+    <div class="feature-card section" id="ar-invoice-response">
+      <div class="card-header">
+        <span class="card-icon">📨</span>
+        <div>
+          <div class="card-title">AR Invoice Response</div>
+          <div class="card-route">Route: /ar-invoice-response</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="desc">
+          A read-only viewer for all AR invoice responses stored from Oracle Fusion.
+          Displays two linked tables: <strong>Invoice Headers</strong> and <strong>Invoice Lines</strong>.
+          Click any header row to filter lines by that specific invoice.
+        </p>
+
+        <div class="sub-section">
+          <div class="sub-title">Step-by-step usage</div>
+          <ol class="steps">
+            <li>Open the page — both tables load automatically with pagination (20 headers / 50 lines per page).</li>
+            <li>Scan the <strong>AR Invoice Header</strong> table: check Status, Transaction Number, Bill-To Customer, and Oracle message.</li>
+            <li>Click any header row to filter the <strong>AR Invoice Lines</strong> table to only that invoice's lines.</li>
+            <li>Click <strong>Clear filter ✕</strong> to show all lines again.</li>
+            <li>Use <strong>← Previous / Next →</strong> buttons to paginate through large datasets.</li>
+          </ol>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">AR Invoice Header table columns</div>
+          <table class="mock-table">
+            <thead><tr><th>ID</th><th>Status</th><th>Txn Number</th><th>Bill To Customer</th><th>Business Unit</th><th>Currency</th><th>Lines</th><th>Message</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>1</td>
+                <td><span class="badge badge-green">Success</span></td>
+                <td style="font-family:monospace">TRX-00412</td>
+                <td>Aziz Mall</td>
+                <td>AlQurashi-KSA</td>
+                <td>SAR</td>
+                <td>5</td>
+                <td>Invoice created</td>
+              </tr>
+              <tr>
+                <td>2</td>
+                <td><span class="badge badge-red">Failed</span></td>
+                <td>—</td>
+                <td>Al Nakheel</td>
+                <td>AlQurashi-KSA</td>
+                <td>SAR</td>
+                <td>0</td>
+                <td>BillToSite not found</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">AR Invoice Lines table (filtered view)</div>
+          <table class="mock-table">
+            <thead><tr><th>ID</th><th>Header</th><th>Status</th><th>Invoice No.</th><th>Item Number</th><th>Qty</th><th>Unit Price</th><th>Tax Code</th></tr></thead>
+            <tbody>
+              <tr><td>10</td><td>1</td><td><span class="badge badge-green">Success</span></td><td>TRX-00412</td><td style="font-family:monospace">6281074736314</td><td>2</td><td>94.79</td><td>OUTPUT-15%</td></tr>
+              <tr><td>11</td><td>1</td><td><span class="badge badge-green">Success</span></td><td>TRX-00412</td><td style="font-family:monospace">6281074736315</td><td>3</td><td>50.00</td><td>OUTPUT-15%</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════
+         SECTION 5 – VEND
+         ════════════════════════════════════════════════════════ -->
+    <hr class="divider" />
+    <div class="section-group-label">📂 Section 5 – Vend</div>
+
+    <!-- Vend Invoice -->
+    <div class="feature-card section" id="vend-invoice">
+      <div class="card-header">
+        <span class="card-icon">🏪</span>
+        <div>
+          <div class="card-title">Vend Invoice</div>
+          <div class="card-route">Route: /vend-invoice</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="desc">
+          Converts <strong>two Vend Excel exports</strong> (Payment Lines + Sales Lines) into
+          Oracle AR Invoice payloads, automatically grouped by <em>store × date × payment type</em>.
+          Supports TABBY and TAMARA as separate invoice streams.
+        </p>
+
+        <div class="sub-section">
+          <div class="sub-title">Step-by-step workflow</div>
+          <ol class="steps">
+            <li>Export <strong>Payment Lines</strong> and <strong>Sales Lines</strong> from your Vend system as Excel files (.xlsx).</li>
+            <li>Drag &amp; drop (or browse) <strong>Payment Lines</strong> into the left upload box.</li>
+            <li>Drag &amp; drop (or browse) <strong>Sales Lines</strong> into the right upload box.</li>
+            <li>Click <strong>📤 Generate AR Invoice Payloads</strong> — the backend groups data by store and date.</li>
+            <li>Review the generated payloads in the result panel below.</li>
+            <li>Choose an action:
+              <ul class="bullets" style="margin-top:4px;">
+                <li>📥 <strong>Download JSON</strong> — saves all payloads as a timestamped <code>.json</code> file.</li>
+                <li>📥 <strong>Download CSV</strong> — saves a summary CSV for record-keeping.</li>
+                <li>🚀 <strong>Send to AR Invoice</strong> — transfers all payloads to the <a href="#ar-invoice-upload" style="color:#3182ce;">AR Invoice Upload</a> page for bulk submission to Oracle.</li>
+              </ul>
+            </li>
+          </ol>
+        </div>
+
+        <!-- Two file upload boxes mock -->
+        <div class="two-col" style="margin-top:12px;">
+          <div>
+            <div class="sub-title">Payment Lines (Excel)</div>
+            <div class="mock-dropzone" style="background:#f0fff4;border-color:#c6f6d5;color:#276749;">
+              <div class="drop-icon">✓</div>
+              <div>YASMEEN Payment Lines.xlsx</div>
+              <div style="font-size:0.7rem;margin-top:4px;">1.4 MB</div>
+            </div>
+          </div>
+          <div>
+            <div class="sub-title">Sales Lines (Excel)</div>
+            <div class="mock-dropzone" style="background:#f0fff4;border-color:#c6f6d5;color:#276749;">
+              <div class="drop-icon">✓</div>
+              <div>YASMEEN Sales Lines.xlsx</div>
+              <div style="font-size:0.7rem;margin-top:4px;">2.1 MB</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Generated payloads result mock -->
+        <div class="sub-section">
+          <div class="sub-title">Generated payloads (result)</div>
+          <div style="background:#f0fff4;border:1px solid #c6f6d5;border-radius:10px;padding:14px 16px;margin:8px 0;">
+            <div style="font-weight:700;color:#276749;margin-bottom:4px;">✅ 6 invoice payloads generated</div>
+            <div style="font-size:0.78rem;color:#4a5568;">Grouped by store × date × payment type (NORMAL / TABBY / TAMARA)</div>
+          </div>
+          <table class="mock-table">
+            <thead><tr><th>#</th><th>Bill To Customer</th><th>Payment Type</th><th>Date</th><th>Lines</th></tr></thead>
+            <tbody>
+              <tr><td>1</td><td>Aziz Mall</td><td><span class="badge badge-blue">NORMAL</span></td><td>2025-05-01</td><td>12</td></tr>
+              <tr><td>2</td><td>Aziz Mall</td><td><span class="badge badge-purple">TABBY</span></td><td>2025-05-01</td><td>3</td></tr>
+              <tr><td>3</td><td>Al Nakheel</td><td><span class="badge badge-blue">NORMAL</span></td><td>2025-05-01</td><td>8</td></tr>
+            </tbody>
+          </table>
+          <div class="btn-row" style="margin-top:10px;">
+            <div class="mock-btn btn-green" style="font-size:0.78rem;">📥 Download JSON</div>
+            <div class="mock-btn btn-green" style="font-size:0.78rem;">📥 Download CSV</div>
+            <div class="mock-btn btn-blue" style="font-size:0.78rem;">🚀 Send to AR Invoice</div>
+          </div>
+        </div>
+
+        <div class="info-note">
+          <strong>💡 Payment grouping rules:</strong> TABBY and TAMARA each get a separate invoice.
+          All other methods (Cash, Mada, Visa, Master, Bank) are grouped as NORMAL.
+          Lines without an SKU/ItemNumber are treated as discount memo lines.
+        </div>
+      </div>
+    </div>
+
+    <!-- Sales Metadata -->
+    <div class="feature-card section" id="vend-metadata">
+      <div class="card-header">
+        <span class="card-icon">🗂️</span>
+        <div>
+          <div class="card-title">Sales Metadata (VendSales Metadata)</div>
+          <div class="card-route">Route: /vend-sales-metadata</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="desc">
+          A <strong>read-only reference table</strong> showing the <code>FusionSalesMetadata</code>
+          dataset (2 100 rows) used to auto-populate invoice header fields during Vend Invoice
+          and AR Invoice Data processing. Use this page to verify store-to-billing mappings.
+        </p>
+
+        <div class="sub-section">
+          <div class="sub-title">How to use</div>
+          <ol class="steps">
+            <li>Open the page — records load automatically, 50 per page.</li>
+            <li>Use <strong>← Previous / Next →</strong> to navigate pages.</li>
+            <li>Find the row whose <em>Subinventory</em> and <em>Customer Type</em> match your store to confirm the BillTo Account, Site, and Business Unit used during invoice generation.</li>
+          </ol>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">Table columns</div>
+          <table class="mock-table">
+            <thead>
+              <tr>
+                <th>ID</th><th>Bill To Name</th><th>Bill To Acct</th><th>Site No.</th>
+                <th>Business Unit</th><th>Subinventory</th><th>Customer Type</th>
+                <th>Region</th><th>Rec Activity Bank</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>1</td><td>Aziz Mall</td><td>1001</td><td>13</td>
+                <td>AlQurashi-KSA</td><td>AZIZMALL</td><td>RETAIL</td>
+                <td>KSA-CENTRAL</td><td>BANK-TRANSFER</td>
+              </tr>
+              <tr>
+                <td>2</td><td>Al Nakheel</td><td>1002</td><td>14</td>
+                <td>AlQurashi-KSA</td><td>NAKHEEL</td><td>RETAIL</td>
+                <td>KSA-WEST</td><td>BANK-TRANSFER</td>
+              </tr>
+            </tbody>
+          </table>
+          <p style="font-size:0.75rem;color:#718096;margin-top:6px;">Total: 2 100 records · 50 per page</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════
+         SECTION 6 – REPORTS & LOGS
+         ════════════════════════════════════════════════════════ -->
+    <hr class="divider" />
+    <div class="section-group-label">📂 Section 6 – Reports &amp; Logs</div>
+
+    <!-- Reports -->
+    <div class="feature-card section" id="reports">
+      <div class="card-header">
+        <span class="card-icon">📈</span>
+        <div>
+          <div class="card-title">Reports &amp; Monitoring</div>
+          <div class="card-route">Route: /reports</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="desc">
+          A unified reporting hub with five tabs: <strong>Dashboard · Upload History · Failures · Activity · Export</strong>.
+          All tabs share a <strong>date-range filter</strong> (From / To) at the top.
+        </p>
+
+        <!-- Tab bar mock -->
+        <div class="tab-bar" style="margin-top:14px;">
+          <div class="tab-item tab-active">Dashboard</div>
+          <div class="tab-item">Upload History</div>
+          <div class="tab-item">Failures</div>
+          <div class="tab-item">Activity</div>
+          <div class="tab-item">Export</div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">📊 Dashboard tab</div>
+          <p class="desc">Summary metric cards: Inventory Uploads, Misc Uploads, Standard Uploads, Success Records, Failed Records.</p>
+          <div class="stat-row">
+            <div class="stat-box"><div class="stat-val blue">24</div><div class="stat-lbl">Inventory</div></div>
+            <div class="stat-box"><div class="stat-val" style="color:#805ad5">18</div><div class="stat-lbl">Misc</div></div>
+            <div class="stat-box"><div class="stat-val" style="color:#4c51bf">12</div><div class="stat-lbl">Standard</div></div>
+            <div class="stat-box"><div class="stat-val green">1 204</div><div class="stat-lbl">Success Records</div></div>
+            <div class="stat-box"><div class="stat-val red">7</div><div class="stat-lbl">Failed Records</div></div>
+          </div>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">📋 Upload History tab</div>
+          <p class="desc">Paginated table of every upload across all types with success-rate mini-bars and links to detail pages.</p>
+          <table class="mock-table">
+            <thead><tr><th>ID</th><th>Type</th><th>CSV File</th><th>Success Rate</th><th>Status</th><th>Date</th><th>Action</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>#42</td>
+                <td><span class="badge badge-blue">Inventory</span></td>
+                <td>inv_may.csv</td>
+                <td><div style="display:flex;align-items:center;gap:6px;"><div style="width:60px;background:#e2e8f0;border-radius:4px;height:6px;"><div style="width:99%;background:#48bb78;height:6px;border-radius:4px;"></div></div><span style="font-size:0.7rem;color:#718096">99%</span></div></td>
+                <td><span class="badge badge-yellow">PARTIAL</span></td>
+                <td>2025-05-20</td>
+                <td><a style="color:#3182ce;font-size:0.75rem;">View details</a></td>
+              </tr>
+              <tr>
+                <td>#9</td>
+                <td><span class="badge badge-indigo">Standard Receipt</span></td>
+                <td>rcpt_may.csv</td>
+                <td><div style="display:flex;align-items:center;gap:6px;"><div style="width:60px;background:#e2e8f0;border-radius:4px;height:6px;"><div style="width:100%;background:#48bb78;height:6px;border-radius:4px;"></div></div><span style="font-size:0.7rem;color:#718096">100%</span></div></td>
+                <td><span class="badge badge-green">SUCCESS</span></td>
+                <td>2025-05-19</td>
+                <td><a style="color:#3182ce;font-size:0.75rem;">View details</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">⚠️ Failures tab</div>
+          <p class="desc">
+            Lists failed rows grouped by type (Inventory / Misc Receipt / Standard Receipt).
+            Use the <strong>Type</strong> dropdown filter to narrow down to a specific category.
+            Each row shows the upload ID, filename, row number, and the exact error message from Oracle.
+          </p>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">🕐 Activity tab</div>
+          <p class="desc">
+            Chronological log of all user actions: who uploaded what, from which IP, and when.
+            Useful for auditing and compliance.
+          </p>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">⬇️ Export tab</div>
+          <p class="desc">Download filtered data as CSV for offline analysis.</p>
+          <div class="btn-row">
+            <div class="mock-btn btn-blue">⬇️ Export Failures CSV</div>
+            <div class="mock-btn btn-gray" style="background:#4a5568;color:#fff;">⬇️ Export Activity CSV</div>
+          </div>
+          <div class="info-note" style="margin-top:8px;">
+            <strong>💡 Tip:</strong> Set the <em>From</em> and <em>To</em> date filters before exporting to limit the CSV to a specific date range.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Logs & Failures -->
+    <div class="feature-card section" id="logs-failures">
+      <div class="card-header">
+        <span class="card-icon">⚠️</span>
+        <div>
+          <div class="card-title">Logs &amp; Failures</div>
+          <div class="card-route">Route: /failures/:uploadId</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="desc">
+          Shows the <strong>row-level failure details</strong> for a specific upload. Each failed
+          row is listed with its row number and the exact Oracle error message.
+          Accessible from the sidebar (shows failures across all uploads) or from a specific
+          "Failures" link in any upload history table.
+        </p>
+
+        <div class="sub-section">
+          <div class="sub-title">How to use</div>
+          <ol class="steps">
+            <li>Click the sidebar <strong>⚠️ Logs &amp; Failures</strong> link to open the global failure view (uploadId = 0).</li>
+            <li>Alternatively, from an upload row in <em>Inventory Upload</em> or <em>Reports → Upload History</em>, click the <strong>Failures</strong> link to jump directly to that upload's failures.</li>
+            <li>Review each row: the <strong>Row #</strong> column tells you exactly which CSV row failed.</li>
+            <li>Read the <strong>Error</strong> column — Oracle errors like <em>"AR-855636: item not found"</em> tell you the root cause.</li>
+            <li>Fix your CSV data for those specific rows and re-upload.</li>
+          </ol>
+        </div>
+
+        <div class="sub-section">
+          <div class="sub-title">Failure detail table</div>
+          <table class="mock-table">
+            <thead><tr><th>Upload ID</th><th>Filename</th><th>Row #</th><th>Error Message</th><th>Date</th></tr></thead>
+            <tbody>
+              <tr><td>#42</td><td>inv_may.csv</td><td>37</td><td style="color:#e53e3e;">ORA-20001: Item 9999999 not found in organization</td><td>2025-05-20</td></tr>
+              <tr><td>#42</td><td>inv_may.csv</td><td>98</td><td style="color:#e53e3e;">ORA-20001: SubinventoryCode UNKNOWN does not exist</td><td>2025-05-20</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ════════════════════════════════════════════════════════
+         SECTION 7 – ADMINISTRATION
+         ════════════════════════════════════════════════════════ -->
+    <hr class="divider" />
+    <div class="section-group-label">📂 Section 7 – Administration <span class="admin-only">ADMIN ONLY</span></div>
+
+    <!-- User Management -->
+    <div class="feature-card section" id="user-management">
+      <div class="card-header">
+        <span class="card-icon">👥</span>
+        <div>
+          <div class="card-title">User Management <span class="admin-only">ADMIN ONLY</span></div>
+          <div class="card-route">Route: /admin/users</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <p class="desc">
+          Manage all portal user accounts. Available <strong>only to Admins</strong> — the sidebar
+          item is hidden for regular users and managers. Supports create, edit, enable/disable,
+          and forced password reset.
+        </p>
+
+        <div class="sub-section">
+          <div class="sub-title">Available actions</div>
+          <ul class="bullets">
+            <li><strong>+ Add User</strong> — opens a modal to create a new account with email, password, and role (User / Manager / Admin).</li>
+            <li><strong>Edit</strong> — modify an existing user's email, role, or active status.</li>
+            <li><strong>Disable / Enable</strong> — toggle a user's access without deleting the account. Disabled users cannot log in.</li>
+            <li><strong>Reset PW</strong> — generates and displays a new temporary password for the user.</li>
+          </ul>
+        </div>
+
+        <!-- Users table mock -->
+        <div class="sub-section">
+          <div class="sub-title">Users table</div>
+          <table class="mock-table">
+            <thead><tr><th>ID</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>#1</td>
+                <td>admin@crm.com</td>
+                <td><span class="badge badge-red">ADMIN</span></td>
+                <td><span class="badge badge-green">Active</span></td>
+                <td>2025-01-10</td>
+                <td style="display:flex;gap:8px;">
+                  <a style="color:#3182ce;font-size:0.75rem;">Edit</a>
+                  <a style="color:#e53e3e;font-size:0.75rem;">Disable</a>
+                  <a style="color:#d69e2e;font-size:0.75rem;">Reset PW</a>
+                </td>
+              </tr>
+              <tr>
+                <td>#2</td>
+                <td>ops@crm.com</td>
+                <td><span class="badge badge-blue">MANAGER</span></td>
+                <td><span class="badge badge-green">Active</span></td>
+                <td>2025-02-14</td>
+                <td style="display:flex;gap:8px;">
+                  <a style="color:#3182ce;font-size:0.75rem;">Edit</a>
+                  <a style="color:#e53e3e;font-size:0.75rem;">Disable</a>
+                  <a style="color:#d69e2e;font-size:0.75rem;">Reset PW</a>
+                </td>
+              </tr>
+              <tr>
+                <td>#3</td>
+                <td>viewer@crm.com</td>
+                <td><span class="badge badge-gray">USER</span></td>
+                <td><span class="badge badge-red">Disabled</span></td>
+                <td>2025-03-01</td>
+                <td style="display:flex;gap:8px;">
+                  <a style="color:#3182ce;font-size:0.75rem;">Edit</a>
+                  <a style="color:#38a169;font-size:0.75rem;">Enable</a>
+                  <a style="color:#d69e2e;font-size:0.75rem;">Reset PW</a>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Create / Edit modal mock -->
+        <div class="sub-section">
+          <div class="sub-title">Create / Edit User modal</div>
+          <div style="border:1px solid #e2e8f0;border-radius:12px;padding:20px;max-width:380px;background:#fafafa;">
+            <div style="font-weight:700;font-size:1rem;margin-bottom:14px;color:#1a202c;">Create New User</div>
+            <div style="font-size:0.78rem;font-weight:600;color:#4a5568;margin-bottom:4px;">Email</div>
+            <input class="mock-input" value="newuser@company.com" readonly />
+            <div style="font-size:0.78rem;font-weight:600;color:#4a5568;margin-bottom:4px;">Password</div>
+            <input class="mock-input" value="••••••••" readonly />
+            <div style="font-size:0.78rem;font-weight:600;color:#4a5568;margin-bottom:4px;">Role</div>
+            <input class="mock-input" value="User" readonly />
+            <div class="btn-row" style="justify-content:flex-end;">
+              <div class="mock-btn btn-gray" style="font-size:0.78rem;">Cancel</div>
+              <div class="mock-btn btn-blue" style="font-size:0.78rem;">Create</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="info-note" style="margin-top:12px;">
+          <strong>⚠️ Security note:</strong> Only Admins can access this page.
+          Non-admin users are automatically redirected to the Dashboard if they attempt to navigate to <code>/admin/users</code>.
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="text-align:center;padding:24px 0;color:#a0aec0;font-size:0.78rem;">
+      CRM Portal – Visual Feature Documentation · Generated 2026-05-21
+    </div>
+
+  </main>
+</div>
+</body>
+</html>
