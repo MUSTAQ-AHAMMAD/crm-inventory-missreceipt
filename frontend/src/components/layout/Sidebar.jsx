@@ -50,6 +50,12 @@ const NAV_GROUPS = [
       { to: '/failures/0', label: 'Logs & Failures', icon: '⚠️' },
     ],
   },
+  {
+    label: 'Help',
+    items: [
+      { to: '/help', label: 'Help & Docs', icon: '❓' },
+    ],
+  },
 ]
 
 const ADMIN_ITEMS = [

@@ -3,7 +3,7 @@
  */
 
 import { useAuth } from '../../context/AuthContext'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 
 export default function Header({ onMenuClick }) {
   const { user, logout } = useAuth()
@@ -36,6 +36,14 @@ export default function Header({ onMenuClick }) {
         <span className="hidden md:block text-sm text-gray-600">
           {user?.email}
         </span>
+        <Link
+          to="/help"
+          className="hidden md:flex items-center gap-1.5 px-3 py-1.5 text-sm text-gray-600 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
+          title="Help & Documentation"
+        >
+          <span>❓</span>
+          <span>Help</span>
+        </Link>
         <button
           onClick={handleLogout}
           className="px-4 py-1.5 text-sm bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
