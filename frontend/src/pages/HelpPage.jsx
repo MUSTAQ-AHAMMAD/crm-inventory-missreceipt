@@ -41,7 +41,7 @@ const SECTIONS = [
     ],
     tips: [
       'If the success rate drops below 80%, check the Failures tab in Reports for patterns.',
-      'Activity timestamps are in your browser\'s local timezone.',
+      'Activity timestamps are in your browser\'s local time zone.',
       'Dashboard data refreshes when you reload the page.',
     ],
     fields: [],
@@ -759,7 +759,7 @@ function SectionCard({ section, defaultOpen = false }) {
           {/* Tips */}
           {section.tips.length > 0 && (
             <div className={`rounded-lg border ${c.border} ${c.bg} p-4`}>
-              <h3 className="font-semibold text-gray-700 mb-2 text-sm">💡 Tips &amp; Gotchas</h3>
+              <h3 className="font-semibold text-gray-700 mb-2 text-sm">💡 Tips & Gotchas</h3>
               <ul className="space-y-1.5">
                 {section.tips.map((tip, i) => (
                   <li key={i} className="flex gap-2 text-sm text-gray-600">
@@ -816,7 +816,7 @@ export default function HelpPage() {
     <div className="space-y-6 max-w-5xl">
       {/* Page header */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-800">Help &amp; Documentation</h1>
+        <h1 className="text-2xl font-bold text-gray-800">Help & Documentation</h1>
         <p className="text-gray-500 mt-1 text-sm">
           Complete user guide for the CRM Portal — step-by-step instructions for every feature.
         </p>
