@@ -24,6 +24,7 @@ import FailureDetailsPage from './pages/FailureDetailsPage'
 import UploadDetailPage from './pages/UploadDetailPage'
 import ReceiptUploadDetailPage from './pages/ReceiptUploadDetailPage'
 import ArInvoiceResponsePage from './pages/ArInvoiceResponsePage'
+import HelpPage from './pages/HelpPage'
 
 /** Route guard – redirects unauthenticated users to /login */
 function PrivateRoute({ children }) {
@@ -81,6 +82,7 @@ export default function App() {
             <Route path="uploads/:uploadId" element={<UploadDetailPage />} />
             <Route path="failures/:uploadId" element={<FailureDetailsPage />} />
             <Route path="receipt-upload/:type/:uploadId" element={<ReceiptUploadDetailPage />} />
+            <Route path="help" element={<HelpPage />} />
           </Route>
 
           {/* Fallback */}
