@@ -309,6 +309,8 @@ async function uploadVendInvoice(req, res, next) {
         const description = getFirstNonEmpty(row, ['Order Lines/Product/Name', 'Order Lines/Product', 'Product', 'Description']);
         const quantity = parseNumericField(row, ['Order Lines/Base Quantity', 'Base Quantity', 'Order Lines/Quantity', 'Quantity', 'Qty']);
         const unitSellingPrice = parseNumericField(row, [
+          // 'Order Lines/Subtotal w/o Tax' is the per-line subtotal exported by Vend;
+          // the user confirmed this column should be mapped directly to UnitSellingPrice.
           'Order Lines/Subtotal w/o Tax',
           'Subtotal w/o Tax',
           'Order Lines/Unit Price',

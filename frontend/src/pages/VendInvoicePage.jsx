@@ -412,7 +412,7 @@ export default function VendInvoicePage() {
           {/* ── Positive Payloads ── */}
           {result.positivePayloads?.length > 0 && (
             <div className="space-y-3">
-              <h3 className="font-semibold text-gray-700 text-green-700">
+              <h3 className="font-semibold text-green-700">
                 ✅ Positive Payloads ({result.positivePayloads.length})
               </h3>
               {result.positivePayloads.map((payload, index) => (
