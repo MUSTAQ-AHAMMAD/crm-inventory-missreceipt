@@ -62,7 +62,6 @@ export default function VendInvoicePage() {
       setSalesLinesFile(null)
     } catch (err) {
       setError(err.response?.data?.error || err.response?.data?.details || 'Upload failed.')
-      // Show detailed errors if available
       if (err.response?.data?.errors) {
         const errorDetails = err.response.data.errors.map(e => `Row ${e.row}: ${e.error}`).join('\n')
         setError(`${err.response.data.error}\n\nDetails:\n${errorDetails}`)
@@ -72,16 +71,16 @@ export default function VendInvoicePage() {
     }
   }
 
+  // Combine positive + negative for downloads
+  const allPayloads = result
+    ? [...(result.positivePayloads || []), ...(result.negativePayloads || [])]
+    : []
+
   const handleDownloadJson = async () => {
-    if (!result?.payloads) return
+    if (!allPayloads.length) return
     setDownloading(true)
     try {
-      const response = await api.post('/vend-invoice/download-json', {
-        payloads: result.payloads,
-      }, {
-        responseType: 'blob',
-      })
-      const blob = new Blob([JSON.stringify(result.payloads, null, 2)], { type: 'application/json' })
+      const blob = new Blob([JSON.stringify(allPayloads, null, 2)], { type: 'application/json' })
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
@@ -99,11 +98,11 @@ export default function VendInvoicePage() {
   }
 
   const handleDownloadCsv = async () => {
-    if (!result?.payloads) return
+    if (!allPayloads.length) return
     setDownloading(true)
     try {
       const response = await api.post('/vend-invoice/download-csv', {
-        payloads: result.payloads,
+        payloads: allPayloads,
       }, {
         responseType: 'blob',
       })
@@ -124,10 +123,82 @@ export default function VendInvoicePage() {
     }
   }
 
+  // Only positive payloads are transferred to AR Invoice
   const handleBulkTransfer = () => {
-    if (!result?.payloads) return
-    // Navigate to AR Invoice page with all payloads
-    navigate('/ar-invoice', { state: { bulkPayloads: result.payloads } })
+    if (!result?.positivePayloads?.length) return
+    navigate('/ar-invoice', { state: { bulkPayloads: result.positivePayloads } })
+  }
+
+  const fmt = (n) =>
+    Number(n).toLocaleString('en-SA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const PayloadCard = ({ payload, index, isNegative }) => {
+    return (
+      <div className={`rounded-lg p-4 ${isNegative ? 'bg-red-50 border border-red-200' : 'bg-gray-50'}`}>
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <p className={`text-sm font-medium ${isNegative ? 'text-red-700' : 'text-gray-700'}`}>
+              {isNegative ? '⚠️ ' : ''}Invoice #{index + 1} - {payload.BillToCustomerName}
+            </p>
+            <p className="text-xs text-gray-600">
+              Date: {payload.TransactionDate} | CrossRef: {payload.CrossReference} | Lines: {payload.receivablesInvoiceLines.length}
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(JSON.stringify(payload, null, 2))
+              alert('Payload copied to clipboard!')
+            }}
+            className="text-xs text-blue-600 hover:underline"
+          >
+            📋 Copy JSON
+          </button>
+        </div>
+
+        {/* Summary of line items */}
+        <div className="mt-3 p-3 bg-white rounded border border-gray-200">
+          <p className="text-xs font-medium text-gray-700 mb-2">Line Items Summary:</p>
+          <div className="space-y-1 max-h-40 overflow-y-auto">
+            {payload.receivablesInvoiceLines.map((line, lineIdx) => {
+              const lineTotal = (line.Quantity || 0) * (line.UnitSellingPrice || 0)
+              return (
+                <div key={lineIdx} className="text-xs text-gray-600 flex justify-between gap-2">
+                  <span className="truncate">
+                    {line.LineNumber}. {line.ItemNumber || <em className="text-gray-500">(MemoLine)</em>} - {line.Description.substring(0, 35)}
+                    {line.Description.length > 35 ? '...' : ''}
+                  </span>
+                  <span className="font-mono whitespace-nowrap">
+                    {line.Quantity} × {line.UnitSellingPrice} = <span className="font-semibold">{fmt(lineTotal)}</span>
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {/* Full JSON preview (collapsed by default) */}
+        <details className="mt-3">
+          <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-800">
+            View Full JSON
+          </summary>
+          <pre className="text-xs bg-white p-3 rounded border border-gray-200 overflow-x-auto max-h-96 mt-2">
+            {JSON.stringify(payload, null, 2)}
+          </pre>
+        </details>
+
+        {!isNegative && (
+          <div className="mt-3">
+            <Link
+              to="/ar-invoice"
+              state={{ prefilledPayload: payload }}
+              className="text-sm text-blue-600 hover:underline"
+            >
+              → Use this payload in AR Invoice Creation
+            </Link>
+          </div>
+        )}
+      </div>
+    )
   }
 
   const FileUploadBox = ({ title, file, onFileSelect, type }) => (
@@ -230,11 +301,11 @@ export default function VendInvoicePage() {
       {/* Result card */}
       {result && (
         <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="font-semibold text-gray-700">Generated Payloads</h2>
 
             {/* Bulk actions */}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={handleDownloadJson}
                 disabled={downloading}
@@ -253,7 +324,8 @@ export default function VendInvoicePage() {
               </button>
               <button
                 onClick={handleBulkTransfer}
-                className="px-3 py-1.5 text-sm bg-blue-600 text-white font-medium rounded hover:bg-blue-700 transition-colors flex items-center gap-1"
+                disabled={!result?.positivePayloads?.length}
+                className="px-3 py-1.5 text-sm bg-blue-600 text-white font-medium rounded hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center gap-1"
               >
                 🚀 Bulk Transfer to AR Invoice
               </button>
@@ -265,72 +337,106 @@ export default function VendInvoicePage() {
             <p className="text-sm mt-1 text-gray-700">{result.message}</p>
           </div>
 
-          <div className="space-y-4">
-            {result.payloads?.map((payload, index) => (
-              <div key={index} className="bg-gray-50 rounded-lg p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <p className="text-sm font-medium text-gray-700">
-                      Invoice #{index + 1} - {payload.BillToCustomerName}
-                    </p>
-                    <p className="text-xs text-gray-600">
-                      Date: {payload.TransactionDate} | CrossRef: {payload.CrossReference} | Lines: {payload.receivablesInvoiceLines.length}
+          {/* ── Statistics ── */}
+          {result.stats && (
+            <div className="space-y-3">
+              <h3 className="font-semibold text-gray-700">📊 Statistics</h3>
+
+              {/* Overall summary */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                {[
+                  { label: 'Sales Lines', value: result.stats.totalSalesLines },
+                  { label: 'Total Payloads', value: result.stats.totalPayloads },
+                  { label: 'Positive Payloads', value: result.stats.positivePayloadsCount, color: 'text-green-700' },
+                  { label: 'Negative Payloads', value: result.stats.negativePayloadsCount, color: 'text-red-700' },
+                  { label: 'Overall Total (SAR)', value: fmt(result.stats.overallTotalAmount), mono: true },
+                ].map((item) => (
+                  <div key={item.label} className="bg-gray-50 rounded-lg p-3 text-center border border-gray-200">
+                    <p className="text-xs text-gray-500 mb-1">{item.label}</p>
+                    <p className={`font-bold text-base ${item.color || 'text-gray-800'} ${item.mono ? 'font-mono' : ''}`}>
+                      {item.value}
                     </p>
                   </div>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(JSON.stringify(payload, null, 2))
-                      alert('Payload copied to clipboard!')
-                    }}
-                    className="text-xs text-blue-600 hover:underline"
-                  >
-                    📋 Copy JSON
-                  </button>
+                ))}
+              </div>
+
+              {/* Positive / negative totals */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3">
+                  <p className="text-xs text-green-700 font-medium">Positive Payloads Total (SAR)</p>
+                  <p className="font-mono font-bold text-green-800 text-sm mt-1">{fmt(result.stats.positiveTotalAmount)}</p>
                 </div>
-
-                {/* Summary of line items */}
-                <div className="mt-3 p-3 bg-white rounded border border-gray-200">
-                  <p className="text-xs font-medium text-gray-700 mb-2">Line Items Summary:</p>
-                  <div className="space-y-1 max-h-40 overflow-y-auto">
-                    {payload.receivablesInvoiceLines.map((line, lineIdx) => {
-                      const lineTotal = (line.Quantity || 0) * (line.UnitSellingPrice || 0)
-                      return (
-                        <div key={lineIdx} className="text-xs text-gray-600 flex justify-between gap-2">
-                          <span className="truncate">
-                            {line.LineNumber}. {line.ItemNumber || <em className="text-gray-500">(MemoLine)</em>} - {line.Description.substring(0, 35)}
-                            {line.Description.length > 35 ? '...' : ''}
-                          </span>
-                          <span className="font-mono whitespace-nowrap">
-                            {line.Quantity} × {line.UnitSellingPrice} = <span className="font-semibold">{Number(lineTotal).toLocaleString('en-SA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
-                          </span>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                {/* Full JSON preview (collapsed by default) */}
-                <details className="mt-3">
-                  <summary className="text-xs text-gray-600 cursor-pointer hover:text-gray-800">
-                    View Full JSON
-                  </summary>
-                  <pre className="text-xs bg-white p-3 rounded border border-gray-200 overflow-x-auto max-h-96 mt-2">
-                    {JSON.stringify(payload, null, 2)}
-                  </pre>
-                </details>
-
-                <div className="mt-3">
-                  <Link
-                    to="/ar-invoice"
-                    state={{ prefilledPayload: payload }}
-                    className="text-sm text-blue-600 hover:underline"
-                  >
-                    → Use this payload in AR Invoice Creation
-                  </Link>
+                <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                  <p className="text-xs text-red-700 font-medium">Negative Payloads Total (SAR)</p>
+                  <p className="font-mono font-bold text-red-800 text-sm mt-1">{fmt(result.stats.negativeTotalAmount)}</p>
                 </div>
               </div>
-            ))}
-          </div>
+
+              {/* Per-payload stats table */}
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-100 text-gray-600">
+                    <tr>
+                      <th className="text-left px-3 py-2">CrossRef</th>
+                      <th className="text-left px-3 py-2">Customer</th>
+                      <th className="text-left px-3 py-2">Date</th>
+                      <th className="text-left px-3 py-2">Payment Type</th>
+                      <th className="text-right px-3 py-2">Lines</th>
+                      <th className="text-right px-3 py-2">Total (SAR)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {result.stats.payloadStats.map((s, idx) => (
+                      <tr key={idx} className={`border-t border-gray-100 ${s.totalAmount < 0 ? 'bg-red-50 text-red-700' : 'text-gray-700'}`}>
+                        <td className="px-3 py-2 font-mono">{s.crossReference}</td>
+                        <td className="px-3 py-2 truncate max-w-[180px]">{s.billToCustomerName}</td>
+                        <td className="px-3 py-2">{s.transactionDate}</td>
+                        <td className="px-3 py-2">{s.paymentType}</td>
+                        <td className="px-3 py-2 text-right">{s.lineCount}</td>
+                        <td className={`px-3 py-2 text-right font-mono font-semibold ${s.totalAmount < 0 ? 'text-red-700' : ''}`}>
+                          {fmt(s.totalAmount)}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="border-t-2 border-gray-300 bg-gray-50 font-semibold">
+                      <td className="px-3 py-2" colSpan={4}>Overall Total</td>
+                      <td className="px-3 py-2 text-right">{result.stats.payloadStats.reduce((s, r) => s + r.lineCount, 0)}</td>
+                      <td className="px-3 py-2 text-right font-mono">{fmt(result.stats.overallTotalAmount)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ── Positive Payloads ── */}
+          {result.positivePayloads?.length > 0 && (
+            <div className="space-y-3">
+              <h3 className="font-semibold text-gray-700 text-green-700">
+                ✅ Positive Payloads ({result.positivePayloads.length})
+              </h3>
+              {result.positivePayloads.map((payload, index) => (
+                <PayloadCard key={index} payload={payload} index={index} isNegative={false} />
+              ))}
+            </div>
+          )}
+
+          {/* ── Negative Payloads ── */}
+          {result.negativePayloads?.length > 0 && (
+            <div className="space-y-3">
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="font-semibold text-red-700">
+                  ⚠️ Negative Payloads ({result.negativePayloads.length}) — Cannot be processed in AR Invoice
+                </p>
+                <p className="text-xs text-red-600 mt-1">
+                  These invoices have a negative total amount. Review the sales lines data before processing.
+                </p>
+              </div>
+              {result.negativePayloads.map((payload, index) => (
+                <PayloadCard key={index} payload={payload} index={index} isNegative={true} />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
