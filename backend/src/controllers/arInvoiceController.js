@@ -106,6 +106,16 @@ function parseOracleDate(value) {
 }
 
 /**
+ * Attempt to JSON-parse a string; return the parsed object on success,
+ * or the original value if it cannot be parsed.
+ */
+function safeJsonParse(value) {
+  if (value == null) return null;
+  if (typeof value !== 'string') return value;
+  try { return JSON.parse(value); } catch { return value; }
+}
+
+/**
  * Persist an Oracle AR Invoice JSON response into FusionInvoiceHeader and
  * FusionInvoiceLine.  The `requestId` is set to the ArInvoiceUpload record id
  * so the two tables can be joined back to the raw request/response.
@@ -362,7 +372,7 @@ async function createInvoice(req, res, next) {
         fusionHeaderId: fusionHeader?.id ?? null,
         status: responseStatus,
         message: responseMessage,
-        response: oracleData ?? (responseBody ? (() => { try { return JSON.parse(responseBody); } catch { return responseBody; } })() : null),
+        response: oracleData ?? safeJsonParse(responseBody),
       });
     }
 
