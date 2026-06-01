@@ -91,7 +91,9 @@ describe('vendInvoiceController', () => {
 
     const response = res.json.mock.calls[0][0];
 
-    for (const payload of response.payloads) {
+    // All generated payloads (discount lines always produce totalAmount=0, so they go to positivePayloads)
+    const allPayloads = [...(response.positivePayloads || []), ...(response.negativePayloads || [])];
+    for (const payload of allPayloads) {
       const line = payload.receivablesInvoiceLines[0];
       // Discount lines must not include ItemNumber (causes Oracle AR-855636)
       expect(line).not.toHaveProperty('ItemNumber');
@@ -167,13 +169,14 @@ describe('vendInvoiceController', () => {
 
     const response = res.json.mock.calls[0][0];
 
-    expect(response.payloads).toHaveLength(3);
-    const comments = response.payloads.map((p) => p.Comments);
+    const allPayloads2 = [...(response.positivePayloads || []), ...(response.negativePayloads || [])];
+    expect(allPayloads2).toHaveLength(3);
+    const comments = allPayloads2.map((p) => p.Comments);
     expect(comments.some((c) => c.includes('Tabby payment'))).toBe(true);
     expect(comments.some((c) => c.includes('Tamara payment'))).toBe(true);
     expect(comments.some((c) => c.includes('Cash/Bank payment'))).toBe(true);
 
-    for (const payload of response.payloads) {
+    for (const payload of allPayloads2) {
       expect(payload.BillToCustomerNumber).not.toBe('');
       expect(payload.BillToSite).not.toBe('');
       expect(payload.receivablesInvoiceLines).toHaveLength(1);
@@ -227,13 +230,14 @@ describe('vendInvoiceController', () => {
     expect(res.json).toHaveBeenCalledTimes(1);
 
     const response = res.json.mock.calls[0][0];
-    expect(response.payloads).toHaveLength(1);
-    expect(response.payloads[0]).toMatchObject({
+    const allPayloads3 = [...(response.positivePayloads || []), ...(response.negativePayloads || [])];
+    expect(allPayloads3).toHaveLength(1);
+    expect(allPayloads3[0]).toMatchObject({
       BillToCustomerName: 'Tamara Customer',
       BillToCustomerNumber: '69011',
       BillToSite: '51050',
     });
-    expect(response.payloads[0].receivablesInvoiceLines[0]).toMatchObject({
+    expect(allPayloads3[0].receivablesInvoiceLines[0]).toMatchObject({
       Quantity: 2,
       UnitSellingPrice: 145.5,
       SalesOrder: 'RASHIDMAD2/4014',

@@ -306,9 +306,13 @@ async function uploadVendInvoice(req, res, next) {
 
         // Extract line item details
         const itemNumber = getFirstNonEmpty(row, ['Order Lines/Product Barcode', 'Order Lines/Product/Barcode', 'Product Barcode', 'Barcode', 'Item Number']);
-        const description = getFirstNonEmpty(row, ['Order Lines/Product', 'Product', 'Description']);
+        const description = getFirstNonEmpty(row, ['Order Lines/Product/Name', 'Order Lines/Product', 'Product', 'Description']);
         const quantity = parseNumericField(row, ['Order Lines/Base Quantity', 'Base Quantity', 'Order Lines/Quantity', 'Quantity', 'Qty']);
         const unitSellingPrice = parseNumericField(row, [
+          // 'Order Lines/Subtotal w/o Tax' is the per-line subtotal exported by Vend;
+          // the user confirmed this column should be mapped directly to UnitSellingPrice.
+          'Order Lines/Subtotal w/o Tax',
+          'Subtotal w/o Tax',
           'Order Lines/Unit Price',
           'Unit Price',
           'Order Lines/Sell Price',
@@ -432,6 +436,9 @@ async function uploadVendInvoice(req, res, next) {
 
     // Generate payloads for each invoice group
     const payloads = [];
+    // Stats tracked separately — not added to payload objects
+    const payloadStats = [];
+
     for (const group of Object.values(invoiceGroups)) {
       const crossReference = await getNextCrossReference();
 
@@ -443,7 +450,7 @@ async function uploadVendInvoice(req, res, next) {
         paymentTypeLabel = 'Tamara';
       }
 
-      payloads.push({
+      const payload = {
         BusinessUnit: 'AlQurashi-KSA',
         TransactionSource: 'Vend',
         TransactionType: 'Vend Invoice',
@@ -457,15 +464,65 @@ async function uploadVendInvoice(req, res, next) {
         CrossReference: String(crossReference),
         Comments: `${paymentTypeLabel} payment - Invoice generated from request ID ${crossReference}`,
         receivablesInvoiceLines: group.lines,
+      };
+
+      // Compute payload totals in separate variables (not attached to the payload)
+      const lineCount = group.lines.length;
+      let totalAmount = 0;
+      for (const line of group.lines) {
+        totalAmount += (line.Quantity || 0) * (line.UnitSellingPrice || 0);
+      }
+      totalAmount = Math.round(totalAmount * 100) / 100;
+
+      payloads.push(payload);
+      payloadStats.push({
+        crossReference: String(crossReference),
+        billToCustomerName: group.customerName,
+        transactionDate: group.date,
+        paymentType: group.paymentType,
+        lineCount,
+        totalAmount,
       });
     }
 
-    console.log(`✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines`);
+    // Split payloads into positive and negative based on totalAmount
+    const positivePayloads = [];
+    const negativePayloads = [];
+    let positiveTotalAmount = 0;
+    let negativeTotalAmount = 0;
+
+    for (let i = 0; i < payloads.length; i++) {
+      if (payloadStats[i].totalAmount >= 0) {
+        positivePayloads.push(payloads[i]);
+        positiveTotalAmount += payloadStats[i].totalAmount;
+      } else {
+        negativePayloads.push(payloads[i]);
+        negativeTotalAmount += payloadStats[i].totalAmount;
+      }
+    }
+
+    positiveTotalAmount = Math.round(positiveTotalAmount * 100) / 100;
+    negativeTotalAmount = Math.round(negativeTotalAmount * 100) / 100;
+
+    const stats = {
+      totalSalesLines: salesLines.length,
+      totalPayloads: payloads.length,
+      positivePayloadsCount: positivePayloads.length,
+      negativePayloadsCount: negativePayloads.length,
+      payloadStats,
+      overallTotalAmount: Math.round((positiveTotalAmount + negativeTotalAmount) * 100) / 100,
+      positiveTotalAmount,
+      negativeTotalAmount,
+    };
+
+    console.log(`✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines (${positivePayloads.length} positive, ${negativePayloads.length} negative)`);
 
     return res.json({
       success: true,
-      message: `Generated ${payloads.length} invoice(s) from ${salesLines.length} sales line(s)`,
-      payloads,
+      message: `Generated ${payloads.length} invoice(s) from ${salesLines.length} sales line(s) — ${positivePayloads.length} positive, ${negativePayloads.length} negative`,
+      positivePayloads,
+      negativePayloads,
+      stats,
     });
 
   } catch (err) {
