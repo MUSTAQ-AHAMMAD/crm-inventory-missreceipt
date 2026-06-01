@@ -96,6 +96,94 @@ async function previewPayload(req, res, next) {
 }
 
 /**
+ * Parse a date string or value returned by Oracle and return a JavaScript Date
+ * (or null if the value is empty / unparseable).
+ */
+function parseOracleDate(value) {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Persist an Oracle AR Invoice JSON response into FusionInvoiceHeader and
+ * FusionInvoiceLine.  The `requestId` is set to the ArInvoiceUpload record id
+ * so the two tables can be joined back to the raw request/response.
+ *
+ * Called for both successful and failed Oracle responses so that every attempt
+ * is traceable.  Lines are only inserted when `status` is 'SUCCESS'.
+ *
+ * @param {object} opts
+ * @param {number}  opts.uploadId   - ArInvoiceUpload record id used as requestId
+ * @param {string}  opts.status     - 'SUCCESS' | 'FAILED'
+ * @param {string}  opts.message    - Human-readable status message
+ * @param {object}  opts.oracleData - Parsed Oracle JSON response (may be null on failure)
+ * @param {object}  opts.payload    - Original request payload (used as fallback for field values)
+ * @returns {Promise<import('@prisma/client').FusionInvoiceHeader>}
+ */
+async function storeInvoiceResponse({ uploadId, status, message, oracleData, payload }) {
+  // Prefer values from the Oracle response; fall back to the original payload.
+  const src = oracleData || payload || {};
+  const fallback = payload || {};
+
+  const billToAccRaw = src.BillToCustomerNumber ?? fallback.BillToCustomerNumber;
+  const txnNumberRaw = src.TransactionNumber ?? null;
+  const customerTxnIdRaw = src.CustomerTrxId ?? src.CustomerTxnId ?? null;
+
+  const header = await prisma.fusionInvoiceHeader.create({
+    data: {
+      requestId:        uploadId,
+      status,
+      message,
+      requestDate:      new Date(),
+      billToCustName:   src.BillToCustomerName  ?? fallback.BillToCustomerName  ?? null,
+      billToLocation:   src.BillToSite          ?? fallback.BillToSite          ?? null,
+      billToAccNumber:  billToAccRaw             ? parseInt(billToAccRaw, 10)    : null,
+      businessUnit:     src.BusinessUnit         ?? fallback.BusinessUnit        ?? null,
+      paymentTermsName: src.PaymentTerms         ?? fallback.PaymentTerms        ?? null,
+      txnSource:        src.TransactionSource    ?? fallback.TransactionSource   ?? null,
+      txnType:          src.TransactionType      ?? fallback.TransactionType     ?? null,
+      txnDate:          parseOracleDate(src.TransactionDate  ?? fallback.TransactionDate),
+      glDate:           parseOracleDate(src.AccountingDate   ?? fallback.AccountingDate),
+      currencyCode:     src.InvoiceCurrencyCode  ?? fallback.InvoiceCurrencyCode ?? null,
+      txnNumber:        txnNumberRaw             ? parseInt(txnNumberRaw, 10)    : null,
+      customerTxnId:    customerTxnIdRaw         ? parseInt(customerTxnIdRaw, 10): null,
+      region:           'SA',
+    },
+  });
+
+  // Only insert line records when the invoice was successfully created in Oracle.
+  if (status === 'SUCCESS') {
+    const lines = src.receivablesInvoiceLines ?? fallback.receivablesInvoiceLines ?? [];
+    for (const line of lines) {
+      await prisma.fusionInvoiceLine.create({
+        data: {
+          requestId:        uploadId,
+          status,
+          requestDate:      new Date(),
+          headerId:         header.id,
+          invoiceNumber:    txnNumberRaw != null ? String(txnNumberRaw) : null,
+          lineNumber:       line.LineNumber       != null ? parseInt(line.LineNumber, 10)       : null,
+          itemNumber:       line.ItemNumber       ?? null,
+          description:      line.Description      ?? null,
+          uom:              line.UnitOfMeasure     ?? line.UOM ?? null,
+          quantity:         line.Quantity          != null ? parseFloat(line.Quantity)          : null,
+          unitSellingPrice: line.UnitSellingPrice  != null ? parseFloat(line.UnitSellingPrice)  : null,
+          currencyCode:     line.InvoiceCurrencyCode ?? src.InvoiceCurrencyCode ?? fallback.InvoiceCurrencyCode ?? null,
+          taxCode:          line.TaxClassificationCode ?? null,
+          version:          line.LockingEtag       != null ? parseInt(line.LockingEtag, 10)    : null,
+          salesOrder:       line.SalesOrder        ?? null,
+          salesOrderLine:   line.SalesOrderLine    != null ? parseInt(line.SalesOrderLine, 10) : null,
+          region:           'SA',
+        },
+      });
+    }
+  }
+
+  return header;
+}
+
+/**
  * POST /api/ar-invoice/create
  * Creates an AR Invoice in Oracle Fusion and stores the response in the database
  *
@@ -203,6 +291,7 @@ async function createInvoice(req, res, next) {
     let responseMessage = 'Invoice created successfully';
     let responseBody = null;
     let httpStatus = null;
+    let oracleData = null;
 
     try {
       // Send request to Oracle
@@ -219,7 +308,8 @@ async function createInvoice(req, res, next) {
       });
 
       httpStatus = response.status;
-      responseBody = JSON.stringify(response.data, null, 2);
+      oracleData = response.data;
+      responseBody = JSON.stringify(oracleData, null, 2);
 
       console.log(`✅ [AR Invoice] Success - HTTP ${httpStatus}`);
       console.log(`Response: ${responseBody.substring(0, 500)}`);
@@ -227,14 +317,15 @@ async function createInvoice(req, res, next) {
     } catch (error) {
       responseStatus = 'FAILED';
       httpStatus = error.response?.status || null;
-      responseBody = error.response?.data
-        ? JSON.stringify(error.response.data, null, 2)
+      oracleData = error.response?.data || null;
+      responseBody = oracleData
+        ? JSON.stringify(oracleData, null, 2)
         : error.message;
       responseMessage = `Failed to create invoice: ${error.message}`;
 
       console.error(`❌ [AR Invoice] Failed - HTTP ${httpStatus}`);
       console.error(`Error: ${error.message}`);
-      console.error(`Response: ${responseBody.substring(0, 500)}`);
+      console.error(`Response: ${String(responseBody).substring(0, 500)}`);
     }
 
     // Update upload record with response
@@ -248,20 +339,39 @@ async function createInvoice(req, res, next) {
       },
     });
 
-    if (responseStatus === 'FAILED') {
-      return res.status(httpStatus || 500).json({
+    // Persist Oracle response fields into FusionInvoiceHeader / FusionInvoiceLine.
+    // This is done for both SUCCESS and FAILED so every attempt is traceable.
+    let fusionHeader = null;
+    try {
+      fusionHeader = await storeInvoiceResponse({
         uploadId: uploadRecord.id,
         status: responseStatus,
         message: responseMessage,
-        response: responseBody ? JSON.parse(responseBody) : null,
+        oracleData,
+        payload,
+      });
+      console.log(`[AR Invoice] Stored fusion header id=${fusionHeader.id}`);
+    } catch (storeErr) {
+      // Non-fatal: log but do not fail the response
+      console.error(`[AR Invoice] Failed to store fusion response: ${storeErr.message}`);
+    }
+
+    if (responseStatus === 'FAILED') {
+      return res.status(httpStatus || 500).json({
+        uploadId: uploadRecord.id,
+        fusionHeaderId: fusionHeader?.id ?? null,
+        status: responseStatus,
+        message: responseMessage,
+        response: oracleData ?? (responseBody ? (() => { try { return JSON.parse(responseBody); } catch { return responseBody; } })() : null),
       });
     }
 
     return res.json({
       uploadId: uploadRecord.id,
+      fusionHeaderId: fusionHeader?.id ?? null,
       status: responseStatus,
       message: responseMessage,
-      response: responseBody ? JSON.parse(responseBody) : null,
+      response: oracleData,
     });
 
   } catch (err) {
