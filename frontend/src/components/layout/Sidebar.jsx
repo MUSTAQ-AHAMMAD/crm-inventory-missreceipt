@@ -41,6 +41,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/vend-invoice', label: 'Vend Invoice', icon: '🏪' },
       { to: '/vend-sales-metadata', label: 'Sales Metadata', icon: '🗂️' },
+      { to: '/vend-receipt', label: 'Vend Receipt', icon: '🧾' },
     ],
   },
   {
