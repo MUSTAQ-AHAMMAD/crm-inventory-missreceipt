@@ -97,19 +97,19 @@ export default function Sidebar({ open, onClose }) {
   return (
     <aside
       className={`
-        fixed inset-y-0 left-0 z-30 w-64 bg-gray-900 text-white transform transition-transform duration-300 ease-in-out
+        fixed inset-y-0 left-0 z-30 w-64 bg-gray-900 text-white flex flex-col transform transition-transform duration-300 ease-in-out
         lg:static lg:translate-x-0
         ${open ? 'translate-x-0' : '-translate-x-full'}
       `}
     >
       {/* Logo */}
-      <div className="flex items-center justify-between h-16 px-6 border-b border-gray-700">
+      <div className="flex-shrink-0 flex items-center justify-between h-16 px-6 border-b border-gray-700">
         <span className="text-xl font-bold text-blue-400">CRM Portal</span>
         <button onClick={onClose} className="lg:hidden text-gray-400 hover:text-white">✕</button>
       </div>
 
       {/* Navigation */}
-      <nav className="mt-4 px-3 overflow-y-auto pb-24">
+      <nav className="flex-1 mt-4 px-3 overflow-y-auto pb-24">
         {NAV_GROUPS.map((group, i) => (
           <div key={group.label} className={i > 0 ? 'mt-5' : ''}>
             <SectionLabel>{group.label}</SectionLabel>
