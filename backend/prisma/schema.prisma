@@ -32,6 +32,7 @@ model User {
   arInvoiceUploads   ArInvoiceUpload[]
   arInvoiceData      ArInvoiceData[]
   activityLogs       ActivityLog[]
+  vendReceiptBatches VendReceiptBatch[]
 }
 
 // Tracks each bulk inventory CSV upload and its processing results
@@ -338,4 +339,161 @@ model FusionInvoiceLine {
   @@index([requestId])
   @@index([invoiceNumber])
   @@index([salesOrder])
+}
+
+// ─── Vend Receipt Tables ─────────────────────────────────────────────────────
+
+// Fusion Receipt Method - maps payment methods to bank charges and tax rates
+// Seeded from FUSION_RECEIPT_METHOD_202606021342.csv
+model FusionReceiptMethod {
+  id                 Int      @id @default(autoincrement())
+  rowId              Int?
+  receiptMethodId    String   // Oracle Receipt Method ID (numeric string)
+  receiptMethodName  String   // e.g. "Mada", "Visa", "Cash", "Cash rounding"
+  receiptIsCash      Boolean  @default(false)
+  receiptBankCharge  Float    @default(0)
+  receiptMethodTax   Float    @default(0)
+  region             String   // SA, KW, BH, AE, OM, SN
+  createdAt          DateTime @default(now())
+
+  @@index([receiptMethodName, region])
+  @@index([region])
+}
+
+// VendHQ Register - maps Vend store registers to Oracle bank accounts
+// Seeded from VENDHQ_REGISTERS_202606021344.csv
+model VendhqRegister {
+  id             Int      @id @default(autoincrement())
+  registerId     String   @unique
+  outletId       String?
+  registerName   String   // e.g. "AZIZMALL" – matches subinventory
+  cashAccount    String?  // Cash account name
+  cashAccountId  String?  // Oracle Cash account ID
+  bankAccount    String?  // Bank account description (used in misc receipt BankAccountNumber)
+  bankAccountId  String?  // Oracle Bank account ID (used in standard receipt RemittanceBankAccountNumber)
+  version        String?
+  deletedAt      String?
+  region         String?
+  giftAccount    String?
+  giftAccountId  String?
+  createdAt      DateTime @default(now())
+
+  @@index([registerName])
+  @@index([region])
+}
+
+// Fusion Standard Receipt - stores Oracle Standard Receipt API responses
+// Corresponds to FUSION_STANDARD_RECEIPT table; seeded from CSV + updated on new submissions
+model FusionStandardReceipt {
+  id                   Int       @id @default(autoincrement())
+  rowId                Int?      // ROW_ID from Oracle
+  requestId            Int?      // REQUEST_ID from Oracle
+  status               String?   // e.g. "Success", "Failed"
+  message              String?
+  requestDate          DateTime?
+  currencyCode         String?
+  receiptDate          DateTime?
+  glDate               DateTime?
+  exchangeDate         DateTime?
+  exchangeRateType     String?
+  receiptMethodId      String?   // RECEIPT_METHOD_ID (Oracle ID)
+  receiptNumber        String?   // e.g. "Mada-2912269"
+  remittanceBankAccId  String?   // REMITTANCE_BACK_ACC_ID
+  depositDate          DateTime?
+  customerId           String?   // CUSTOMER_ID
+  orgId                String?   // ORG_ID
+  amount               Float?
+  region               String?
+  integMode            String?   // AUTOMATIC / MANUAL
+  batchId              Int?      // links to VendReceiptBatch (null for seeded historical data)
+
+  createdAt            DateTime  @default(now())
+
+  @@index([receiptNumber])
+  @@index([status])
+  @@index([requestId])
+  @@index([batchId])
+}
+
+// Fusion Misc Receipt - stores Oracle Misc Receipt SOAP responses
+// Corresponds to FUSION_MISC_RECEIPT table; seeded from CSV + updated on new submissions
+model FusionMiscReceipt {
+  id                Int       @id @default(autoincrement())
+  rowId             Int?
+  requestId         Int?
+  status            String?
+  message           String?
+  requestDate       DateTime?
+  currencyCode      String?
+  glDate            DateTime?
+  exchangeDate      DateTime?
+  exchangeRateType  String?
+  receiptMethodName String?   // e.g. "Mada", "Visa"
+  receiptNumber     String?   // e.g. "Mada-2912269-MISC"
+  bankAccNumber     String?   // BANK_ACC_NUMBER (full description)
+  recActivityName   String?   // e.g. "Bank Charge"
+  amount            Float?
+  receiptDate       DateTime?
+  region            String?
+  integMode         String?
+  batchId           Int?
+
+  createdAt         DateTime  @default(now())
+
+  @@index([receiptNumber])
+  @@index([status])
+  @@index([requestId])
+  @@index([batchId])
+}
+
+// Fusion Apply Receipt - stores Oracle Apply Receipt responses
+// Corresponds to FUSION_APPLY_RECEIPT table; seeded from CSV + updated on new submissions
+model FusionApplyReceipt {
+  id              Int       @id @default(autoincrement())
+  rowId           Int?
+  requestId       Int?
+  status          String?
+  message         String?
+  requestDate     DateTime?
+  accountingDate  DateTime?
+  applicationDate DateTime?
+  txnNumber       String?
+  receiptNumber   String?
+  amountApplied   Float?
+  currencyCode    String?
+  region          String?
+  integMode       String?
+  txnSource       String?
+  batchId         Int?
+
+  createdAt       DateTime  @default(now())
+
+  @@index([receiptNumber])
+  @@index([txnNumber])
+  @@index([status])
+  @@index([requestId])
+  @@index([batchId])
+}
+
+// VendReceiptBatch - tracks each Vend Receipt payload generation and submission
+model VendReceiptBatch {
+  id                 Int      @id @default(autoincrement())
+  userId             Int
+  user               User     @relation(fields: [userId], references: [id])
+  filename           String   // payment lines file name
+  region             String   @default("SA")
+  totalStandard      Int      @default(0)
+  totalMisc          Int      @default(0)
+  successStandard    Int      @default(0)
+  failureStandard    Int      @default(0)
+  successMisc        Int      @default(0)
+  failureMisc        Int      @default(0)
+  status             String   @default("GENERATED") // GENERATED, SUBMITTING, DONE, PARTIAL, FAILED
+  payloadsJson       String   // generated payloads (standard + misc) as JSON
+  responseLog        String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([status])
+  @@index([userId])
 }
