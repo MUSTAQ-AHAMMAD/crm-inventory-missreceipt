@@ -27,6 +27,7 @@ import ReceiptUploadDetailPage from './pages/ReceiptUploadDetailPage'
 import ArInvoiceResponsePage from './pages/ArInvoiceResponsePage'
 import ReceiptResponsePage from './pages/ReceiptResponsePage'
 import HelpPage from './pages/HelpPage'
+import ArPipelinePage from './pages/ArPipelinePage'
 
 /** Route guard – redirects unauthenticated users to /login */
 function PrivateRoute({ children }) {
@@ -70,6 +71,7 @@ export default function App() {
             <Route path="ar-invoice-data" element={<ArInvoiceDataPage />} />
             <Route path="ar-invoice/uploads/:uploadId" element={<ArInvoiceDetailPage />} />
             <Route path="ar-invoice-response" element={<ArInvoiceResponsePage />} />
+            <Route path="ar-pipeline" element={<ArPipelinePage />} />
             <Route path="receipt-response" element={<ReceiptResponsePage />} />
             <Route path="vend-invoice" element={<VendInvoicePage />} />
             <Route path="vend-sales-metadata" element={<VendSalesMetadataPage />} />
