@@ -48,9 +48,7 @@ function toDateString(val) {
 /** Extract numeric invoice number embedded in a receipt number like "Mada-2912269" */
 function extractInvoiceNumberFromReceipt(receiptNumber) {
   if (!receiptNumber) return null;
-  // Match the last numeric segment that is not followed by "-MISC"
-  const m = receiptNumber.match(/-(\d+)(?!-MISC)(?:-[^-]*)?$/);
-  // More precise: ends with -<digits> (and nothing after, or another -word that isn't MISC)
+  // Match the last numeric segment at the end (e.g. "-2912269" in "Mada-2912269")
   const m2 = receiptNumber.match(/-(\d+)$/);
   return m2 ? parseInt(m2[1], 10) : null;
 }
@@ -587,7 +585,7 @@ async function listStandardReceipts(req, res, next) {
         where,
         skip,
         take: parseInt(limit, 10),
-        orderBy: [{ receiptDate: 'desc' }],
+        orderBy: [{ receiptDate: 'desc' }, { receiptNumber: 'asc' }],
       }),
       prisma.fusionStandardReceipt.count({ where }),
     ]);
@@ -623,7 +621,7 @@ async function listMiscReceipts(req, res, next) {
         where,
         skip,
         take: parseInt(limit, 10),
-        orderBy: [{ receiptDate: 'desc' }],
+        orderBy: [{ receiptDate: 'desc' }, { receiptNumber: 'asc' }],
       }),
       prisma.fusionMiscReceipt.count({ where }),
     ]);
