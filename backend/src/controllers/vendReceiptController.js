@@ -425,10 +425,11 @@ async function generateReceipts(req, res, next) {
       const reg = await prisma.vendhqRegister.findFirst({
         where: { registerName: { equals: subinventory } },
       });
-      // If not found, try case-insensitive
-      const register = reg || await prisma.vendhqRegister.findFirst({
-        where: { registerName: { contains: subinventory.slice(0, 5) } },
-      });
+      const register = reg || (subinventory.length >= 4
+        ? await prisma.vendhqRegister.findFirst({
+            where: { registerName: { startsWith: subinventory.slice(0, 4) } },
+          })
+        : null);
 
       const bankAccountId  = register?.bankAccountId  || '';  // for standard receipt
       const bankAccountText = register?.bankAccount    || '';  // for misc receipt
@@ -626,16 +627,22 @@ async function submitStandardReceipts(req, res, next) {
 
     await Promise.all(tasks);
 
-    // Update batch status if batchId provided
+    // Update batch status if batchId provided.
+    // Read existing misc counters so we don't overwrite them and append to responseLog.
     if (batchId) {
       try {
+        const existing = await prisma.vendReceiptBatch.findUnique({ where: { id: parseInt(batchId, 10) } });
+        const existingLog = existing?.responseLog ? existing.responseLog + '\n' : '';
+        const totalFail = failureCount + (existing?.failureMisc || 0);
+        const totalOk   = successCount + (existing?.successMisc || 0);
+        const newStatus = totalFail === 0 ? 'DONE' : totalOk === 0 ? 'FAILED' : 'PARTIAL';
         await prisma.vendReceiptBatch.update({
           where: { id: parseInt(batchId, 10) },
           data: {
             successStandard: successCount,
             failureStandard: failureCount,
-            status: failureCount === 0 ? 'DONE' : successCount === 0 ? 'FAILED' : 'PARTIAL',
-            responseLog: logs.join('\n'),
+            status: newStatus,
+            responseLog: existingLog + logs.join('\n'),
           },
         });
       } catch (_) {}
@@ -733,13 +740,18 @@ async function submitMiscReceipts(req, res, next) {
 
     if (batchId) {
       try {
+        const existing = await prisma.vendReceiptBatch.findUnique({ where: { id: parseInt(batchId, 10) } });
+        const existingLog = existing?.responseLog ? existing.responseLog + '\n' : '';
+        const totalFail = failureCount + (existing?.failureStandard || 0);
+        const totalOk   = successCount + (existing?.successStandard || 0);
+        const newStatus = totalFail === 0 ? 'DONE' : totalOk === 0 ? 'FAILED' : 'PARTIAL';
         await prisma.vendReceiptBatch.update({
           where: { id: parseInt(batchId, 10) },
           data: {
             successMisc: successCount,
             failureMisc: failureCount,
-            status: failureCount === 0 ? 'DONE' : successCount === 0 ? 'FAILED' : 'PARTIAL',
-            responseLog: logs.join('\n'),
+            status: newStatus,
+            responseLog: existingLog + logs.join('\n'),
           },
         });
       } catch (_) {}
