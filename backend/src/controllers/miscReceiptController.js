@@ -290,6 +290,7 @@ async function upload(req, res, next) {
         userId: req.user.id,
         filename: req.file.originalname,
         xmlPayload: normalizedRecords.map(generateSoapEnvelope).join('\n\n'),
+        totalRecords: normalizedRecords.length,
         responseStatus: 'PROCESSING',
         responseLog: '',
       },
@@ -354,6 +355,8 @@ async function upload(req, res, next) {
     await prisma.miscReceiptUpload.update({
       where: { id: uploadRecord.id },
       data: {
+        successCount,
+        failureCount,
         responseStatus: finalStatus,
         responseMessage,
         responseLog,
@@ -466,6 +469,9 @@ async function getUploadProgress(req, res, next) {
 
     return res.json({
       uploadId: upload.id,
+      totalRecords: upload.totalRecords,
+      successCount: upload.successCount,
+      failureCount: upload.failureCount,
       status: upload.responseStatus,
       responseMessage: upload.responseMessage,
     });

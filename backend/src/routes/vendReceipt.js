@@ -13,6 +13,7 @@ const {
   submitMiscReceipts,
   listBatches,
   getBatch,
+  listReceiptMethods,
   listStandardReceipts,
   listMiscReceipts,
   listApplyReceipts,
@@ -54,6 +55,12 @@ router.get('/batches', listBatches);
  * Get details of a specific batch including generated payloads.
  */
 router.get('/batches/:id', getBatch);
+
+/**
+ * GET /api/vend-receipt/receipt-methods
+ * List FusionReceiptMethod data (payment method mappings with bank charges/tax).
+ */
+router.get('/receipt-methods', listReceiptMethods);
 
 /**
  * GET /api/vend-receipt/standard-receipts

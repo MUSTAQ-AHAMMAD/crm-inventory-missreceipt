@@ -25,6 +25,7 @@ import FailureDetailsPage from './pages/FailureDetailsPage'
 import UploadDetailPage from './pages/UploadDetailPage'
 import ReceiptUploadDetailPage from './pages/ReceiptUploadDetailPage'
 import ArInvoiceResponsePage from './pages/ArInvoiceResponsePage'
+import ReceiptResponsePage from './pages/ReceiptResponsePage'
 import HelpPage from './pages/HelpPage'
 
 /** Route guard – redirects unauthenticated users to /login */
@@ -69,6 +70,7 @@ export default function App() {
             <Route path="ar-invoice-data" element={<ArInvoiceDataPage />} />
             <Route path="ar-invoice/uploads/:uploadId" element={<ArInvoiceDetailPage />} />
             <Route path="ar-invoice-response" element={<ArInvoiceResponsePage />} />
+            <Route path="receipt-response" element={<ReceiptResponsePage />} />
             <Route path="vend-invoice" element={<VendInvoicePage />} />
             <Route path="vend-sales-metadata" element={<VendSalesMetadataPage />} />
             <Route path="vend-receipt" element={<VendReceiptPage />} />

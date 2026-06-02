@@ -825,6 +825,26 @@ async function getBatch(req, res, next) {
 
 // ─── Receipt data tables ──────────────────────────────────────────────────────
 
+async function listReceiptMethods(req, res, next) {
+  try {
+    const page   = Math.max(1, parseInt(req.query.page) || 1);
+    const limit  = Math.min(200, parseInt(req.query.limit) || 50);
+    const skip   = (page - 1) * limit;
+    const region = req.query.region ? String(req.query.region).trim().toUpperCase() : undefined;
+
+    const where = region ? { region } : {};
+
+    const [methods, total] = await Promise.all([
+      prisma.fusionReceiptMethod.findMany({ where, orderBy: [{ region: 'asc' }, { receiptMethodName: 'asc' }], skip, take: limit }),
+      prisma.fusionReceiptMethod.count({ where }),
+    ]);
+
+    return res.json({ methods, total, page, limit });
+  } catch (err) {
+    next(err);
+  }
+}
+
 async function listStandardReceipts(req, res, next) {
   try {
     const page  = Math.max(1, parseInt(req.query.page) || 1);
@@ -882,6 +902,7 @@ module.exports = {
   submitMiscReceipts,
   listBatches,
   getBatch,
+  listReceiptMethods,
   listStandardReceipts,
   listMiscReceipts,
   listApplyReceipts,
