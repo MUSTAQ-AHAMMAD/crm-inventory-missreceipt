@@ -88,6 +88,9 @@ model MiscReceiptUpload {
   user            User     @relation(fields: [userId], references: [id])
   filename        String
   xmlPayload      String
+  totalRecords    Int      @default(0)
+  successCount    Int      @default(0)
+  failureCount    Int      @default(0)
   responseStatus  String?
   responseMessage String?
   responseLog     String?
