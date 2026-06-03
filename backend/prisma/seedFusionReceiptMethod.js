@@ -38,6 +38,8 @@ function parseReceiptMethodSql(sqlContent) {
     ] = match;
 
     rows.push({
+      // receiptMethodId is stored as String in the Prisma schema (large Oracle IDs
+      // exceed safe integer range in JavaScript, so string is the correct type)
       receiptMethodId:   receiptMethodId.trim(),
       receiptMethodName: receiptMethodName.trim(),
       receiptIsCash:     receiptIsCash.trim() === '1',
@@ -66,7 +68,9 @@ async function seedReceiptMethods() {
 
   console.log(`[Seed] Parsed ${rows.length} receipt method rows`);
 
-  // Clear existing rows so a re-run always reflects the SQL file exactly
+  // Intentionally wipe existing rows so every run of this script produces a
+  // clean, authoritative dataset that exactly mirrors the SQL source file.
+  // Use seed.js (npm run prisma:seed) for first-run-only setup.
   const deleted = await prisma.fusionReceiptMethod.deleteMany();
   console.log(`[Seed] Cleared ${deleted.count} existing FusionReceiptMethod rows`);
 
