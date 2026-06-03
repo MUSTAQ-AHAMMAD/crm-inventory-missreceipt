@@ -1,55 +1,101 @@
 /**
- * Seed script to populate FusionReceiptMethod from FUSION_RECEIPT_METHOD CSV
+ * Seed script to populate FusionReceiptMethod from FUSION_RECEIPT_METHOD SQL file.
+ * Parses Oracle-style INSERT statements and upserts every row into the local
+ * SQLite database so the data is available for receipt calculations and mappings.
+ *
  * Usage: node prisma/seedFusionReceiptMethod.js
  */
 
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const { parse } = require('csv-parse/sync');
 const { PrismaClient } = require('@prisma/client');
 
 const prisma = new PrismaClient();
 
-async function seedReceiptMethods() {
-  const csvPath = path.join(__dirname, '../../FUSION_RECEIPT_METHOD_202606021342.csv');
+/**
+ * Parse all value tuples from the SQL file.
+ * Each row has the form:
+ *   (RECEIPT_METHOD_ID, 'RECEIPT_METHOD_NAME', 'RECEIPT_IS_CASH', RECEIPT_BANK_CHARGE, RECEIPT_METHOD_TAX, 'REGION', ROW_ID)
+ */
+function parseReceiptMethodSql(sqlContent) {
+  const rows = [];
 
-  if (!fs.existsSync(csvPath)) {
-    console.error('[Seed] File not found:', csvPath);
+  // Match every parenthesised value tuple in any INSERT block
+  const tuplePattern = /\((\d+),'([^']*?)','([^']*?)',([\d.]+),([\d.]+),'([^']*?)',(\d+)\)/g;
+
+  let match;
+  while ((match = tuplePattern.exec(sqlContent)) !== null) {
+    const [
+      ,
+      receiptMethodId,
+      receiptMethodName,
+      receiptIsCash,
+      receiptBankCharge,
+      receiptMethodTax,
+      region,
+      rowId,
+    ] = match;
+
+    rows.push({
+      receiptMethodId:   receiptMethodId.trim(),
+      receiptMethodName: receiptMethodName.trim(),
+      receiptIsCash:     receiptIsCash.trim() === '1',
+      receiptBankCharge: parseFloat(receiptBankCharge) || 0,
+      receiptMethodTax:  parseFloat(receiptMethodTax) || 0,
+      region:            region.trim(),
+      rowId:             parseInt(rowId, 10),
+    });
+  }
+
+  return rows;
+}
+
+async function seedReceiptMethods() {
+  const sqlPath = path.join(__dirname, '../../FUSION_RECEIPT_METHOD_202606030400.sql');
+
+  console.log('[Seed] Reading SQL file:', sqlPath);
+
+  if (!fs.existsSync(sqlPath)) {
+    console.error('[Seed] SQL file not found at:', sqlPath);
     process.exit(1);
   }
 
-  const content = fs.readFileSync(csvPath, 'utf-8');
-  const records = parse(content, { columns: true, skip_empty_lines: true, trim: true, bom: true });
+  const sqlContent = fs.readFileSync(sqlPath, 'utf-8');
+  const rows = parseReceiptMethodSql(sqlContent);
 
-  console.log(`[Seed] Found ${records.length} receipt method rows`);
+  console.log(`[Seed] Parsed ${rows.length} receipt method rows`);
+
+  // Clear existing rows so a re-run always reflects the SQL file exactly
+  const deleted = await prisma.fusionReceiptMethod.deleteMany();
+  console.log(`[Seed] Cleared ${deleted.count} existing FusionReceiptMethod rows`);
 
   let inserted = 0;
-  let skipped = 0;
+  let errorCount = 0;
 
-  for (const row of records) {
+  for (const row of rows) {
     try {
-      await prisma.fusionReceiptMethod.create({
-        data: {
-          rowId:             row.ROW_ID ? parseInt(row.ROW_ID, 10) : null,
-          receiptMethodId:   String(row.RECEIPT_METHOD_ID ?? '').trim(),
-          receiptMethodName: String(row.RECEIPT_METHOD_NAME ?? '').trim(),
-          receiptIsCash:     String(row.RECEIPT_IS_CASH ?? '0').trim() === '1',
-          receiptBankCharge: parseFloat(row.RECEIPT_BANK_CHARGE ?? 0) || 0,
-          receiptMethodTax:  parseFloat(row.RECEIPT_METHOD_TAX ?? 0) || 0,
-          region:            String(row.REGION ?? '').trim(),
-        },
-      });
+      await prisma.fusionReceiptMethod.create({ data: row });
       inserted++;
     } catch (err) {
-      console.warn(`[Seed] Skipped row (${row.RECEIPT_METHOD_NAME}/${row.REGION}): ${err.message}`);
-      skipped++;
+      errorCount++;
+      console.warn(
+        `[Seed] Failed to insert (${row.receiptMethodName}/${row.region}): ${err.message}`,
+      );
     }
   }
 
-  console.log(`[Seed] FusionReceiptMethod: ${inserted} inserted, ${skipped} skipped`);
+  console.log('\n[Seed] Complete!');
+  console.log(`Total rows:  ${rows.length}`);
+  console.log(`Inserted:    ${inserted}`);
+  console.log(`Errors:      ${errorCount}`);
 }
 
-seedReceiptMethods()
-  .catch((err) => { console.error(err); process.exit(1); })
-  .finally(() => prisma.$disconnect());
+module.exports = { seedReceiptMethods };
+
+// Run directly when called as a standalone script
+if (require.main === module) {
+  seedReceiptMethods()
+    .catch((err) => { console.error('[Seed] Fatal error:', err); process.exit(1); })
+    .finally(() => prisma.$disconnect());
+}

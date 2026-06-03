@@ -7,6 +7,7 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const { seedMetadata } = require('./seedFusionMetadata');
+const { seedReceiptMethods } = require('./seedFusionReceiptMethod');
 
 const prisma = new PrismaClient();
 
@@ -41,6 +42,14 @@ async function main() {
   } else {
     console.log('Seeding Fusion Sales Metadata...');
     await seedMetadata();
+  }
+  // Seed Fusion Receipt Methods (skips if already populated)
+  const existingMethods = await prisma.fusionReceiptMethod.count();
+  if (existingMethods > 0) {
+    console.log(`Fusion Receipt Methods already seeded (${existingMethods} records), skipping.`);
+  } else {
+    console.log('Seeding Fusion Receipt Methods...');
+    await seedReceiptMethods();
   }
 }
 
