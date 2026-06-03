@@ -654,7 +654,7 @@ export default function ArPipelinePage() {
     : 'error'
 
   const step2Status = s2.status === 'idle' ? 'idle'
-    : s2.status.startsWith('creating') || s2.status === 'generating' ? 'active'
+    : s2.status?.startsWith('creating') || s2.status === 'generating' ? 'active'
     : s2.status === 'generated' ? 'active'
     : s2.status === 'done' ? 'done'
     : s2.status === 'partial' ? 'partial'
@@ -840,7 +840,7 @@ export default function ArPipelinePage() {
             <p className="font-bold">Upload Your Files</p>
             <p className="text-xs text-blue-100">These files are used for all steps — upload once, use everywhere</p>
           </div>
-          {filesReady && <Badge color="green" className="ml-auto">✓ Files ready</Badge>}
+          {filesReady && <span className="ml-auto"><Badge color="green">✓ Files ready</Badge></span>}
         </div>
         <div className="p-5 grid sm:grid-cols-2 gap-4">
           <div>
@@ -1162,7 +1162,7 @@ export default function ArPipelinePage() {
       {summaryData?.grouped && summaryData.grouped.length > 0 && (
         <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <div className="px-5 py-4 bg-gray-50 border-b border-gray-100">
-            <h2 className="font-semibold text-gray-800">📋 Pipeline History — Store &amp; Date Summary</h2>
+            <h2 className="font-semibold text-gray-800">📋 Pipeline History — Store & Date Summary</h2>
             <p className="text-xs text-gray-400 mt-0.5">Status of all AR data stored in the database</p>
           </div>
           <div className="p-5 overflow-x-auto">
