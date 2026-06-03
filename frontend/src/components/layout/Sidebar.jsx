@@ -32,6 +32,7 @@ const NAV_GROUPS = [
   {
     label: 'AR Invoice',
     items: [
+      { to: '/ar-pipeline', label: 'AR Pipeline', icon: '🔄' },
       { to: '/ar-invoice', label: 'AR Invoice Upload', icon: '📄' },
       { to: '/ar-invoice-data', label: 'AR Invoice Data', icon: '📋' },
       { to: '/ar-invoice-response', label: 'AR Invoice Response', icon: '📨' },
