@@ -14,6 +14,7 @@ const {
   listInvoices,
   listStandardReceipts,
   listMiscReceipts,
+  createInvoiceBatch,
 } = require('../controllers/arPipelineController');
 
 const router = express.Router();
@@ -28,6 +29,9 @@ router.get('/pending-apply', getPendingApply);
 
 // Submit auto-matched pairs via Oracle SOAP
 router.post('/submit-apply', submitApply);
+
+// Batch AR Invoice creation (pipeline flow)
+router.post('/create-invoice-batch', createInvoiceBatch);
 
 // Individual step data lists
 router.get('/invoices', listInvoices);
