@@ -111,12 +111,15 @@ async function executeTransaction(statements) {
   }
 }
 
+/** Seconds to wait for in-flight queries to finish before forcibly closing the pool */
+const POOL_DRAIN_TIMEOUT = 10;
+
 /**
  * Close the pool gracefully (call on application shutdown).
  */
 async function closePool() {
   if (_pool) {
-    await _pool.close(10);
+    await _pool.close(POOL_DRAIN_TIMEOUT);
     _pool = null;
     console.log('[DB] Oracle connection pool closed');
   }

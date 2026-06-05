@@ -301,13 +301,18 @@ function makeModel(modelName) {
       const cols = buildSelect(select);
       const obClause = buildOrderBy(orderBy);
 
+      // Pagination via bind variables (never interpolate user-supplied numbers)
       let pagination = '';
       if (skip !== undefined || take !== undefined) {
-        const offset = skip || 0;
+        const offsetVal = Math.max(0, parseInt(skip, 10) || 0);
         if (take !== undefined) {
-          pagination = `OFFSET ${offset} ROWS FETCH NEXT ${take} ROWS ONLY`;
+          const takeVal = Math.max(1, parseInt(take, 10) || 1);
+          wb.binds.pg_offset = offsetVal;
+          wb.binds.pg_take   = takeVal;
+          pagination = 'OFFSET :pg_offset ROWS FETCH NEXT :pg_take ROWS ONLY';
         } else {
-          pagination = `OFFSET ${offset} ROWS`;
+          wb.binds.pg_offset = offsetVal;
+          pagination = 'OFFSET :pg_offset ROWS';
         }
       }
 
@@ -405,14 +410,21 @@ function makeModel(modelName) {
     async createMany({ data, skipDuplicates } = {}) {
       if (!data || data.length === 0) return { count: 0 };
       let count = 0;
+      const skipped = [];
       for (const item of data) {
         try {
           await this.create({ data: item });
           count++;
         } catch (err) {
-          if (skipDuplicates && isUniqueViolation(err)) continue;
+          if (skipDuplicates && isUniqueViolation(err)) {
+            skipped.push(item);
+            continue;
+          }
           throw err;
         }
+      }
+      if (skipped.length > 0) {
+        console.warn(`[Oracle] createMany on ${tableName}: skipped ${skipped.length} duplicate row(s)`);
       }
       return { count };
     },
