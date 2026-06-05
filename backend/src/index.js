@@ -103,22 +103,42 @@ app.get('/api/health', (_req, res) => {
 // ─── Global Error Handler ─────────────────────────────────────────────────────
 app.use(errorHandler);
 
-// ─── Start Server ─────────────────────────────────────────────────────────────
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`CRM Backend running on http://0.0.0.0:${PORT}`);
-  console.log(`Swagger docs available at http://0.0.0.0:${PORT}/api/docs`);
-});
+// ─── Oracle Connection Pool & Server Start ────────────────────────────────────
+const { initPool, closePool } = require('./services/db');
 
-server.on('error', (err) => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(
-      `[ERROR] Port ${PORT} is already in use. Stop the other process or set PORT to an open port in backend/.env (and update VITE_API_BASE_URL in frontend/.env).`
-    );
+(async () => {
+  try {
+    await initPool();
+  } catch (err) {
+    console.error('[DB] Failed to initialise Oracle connection pool:', err.message);
     process.exit(1);
   }
 
-  console.error(`[ERROR] Failed to start server: ${err.message}`);
-  process.exit(1);
-});
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`CRM Backend running on http://0.0.0.0:${PORT}`);
+    console.log(`Swagger docs available at http://0.0.0.0:${PORT}/api/docs`);
+  });
 
-module.exports = app;
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(
+        `[ERROR] Port ${PORT} is already in use. Stop the other process or set PORT to an open port in backend/.env (and update VITE_API_BASE_URL in frontend/.env).`
+      );
+      process.exit(1);
+    }
+
+    console.error(`[ERROR] Failed to start server: ${err.message}`);
+    process.exit(1);
+  });
+
+  // Graceful shutdown – close Oracle pool before exit
+  const shutdown = async (signal) => {
+    console.log(`[${signal}] Shutting down...`);
+    server.close(async () => {
+      await closePool();
+      process.exit(0);
+    });
+  };
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT',  () => shutdown('SIGINT'));
+})();

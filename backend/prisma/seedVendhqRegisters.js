@@ -7,9 +7,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { parse } = require('csv-parse/sync');
-const { PrismaClient } = require('@prisma/client');
-
-const prisma = new PrismaClient();
+const prisma = require('../src/services/prisma');
 
 async function seedRegisters() {
   const csvPath = path.join(__dirname, '../../VENDHQ_REGISTERS_202606021344.csv');

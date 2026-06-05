@@ -4,12 +4,11 @@
  * Run with: node prisma/seed.js  (or npm run prisma:seed)
  */
 
-const { PrismaClient } = require('@prisma/client');
+require('dotenv').config();
 const bcrypt = require('bcryptjs');
+const prisma = require('../src/services/prisma');
 const { seedMetadata } = require('./seedFusionMetadata');
 const { seedReceiptMethods } = require('./seedFusionReceiptMethod');
-
-const prisma = new PrismaClient();
 
 async function main() {
   const email = 'admin@crm.com';

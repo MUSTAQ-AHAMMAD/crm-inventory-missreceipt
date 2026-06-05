@@ -1184,19 +1184,19 @@ async function getDebugLog(req, res, next) {
     const totalRecords = totalSuccessRecords + totalFailureRecords;
 
     const rawRecords = await prisma.$queryRaw`
-      SELECT id, rowNumber, rawData, responseBody, responseStatus,
-             NULL as errorMessage, NULL as oracleErrorCode, NULL as oracleProcessStatus,
-             createdAt, 'SUCCESS' as recordType
-      FROM InventorySuccessRecord
-      WHERE uploadId = ${uploadId}
+      SELECT ID, ROW_NUMBER, RAW_DATA, RESPONSE_BODY, RESPONSE_STATUS,
+             NULL AS ERROR_MESSAGE, NULL AS ORACLE_ERROR_CODE, NULL AS ORACLE_PROCESS_STATUS,
+             CREATED_AT, 'SUCCESS' AS RECORD_TYPE
+      FROM INVENTORY_SUCCESS_RECORDS
+      WHERE UPLOAD_ID = ${uploadId}
       UNION ALL
-      SELECT id, rowNumber, rawData, responseBody, responseStatus,
-             errorMessage, oracleErrorCode, oracleProcessStatus,
-             createdAt, 'FAILURE' as recordType
-      FROM InventoryFailureRecord
-      WHERE uploadId = ${uploadId}
-      ORDER BY rowNumber ASC, createdAt ASC
-      LIMIT ${limit} OFFSET ${offset}
+      SELECT ID, ROW_NUMBER, RAW_DATA, RESPONSE_BODY, RESPONSE_STATUS,
+             ERROR_MESSAGE, ORACLE_ERROR_CODE, ORACLE_PROCESS_STATUS,
+             CREATED_AT, 'FAILURE' AS RECORD_TYPE
+      FROM INVENTORY_FAILURE_RECORDS
+      WHERE UPLOAD_ID = ${uploadId}
+      ORDER BY ROW_NUMBER ASC, CREATED_AT ASC
+      OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
     `;
 
     const parseJson = (val) => {

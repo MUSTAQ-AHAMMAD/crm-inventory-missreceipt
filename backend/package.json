@@ -6,10 +6,7 @@
     "scripts": {
         "start": "node src/index.js",
         "dev": "nodemon src/index.js",
-        "postinstall": "prisma generate",
-        "prisma:generate": "prisma generate",
-        "prisma:migrate": "prisma migrate dev",
-        "prisma:seed": "node prisma/seed.js",
+        "seed": "node prisma/seed.js",
         "seed:fusion-metadata": "node prisma/seedFusionMetadata.js",
         "seed:receipt-methods": "node prisma/seedFusionReceiptMethod.js",
         "seed:vend-registers": "node prisma/seedVendhqRegisters.js",
@@ -37,6 +34,7 @@
         "fast-xml-parser": "^5.7.2",
         "jsonwebtoken": "^9.0.2",
         "multer": "^2.1.1",
+        "oracledb": "^6.4.0",
         "p-limit": "^3.1.0",
         "p-retry": "^4.6.2",
         "swagger-jsdoc": "^6.3.0",
@@ -48,7 +46,6 @@
     "devDependencies": {
         "jest": "^30.3.0",
         "nodemon": "^3.0.2",
-        "prisma": "^5.7.0",
         "supertest": "^7.2.2"
     }
 }

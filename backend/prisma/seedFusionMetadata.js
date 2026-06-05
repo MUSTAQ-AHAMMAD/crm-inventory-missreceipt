@@ -6,9 +6,7 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const { PrismaClient } = require('@prisma/client');
-
-const prisma = new PrismaClient();
+const prisma = require('../src/services/prisma');
 
 async function seedMetadata() {
   const sqlFilePath = path.join(__dirname, '../../FUSION_SALES_METADATA_202605180144.sql');
