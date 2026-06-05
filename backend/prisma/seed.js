@@ -7,6 +7,7 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const { seedMetadata } = require('./seedFusionMetadata');
+const { seedReceiptMethods } = require('./seedFusionReceiptMethod');
 
 const prisma = new PrismaClient();
 
@@ -42,6 +43,10 @@ async function main() {
     console.log('Seeding Fusion Sales Metadata...');
     await seedMetadata();
   }
+  // Seed Fusion Receipt Methods (always re-seeds from the SQL source file to
+  // ensure the table exactly reflects FUSION_RECEIPT_METHOD_202606030400.sql)
+  console.log('Seeding Fusion Receipt Methods...');
+  await seedReceiptMethods();
 }
 
 main()
