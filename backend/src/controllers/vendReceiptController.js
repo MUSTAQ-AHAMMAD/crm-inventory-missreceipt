@@ -277,7 +277,7 @@ async function findInvoiceHeader(subinventory, date, paymentType) {
       where: {
         billToLocation: siteNumber,
         txnDate: { gte: dayStart, lte: dayEnd },
-        status: 'Success',
+        status: 'SUCCESS',
       },
       orderBy: { createdAt: 'desc' },
       take: 1,
@@ -290,7 +290,7 @@ async function findInvoiceHeader(subinventory, date, paymentType) {
       where: {
         billToCustName: { contains: subinventory },
         txnDate: { gte: dayStart, lte: dayEnd },
-        status: 'Success',
+        status: 'SUCCESS',
       },
       orderBy: { createdAt: 'desc' },
       take: 1,
