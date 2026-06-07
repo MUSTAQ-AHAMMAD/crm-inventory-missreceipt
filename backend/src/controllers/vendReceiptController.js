@@ -249,7 +249,10 @@ function buildStandardSoapEnvelope(row) {
  */
 async function lookupCustomerPartyId(customerAccNumber) {
   if (!customerAccNumber) return null;
-  const accNum = parseInt(customerAccNumber, 10);
+  // billToAccNumber is stored as Int; coerce to integer for the DB lookup
+  const accNum = typeof customerAccNumber === 'number'
+    ? customerAccNumber
+    : parseInt(String(customerAccNumber).replace(/\D/g, ''), 10);
   if (isNaN(accNum) || accNum <= 0) return null;
 
   // Find invoice headers for this customer account number
@@ -654,6 +657,9 @@ async function submitStandardReceipts(req, res, next) {
         const customerId = await lookupCustomerPartyId(apiPayload.CustomerAccountNumber);
 
         // Build SOAP row: map REST-oriented payload fields to SOAP field names
+        if (!customerId) {
+          console.warn(`⚠️ [StandardReceipt] No Oracle party ID found for account ${apiPayload.CustomerAccountNumber} (${apiPayload.ReceiptNumber}). Falling back to account number — Oracle may reject this.`);
+        }
         const soapRow = {
           ReceiptNumber:          apiPayload.ReceiptNumber,
           ReceiptDate:            apiPayload.ReceiptDate,
@@ -697,7 +703,6 @@ async function submitStandardReceipts(req, res, next) {
           const response = await soapClient.callWithCustomEnvelope(soapXml, 'createStandardReceipt');
 
           successCount++;
-          const bodyText = asText(response.data);
 
           await prisma.fusionStandardReceipt.create({
             data: {
