@@ -703,7 +703,8 @@ async function createInvoiceBatch(req, res, next) {
 
       // Pre-create all upload records in parallel so the rate-limited workers
       // don't spend a concurrency slot on DB writes before starting Oracle calls.
-      const uploadRecords = await Promise.all(
+      // allSettled ensures a single DB failure doesn't abort the whole batch.
+      const uploadRecordResults = await Promise.allSettled(
         payloads.map((payload) =>
           prisma.arInvoiceUpload.create({
             data: {
@@ -721,7 +722,27 @@ async function createInvoiceBatch(req, res, next) {
 
       const tasks = payloads.map((payload, i) =>
         limit(async () => {
-          const uploadRecord = uploadRecords[i];
+          // Use the pre-created record if available; otherwise create it now as a fallback.
+          let uploadRecord = uploadRecordResults[i]?.status === 'fulfilled'
+            ? uploadRecordResults[i].value
+            : null;
+
+          if (!uploadRecord) {
+            try {
+              uploadRecord = await prisma.arInvoiceUpload.create({
+                data: {
+                  userId:         req.user.id,
+                  batchId:        batch.id,
+                  payloadJson:    JSON.stringify(payload),
+                  responseStatus: 'PROCESSING',
+                },
+              });
+            } catch (dbErr) {
+              console.error(`[Pipeline] Could not create upload record for payload ${i + 1}: ${dbErr.message}`);
+              failureCount++;
+              return;
+            }
+          }
 
           let responseStatus  = 'SUCCESS';
           let responseMessage = 'Invoice created successfully';
