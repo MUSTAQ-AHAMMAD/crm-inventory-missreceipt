@@ -8,7 +8,7 @@ const prisma = require('../services/prisma');
 const fusionMetadataService = require('../services/fusionSalesMetadataService');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
-// SOAP namespaces for RecInvoiceService – createSimpleInvoice
+// SOAP namespaces for RecInvoiceService - createSimpleInvoice
 const SOAP_ENV_NS  = 'http://schemas.xmlsoap.org/soap/envelope/';
 const SOAP_TYP_NS  = 'http://xmlns.oracle.com/apps/financials/receivables/transactions/invoices/invoiceService/types/';
 const SOAP_INV_NS  = 'http://xmlns.oracle.com/apps/financials/receivables/transactions/invoices/invoiceService/';
@@ -37,22 +37,22 @@ function optionalTag(ns, tag, value) {
  * Builds the SOAP XML for createSimpleInvoice, mapping JSON payload fields
  * to the Oracle RecInvoiceService WSDL (matching FusionInvoiceTransform.java).
  *
- * JSON field → SOAP element:
- *   BillToCustomerName  → BillToCustomerName
- *   BillToSite          → BillToLocation   (Java: billToLocation)
- *   BillToCustomerNumber→ BillToAccountNumber (Java: billToAccountNumber)
- *   BusinessUnit        → BusinessUnit
- *   TransactionSource   → TransactionSource
- *   TransactionType     → TransactionType
- *   InvoiceCurrencyCode → InvoiceCurrencyCode
- *   ConversionRateType  → ConversionRateType
- *   PaymentTerms        → PaymentTermsName  (Java: paymentTermsName)
- *   TransactionDate     → TrxDate          (Java: trxDate)
- *   AccountingDate      → GlDate           (Java: glDate)
+ * JSON field -> SOAP element:
+ *   BillToCustomerName   -> BillToCustomerName
+ *   BillToSite           -> BillToLocation   (Java: billToLocation)
+ *   BillToCustomerNumber -> BillToAccountNumber (Java: billToAccountNumber)
+ *   BusinessUnit         -> BusinessUnit
+ *   TransactionSource    -> TransactionSource
+ *   TransactionType      -> TransactionType
+ *   InvoiceCurrencyCode  -> InvoiceCurrencyCode
+ *   ConversionRateType   -> ConversionRateType
+ *   PaymentTerms         -> PaymentTermsName  (Java: paymentTermsName)
+ *   TransactionDate      -> TrxDate          (Java: trxDate)
+ *   AccountingDate       -> GlDate           (Java: glDate)
  *
  * Line fields:
- *   LineNumber          → LineNumber
- *   ItemNumber          → ItemNumber  (omitted for discount lines)
+ *   LineNumber           -> LineNumber
+ *   ItemNumber           -> ItemNumber  (omitted for discount lines)
  *   MemoLine            → MemoLineName (Java: memoLineName, discount lines only)
  *   Description         → Description
  *   Quantity            → Quantity (MeasureType with adf:Value / adf:UnitCode)
@@ -99,9 +99,18 @@ ${soTag}${solTag}          <inv:TaxClassificationCode>${escapeXml(line.TaxClassi
   <soapenv:Body>
     <typ:createSimpleInvoice>
       <typ:invoice>
-${optionalTag('inv', 'BillToCustomerName',   payload.BillToCustomerName)}${optionalTag('inv', 'BillToLocation',      payload.BillToSite)}${optionalTag('inv', 'BillToAccountNumber',  payload.BillToCustomerNumber)}${optionalTag('inv', 'BusinessUnit',         payload.BusinessUnit)}${optionalTag('inv', 'TransactionSource',   payload.TransactionSource)}${optionalTag('inv', 'TransactionType',     payload.TransactionType)}        <inv:InvoiceCurrencyCode>${escapeXml(currency)}</inv:InvoiceCurrencyCode>
-${optionalTag('inv', 'ConversionRateType',  payload.ConversionRateType)}${optionalTag('inv', 'PaymentTermsName',   payload.PaymentTerms)}        <inv:TrxDate>${escapeXml(payload.TransactionDate)}</inv:TrxDate>
-${optionalTag('inv', 'GlDate', payload.AccountingDate)}${lineXml}
+        ${optionalTag('inv', 'BillToCustomerName',   payload.BillToCustomerName)}
+        ${optionalTag('inv', 'BillToLocation',      payload.BillToSite)}
+        ${optionalTag('inv', 'BillToAccountNumber', payload.BillToCustomerNumber)}
+        ${optionalTag('inv', 'BusinessUnit',         payload.BusinessUnit)}
+        ${optionalTag('inv', 'TransactionSource',   payload.TransactionSource)}
+        ${optionalTag('inv', 'TransactionType',     payload.TransactionType)}
+        <inv:InvoiceCurrencyCode>${escapeXml(currency)}</inv:InvoiceCurrencyCode>
+        ${optionalTag('inv', 'ConversionRateType',  payload.ConversionRateType)}
+        ${optionalTag('inv', 'PaymentTermsName',    payload.PaymentTerms)}
+        <inv:TrxDate>${escapeXml(payload.TransactionDate)}</inv:TrxDate>
+        ${optionalTag('inv', 'GlDate', payload.AccountingDate)}
+        ${lineXml}
       </typ:invoice>
     </typ:createSimpleInvoice>
   </soapenv:Body>

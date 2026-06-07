@@ -4,14 +4,14 @@
  * StandardReceiptService (createStandardReceipt operation).
  *
  * Field mapping from Java StandardReceiptRequest:
- *   ReceiptNumber          – unique receipt identifier
- *   ReceiptDate            – receipt date (also used for GlDate and DepositDate)
- *   Amount                 – receipt amount (positive)
- *   CurrencyCode           – ISO currency code (e.g. SAR)
- *   ReceiptMethodId        – numeric payment method ID from Oracle Fusion
- *   RemittanceBankAccountId– numeric bank / cash account ID from Oracle Fusion
- *   CustomerId             – numeric customer party ID from Oracle Fusion
- *   OrgId                  – numeric Oracle Fusion business unit / org ID
+ *   ReceiptNumber           - unique receipt identifier
+ *   ReceiptDate             - receipt date (also used for GlDate and DepositDate)
+ *   Amount                  - receipt amount (positive)
+ *   CurrencyCode            - ISO currency code (e.g. SAR)
+ *   ReceiptMethodId         - numeric payment method ID from Oracle Fusion
+ *   RemittanceBankAccountId - numeric bank / cash account ID from Oracle Fusion
+ *   CustomerId              - numeric customer party ID from Oracle Fusion
+ *   OrgId                   - numeric Oracle Fusion business unit / org ID
  */
 
 const { parse } = require('csv-parse/sync');
@@ -33,7 +33,7 @@ const REQUIRED_FIELDS = [
 
 const TEMPLATE_FIELDS = [...REQUIRED_FIELDS];
 
-// SOAP namespaces – StandardReceiptService (same service used by createApplyReceipt)
+// SOAP namespaces - StandardReceiptService (same service used by createApplyReceipt)
 const SOAP_ENV_NS   = 'http://schemas.xmlsoap.org/soap/envelope/';
 const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/types/';
 const SOAP_COM_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/';
