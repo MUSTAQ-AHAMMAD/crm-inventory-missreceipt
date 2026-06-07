@@ -24,6 +24,7 @@ const vendReceiptRoutes = require('./routes/vendReceipt');
 const adminRoutes = require('./routes/admin');
 const reportsRoutes = require('./routes/reports');
 const arPipelineRoutes = require('./routes/arPipeline');
+const vendhqRegistersRoutes = require('./routes/vendhqRegisters');
 
 const { errorHandler } = require('./middleware/errorHandler');
 const { requestLogger } = require('./middleware/requestLogger');
@@ -94,6 +95,7 @@ app.use('/api/vend-receipt', vendReceiptRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/ar-pipeline', arPipelineRoutes);
+app.use('/api/vendhq-registers', vendhqRegistersRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {

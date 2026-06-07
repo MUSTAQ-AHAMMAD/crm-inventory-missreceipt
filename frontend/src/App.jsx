@@ -19,6 +19,7 @@ import ArInvoiceDetailPage from './pages/ArInvoiceDetailPage'
 import VendInvoicePage from './pages/VendInvoicePage'
 import VendSalesMetadataPage from './pages/VendSalesMetadataPage'
 import VendReceiptPage from './pages/VendReceiptPage'
+import VendhqRegistersPage from './pages/VendhqRegistersPage'
 import UserManagementPage from './pages/UserManagementPage'
 import ReportsPage from './pages/ReportsPage'
 import FailureDetailsPage from './pages/FailureDetailsPage'
@@ -76,6 +77,7 @@ export default function App() {
             <Route path="vend-invoice" element={<VendInvoicePage />} />
             <Route path="vend-sales-metadata" element={<VendSalesMetadataPage />} />
             <Route path="vend-receipt" element={<VendReceiptPage />} />
+            <Route path="vendhq-registers" element={<VendhqRegistersPage />} />
             <Route
               path="admin/users"
               element={
