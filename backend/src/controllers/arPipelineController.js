@@ -22,10 +22,11 @@ const axios = require('axios');
 const pLimit = require('p-limit');
 const pRetry = require('p-retry');
 
-const CONCURRENT_REQUESTS = 3;
+const CONCURRENT_REQUESTS = 2;
 const MAX_RETRIES = 2;
 const RETRY_MIN_TIMEOUT = 2000;
 const RETRY_MAX_TIMEOUT = 8000;
+const ORACLE_INVOICE_TIMEOUT = 120000; // Oracle AR invoice creation can take up to 2 minutes
 
 // SOAP namespaces (same as applyReceiptController)
 const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
@@ -694,7 +695,7 @@ async function createInvoiceBatch(req, res, next) {
             data: {
               userId:         req.user.id,
               batchId:        batch.id,
-              payloadJson:    JSON.stringify(payload, null, 2),
+              payloadJson:    JSON.stringify(payload),
               responseStatus: 'PROCESSING',
             },
           });
@@ -713,7 +714,7 @@ async function createInvoiceBatch(req, res, next) {
                     Accept:         'application/json',
                     Authorization:  `Basic ${oracleAuth}`,
                   },
-                  timeout:        30000,
+                  timeout:        ORACLE_INVOICE_TIMEOUT,
                   validateStatus: () => true,
                 });
                 if (r.status >= 500) throw new Error(`HTTP ${r.status}`);
@@ -740,7 +741,7 @@ async function createInvoiceBatch(req, res, next) {
             data: {
               responseStatus,
               responseMessage,
-              responseBody: oracleData ? JSON.stringify(oracleData, null, 2) : responseMessage,
+              responseBody: oracleData ? JSON.stringify(oracleData) : responseMessage,
               httpStatus,
             },
           });
