@@ -413,6 +413,29 @@ async function upload(req, res, next) {
           responseLogs.push(logLine);
           console.log(`✅ ${logLine}`);
 
+          // Persist successful receipt to FusionStandardReceipt so the AR pipeline
+          // can match it against invoices (getSummary / getPendingApply queries this table).
+          await prisma.fusionStandardReceipt.create({
+            data: {
+              requestId:           uploadRecord.id,
+              status:              'Success',
+              message:             null,
+              requestDate:         new Date(),
+              currencyCode:        row.CurrencyCode,
+              receiptDate:         row.ReceiptDate ? new Date(row.ReceiptDate) : null,
+              glDate:              row.ReceiptDate ? new Date(row.ReceiptDate) : null,
+              depositDate:         row.ReceiptDate ? new Date(row.ReceiptDate) : null,
+              receiptNumber:       row.ReceiptNumber,
+              receiptMethodId:     row.ReceiptMethodId || null,
+              remittanceBankAccId: row.RemittanceBankAccountId || null,
+              customerId:          row.CustomerId || null,
+              orgId:               row.OrgId || null,
+              amount:              parseFloat(row.Amount) || null,
+              region:              'SA',
+              integMode:           'MANUAL',
+            },
+          });
+
         } catch (error) {
           failureCount++;
           const errorMessage = error.message || 'Unknown error';
@@ -431,6 +454,21 @@ async function upload(req, res, next) {
           const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED: ${snippet(errorMessage)} | Receipt: ${row.ReceiptNumber}`;
           responseLogs.push(logLine);
           console.error(`❌ ${logLine}`);
+
+          // Persist failed receipt to FusionStandardReceipt so the AR pipeline
+          // has a complete record of all attempted receipts.
+          await prisma.fusionStandardReceipt.create({
+            data: {
+              requestId:    uploadRecord.id,
+              status:       'Failed',
+              message:      errorMessage.substring(0, 500),
+              requestDate:  new Date(),
+              receiptNumber: row.ReceiptNumber,
+              amount:       parseFloat(row.Amount) || null,
+              region:       'SA',
+              integMode:    'MANUAL',
+            },
+          });
         }
       });
     });
