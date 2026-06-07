@@ -854,14 +854,56 @@ async function getInvoiceBatchProgress(req, res, next) {
 
     const processed = batch.successCount + batch.failureCount;
 
+    // When the batch has finished (not still PROCESSING), include per-invoice
+    // details so the frontend can display individual success/failure rows.
+    let invoiceResults = null;
+    if (batch.status !== 'PROCESSING') {
+      const uploads = await prisma.arInvoiceUpload.findMany({
+        where: { batchId },
+        select: {
+          id: true,
+          responseStatus: true,
+          responseMessage: true,
+          responseBody: true,
+          payloadJson: true,
+        },
+        orderBy: { id: 'asc' },
+      });
+
+      invoiceResults = uploads.map((u, i) => {
+        let customerName = null;
+        let date = null;
+        let txnNumber = null;
+        try {
+          const payload = JSON.parse(u.payloadJson || '{}');
+          customerName = payload.BillToCustomerName || null;
+          date = payload.TransactionDate || null;
+        } catch { /* ignore */ }
+        try {
+          const body = JSON.parse(u.responseBody || '{}');
+          txnNumber = body.TransactionNumber != null ? String(body.TransactionNumber) : null;
+        } catch { /* ignore */ }
+        return {
+          index: i,
+          uploadId: u.id,
+          customerName,
+          date,
+          txnNumber,
+          status:  u.responseStatus || 'FAILED',
+          message: u.responseMessage || null,
+        };
+      });
+    }
+
     return res.json({
-      batchId:      batch.id,
-      totalRecords: batch.totalRecords,
-      successCount: batch.successCount,
-      failureCount: batch.failureCount,
+      batchId:        batch.id,
+      totalRecords:   batch.totalRecords,
+      successCount:   batch.successCount,
+      failureCount:   batch.failureCount,
       processed,
-      status:       batch.status,
-      message:      batch.message,
+      status:         batch.status,
+      message:        batch.message,
+      invoiceResults,
     });
   } catch (err) {
     next(err);

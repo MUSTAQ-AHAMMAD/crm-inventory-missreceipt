@@ -655,13 +655,13 @@ export default function ArPipelinePage() {
   // When batch finishes, update s1 state
   useEffect(() => {
     if (!batchProgress || s1.status !== 'creating') return
-    const { status, successCount, failureCount, totalRecords } = batchProgress
+    const { status, successCount, failureCount, totalRecords, invoiceResults } = batchProgress
     if (status === 'PROCESSING') return
     const newStatus = failureCount === 0 ? 'done' : successCount === 0 ? 'error' : 'partial'
     setS1(prev => ({
       ...prev,
       status: newStatus,
-      createResults: { total: totalRecords, successCount, failureCount },
+      createResults: { total: totalRecords, successCount, failureCount, invoiceResults: invoiceResults || null },
       error: failureCount > 0 && successCount === 0 ? `All ${failureCount} invoices failed.` : '',
     }))
     refetchSummary()
@@ -1021,10 +1021,66 @@ export default function ArPipelinePage() {
                     ? `❌ All ${s1.createResults.failureCount} invoices failed`
                     : `⚠️ ${s1.createResults.successCount} created, ${s1.createResults.failureCount} failed`}
                 </p>
-                <p className="text-xs text-gray-600 mt-1">
-                  Transaction numbers are now available for receipt generation → proceed to Step 2.
-                </p>
+                {s1.createResults.successCount > 0 && (
+                  <p className="text-xs text-gray-600 mt-1">
+                    Transaction numbers are now available for receipt generation → proceed to Step 2.
+                  </p>
+                )}
               </div>
+
+              {/* Per-invoice detailed results */}
+              {s1.createResults.invoiceResults && s1.createResults.invoiceResults.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                    Invoice Creation Report ({s1.createResults.invoiceResults.length} invoices)
+                  </p>
+                  <div className="overflow-x-auto rounded-lg border border-gray-200">
+                    <table className="w-full text-xs">
+                      <thead className="bg-gray-50 text-gray-500 uppercase">
+                        <tr>
+                          <th className="px-3 py-2 text-left">#</th>
+                          <th className="px-3 py-2 text-left">Customer</th>
+                          <th className="px-3 py-2 text-left">Date</th>
+                          <th className="px-3 py-2 text-left">Txn #</th>
+                          <th className="px-3 py-2 text-left">Status</th>
+                          <th className="px-3 py-2 text-left">Details</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {s1.createResults.invoiceResults.map((r) => (
+                          <tr key={r.index} className={`hover:bg-gray-50 ${r.status === 'FAILED' ? 'bg-red-50' : ''}`}>
+                            <td className="px-3 py-2 text-gray-400">{r.index + 1}</td>
+                            <td className="px-3 py-2 font-medium text-gray-800 max-w-[180px] truncate">{r.customerName || '—'}</td>
+                            <td className="px-3 py-2 text-gray-500">{r.date || '—'}</td>
+                            <td className="px-3 py-2 font-mono font-semibold text-blue-700">{r.txnNumber || '—'}</td>
+                            <td className="px-3 py-2">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                r.status === 'SUCCESS' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                              }`}>
+                                {r.status === 'SUCCESS' ? '✓ Created' : '✗ Failed'}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2 text-gray-500 max-w-[200px] truncate" title={r.message || ''}>
+                              {r.status === 'FAILED' ? (
+                                <span className="text-red-600">{r.message || 'Unknown error'}</span>
+                              ) : r.uploadId ? (
+                                <Link to={`/ar-invoice/uploads/${r.uploadId}`} className="text-blue-600 hover:underline">
+                                  View details →
+                                </Link>
+                              ) : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="text-right">
+                    <Link to="/ar-invoice/response" className="text-xs text-blue-600 hover:underline">
+                      View all AR Invoice responses in database →
+                    </Link>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

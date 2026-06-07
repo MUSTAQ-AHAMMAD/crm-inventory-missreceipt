@@ -243,4 +243,67 @@ describe('vendInvoiceController', () => {
       SalesOrder: 'RASHIDMAD2/4014',
     });
   });
+
+  test('divides Subtotal w/o Tax by Base Quantity to produce UnitSellingPrice', async () => {
+    XLSX.utils.sheet_to_json
+      .mockImplementationOnce(() => ([
+        { Store: 'REDSEA', 'Subinventory code': 'REDSEA', Branch: 'Red Sea Mall', 'Payment Method': 'Cash' },
+      ]))
+      .mockImplementationOnce(() => ([
+        {
+          'Order Lines/Order Ref': 'REDSEA/12345',
+          'Order Lines/Order Ref/Date': '2025-01-31',
+          'Order Lines/Product Barcode': '9999000000001',
+          'Order Lines/Product': 'Test Product',
+          'Order Lines/Base Quantity': 3,
+          'Order Lines/Subtotal w/o Tax': 150,
+        },
+        // YASMEEN-style Tax Excl. column (trailing period)
+        {
+          'Order Lines/Order Ref': 'REDSEA/12345',
+          'Order Lines/Order Ref/Date': '2025-01-31',
+          'Order Lines/Product Barcode': '9999000000002',
+          'Order Lines/Product': 'Another Product',
+          'Order Lines/Base Quantity': 2,
+          'Order Lines/Tax Excl.': 278.26,
+        },
+      ]));
+
+    fusionMetadataService.findByCustomerType.mockResolvedValue({
+      billToName: 'Red Sea Mall Customer',
+      billToAccount: 14,
+      siteNumber: '14',
+    });
+    fusionMetadataService.mapToArInvoiceHeader.mockReturnValue({
+      BillToCustomerName: 'Red Sea Mall Customer',
+      BillToCustomerNumber: '14',
+      BillToSite: '14',
+    });
+
+    const req = {
+      files: {
+        paymentLines: { name: 'payment.xlsx', data: Buffer.from('payment') },
+        salesLines: { name: 'sales.xlsx', data: Buffer.from('sales') },
+      },
+    };
+    const res = { json: jest.fn(), status: jest.fn().mockReturnThis() };
+    const next = jest.fn();
+
+    await uploadVendInvoice(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(res.status).not.toHaveBeenCalled();
+    const response = res.json.mock.calls[0][0];
+    const allPayloads = [...(response.positivePayloads || []), ...(response.negativePayloads || [])];
+    expect(allPayloads).toHaveLength(1);
+
+    const lines = allPayloads[0].receivablesInvoiceLines;
+    expect(lines).toHaveLength(2);
+
+    // Line 1: Subtotal w/o Tax = 150, Qty = 3 → UnitSellingPrice = 50
+    expect(lines[0]).toMatchObject({ Quantity: 3, UnitSellingPrice: 50 });
+
+    // Line 2: Tax Excl. = 278.26, Qty = 2 → UnitSellingPrice = 139.13
+    expect(lines[1]).toMatchObject({ Quantity: 2, UnitSellingPrice: 139.13 });
+  });
 });
