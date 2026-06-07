@@ -9,10 +9,10 @@ const prisma = require('../services/prisma');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
 // Required CSV columns (OrgId is required in CSV but value is ignored - static value used instead)
+// DepositDate removed: Java FusionMiscReceiptTransform only sets ReceiptDate and GlDate
 const REQUIRED_FIELDS = [
   'Amount',
   'CurrencyCode',
-  'DepositDate',
   'ReceiptDate',
   'GlDate',
   'OrgId',
@@ -32,6 +32,7 @@ const SOAP_ENV_NS    = 'http://schemas.xmlsoap.org/soap/envelope/';
 const SOAP_TYPES_NS  = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/types/';
 const SOAP_COMMON_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
 const SOAP_MIS_NS    = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/model/flex/MiscellaneousReceiptDff/';
+const SOAP_ADF_NS    = 'http://xmlns.oracle.com/adf/svc/types/';
 const REQUIRED_CURRENCY = 'SAR';
 
 const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 3;
@@ -107,7 +108,6 @@ function normalizeRow(row) {
     CurrencyCode: REQUIRED_CURRENCY,
     ReceiptNumber: String(row.ReceiptNumber ?? '').trim(),
     ReceiptDate: normalizeDate(row.ReceiptDate, 'ReceiptDate'),
-    DepositDate: normalizeDate(row.DepositDate, 'DepositDate'),
     GlDate: normalizeDate(row.GlDate, 'GlDate'),
     ReceiptMethodName: row.ReceiptMethodName ? String(row.ReceiptMethodName).trim() : undefined,
     ReceivableActivityName: String(row.ReceivableActivityName ?? '').trim(),
@@ -145,7 +145,7 @@ function generateSoapEnvelope(row) {
   // Validate all required fields are present
   const requiredFields = [
     'Amount', 'CurrencyCode', 'ReceiptNumber', 'ReceiptDate',
-    'DepositDate', 'GlDate', 'ReceivableActivityName',
+    'GlDate', 'ReceivableActivityName',
     'BankAccountName', 'OrgId',
   ];
 
@@ -163,16 +163,19 @@ function generateSoapEnvelope(row) {
 <soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
   xmlns:typ="${SOAP_TYPES_NS}"
   xmlns:com="${SOAP_COMMON_NS}"
-  xmlns:mis="${SOAP_MIS_NS}">
+  xmlns:mis="${SOAP_MIS_NS}"
+  xmlns:adf="${SOAP_ADF_NS}">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:createMiscellaneousReceipt>
       <typ:miscellaneousReceipt>
-        <com:Amount>${escapeXml(row.Amount)}</com:Amount>
+        <com:Amount>
+          <adf:Value>${escapeXml(row.Amount)}</adf:Value>
+          <adf:CurrencyCode>${escapeXml(row.CurrencyCode)}</adf:CurrencyCode>
+        </com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
-        <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
         <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
 ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
         <com:BankAccountName>${escapeXml(row.BankAccountName)}</com:BankAccountName>
@@ -485,7 +488,7 @@ async function getUploadProgress(req, res, next) {
  */
 function downloadTemplate(_req, res) {
   const header = TEMPLATE_FIELDS.join(',');
-  const sample = '-100.00,SAR,2024-01-20,2024-01-20,2024-01-20,300000001421038,REC001,Bank Charge,AL Jazeerah Bank Example Account - Acc # 015795017321006';
+  const sample = '-100.00,SAR,2024-01-20,2024-01-20,300000001421038,REC001,Bank Charge,AL Jazeerah Bank Example Account - Acc # 015795017321006';
   const BOM = '\uFEFF';
   const csv = `${BOM}${header}\n${sample}\n`;
 

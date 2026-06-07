@@ -33,7 +33,7 @@ describe('Misc Receipt Controller', () => {
       // Check headers
       expect(response.text).toContain('Amount');
       expect(response.text).toContain('CurrencyCode');
-      expect(response.text).toContain('DepositDate');
+      expect(response.text).not.toContain('DepositDate');
       expect(response.text).toContain('ReceiptDate');
       expect(response.text).toContain('GlDate');
       expect(response.text).toContain('OrgId');
@@ -61,8 +61,8 @@ describe('Misc Receipt Controller', () => {
 
   describe('CSV Validation', () => {
     test('should validate all required fields are present in headers', () => {
-      const csvWithMissingHeaders = `Amount,CurrencyCode,DepositDate
--100,SAR,2024-01-20`;
+      const csvWithMissingHeaders = `Amount,CurrencyCode
+-100,SAR`;
 
       const records = parse(csvWithMissingHeaders, {
         columns: true,
@@ -74,7 +74,6 @@ describe('Misc Receipt Controller', () => {
       const requiredFields = [
         'Amount',
         'CurrencyCode',
-        'DepositDate',
         'ReceiptDate',
         'GlDate',
         'OrgId',
@@ -93,9 +92,9 @@ describe('Misc Receipt Controller', () => {
     });
 
     test('should validate required values are not empty', () => {
-      const csvWithEmptyValues = `Amount,CurrencyCode,DepositDate,ReceiptDate,GlDate,OrgId,ReceiptNumber,ReceivableActivityName,BankAccountName
--100,SAR,,2024-01-20,2024-01-20,101,REC001,Misc Activity,123456789
-,SAR,2024-01-20,2024-01-20,2024-01-20,101,REC002,Misc Activity,123456789`;
+      const csvWithEmptyValues = `Amount,CurrencyCode,ReceiptDate,GlDate,OrgId,ReceiptNumber,ReceivableActivityName,BankAccountName
+-100,SAR,,2024-01-20,101,REC001,Misc Activity,123456789
+,SAR,2024-01-20,2024-01-20,101,REC002,Misc Activity,123456789`;
 
       const records = parse(csvWithEmptyValues, {
         columns: true,
@@ -106,7 +105,6 @@ describe('Misc Receipt Controller', () => {
       const requiredFields = [
         'Amount',
         'CurrencyCode',
-        'DepositDate',
         'ReceiptDate',
         'GlDate',
         'OrgId',
@@ -122,7 +120,7 @@ describe('Misc Receipt Controller', () => {
           value === undefined || value === null || String(value).trim() === ''
         );
       });
-      expect(missingValues).toContain('DepositDate');
+      expect(missingValues).toContain('ReceiptDate');
 
       // Check row 2 (index 1)
       missingValues = requiredFields.filter((field) => {
@@ -301,22 +299,26 @@ describe('Misc Receipt Controller', () => {
           .replace(/'/g, '&apos;');
       };
 
+      const SOAP_ADF_NS = 'http://xmlns.oracle.com/adf/svc/types/';
+
       const generateSoapEnvelope = (row) => {
         const receiptMethodNameTag = row.ReceiptMethodName
           ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
           : '';
 
         return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/" xmlns:com="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/">
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/" xmlns:com="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/" xmlns:adf="${SOAP_ADF_NS}">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:createMiscellaneousReceipt>
       <com:MiscellaneousReceipt>
-        <com:Amount>${escapeXml(row.Amount)}</com:Amount>
+        <com:Amount>
+          <adf:Value>${escapeXml(row.Amount)}</adf:Value>
+          <adf:CurrencyCode>${escapeXml(row.CurrencyCode)}</adf:CurrencyCode>
+        </com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
-        <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
         <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
 ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
         <com:BankAccountName>${escapeXml(row.BankAccountName)}</com:BankAccountName>
@@ -332,7 +334,6 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
         CurrencyCode: 'SAR',
         ReceiptNumber: 'REC001',
         ReceiptDate: '2024-01-20',
-        DepositDate: '2024-01-20',
         GlDate: '2024-01-20',
         ReceivableActivityName: 'Misc Activity',
         BankAccountName: '123456789',
@@ -344,9 +345,10 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
       expect(xml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
       expect(xml).toContain('<soapenv:Envelope');
       expect(xml).toContain('<typ:createMiscellaneousReceipt>');
-      expect(xml).toContain('<com:Amount>-100.00</com:Amount>');
+      expect(xml).toContain('<adf:Value>-100.00</adf:Value>');
       expect(xml).toContain('<com:CurrencyCode>SAR</com:CurrencyCode>');
       expect(xml).toContain('<com:ReceiptNumber>REC001</com:ReceiptNumber>');
+      expect(xml).not.toContain('<com:DepositDate>');
       expect(xml).toContain('</soapenv:Envelope>');
     });
 
@@ -378,22 +380,26 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
           .replace(/'/g, '&apos;');
       };
 
+      const SOAP_ADF_NS = 'http://xmlns.oracle.com/adf/svc/types/';
+
       const generateSoapEnvelope = (row) => {
         const receiptMethodNameTag = row.ReceiptMethodName
           ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
           : '';
 
         return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/" xmlns:com="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/">
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/" xmlns:com="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/" xmlns:adf="${SOAP_ADF_NS}">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:createMiscellaneousReceipt>
       <com:MiscellaneousReceipt>
-        <com:Amount>${escapeXml(row.Amount)}</com:Amount>
+        <com:Amount>
+          <adf:Value>${escapeXml(row.Amount)}</adf:Value>
+          <adf:CurrencyCode>${escapeXml(row.CurrencyCode)}</adf:CurrencyCode>
+        </com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
-        <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
         <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
 ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
         <com:BankAccountName>${escapeXml(row.BankAccountName)}</com:BankAccountName>
@@ -409,7 +415,6 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
         CurrencyCode: 'SAR',
         ReceiptNumber: 'REC001',
         ReceiptDate: '2024-01-20',
-        DepositDate: '2024-01-20',
         GlDate: '2024-01-20',
         ReceiptMethodName: 'Credit Card',
         ReceivableActivityName: 'Misc Activity',
