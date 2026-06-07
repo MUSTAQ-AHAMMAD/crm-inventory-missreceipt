@@ -315,7 +315,7 @@ async function createInvoice(req, res, next) {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        timeout: 30000, // 30 seconds
+        timeout: 120000, // Oracle AR invoice creation can take up to 2 minutes
       });
 
       httpStatus = response.status;
