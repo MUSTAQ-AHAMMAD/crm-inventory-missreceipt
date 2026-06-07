@@ -794,7 +794,6 @@ async function createInvoiceBatch(req, res, next) {
                     salesOrder:       line.SalesOrder        ?? null,
                     region:           'SA',
                   })),
-                  skipDuplicates: true,
                 });
               }
             }
