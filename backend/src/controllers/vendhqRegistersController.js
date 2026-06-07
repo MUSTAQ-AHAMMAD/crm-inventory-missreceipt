@@ -3,8 +3,7 @@
  * Exposes list, create, update, and delete endpoints.
  */
 
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const prisma = require('../services/prisma');
 
 /**
  * GET /api/vendhq-registers
