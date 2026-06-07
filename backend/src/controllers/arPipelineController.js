@@ -723,9 +723,8 @@ async function createInvoiceBatch(req, res, next) {
       const tasks = payloads.map((payload, i) =>
         limit(async () => {
           // Use the pre-created record if available; otherwise create it now as a fallback.
-          let uploadRecord = uploadRecordResults[i]?.status === 'fulfilled'
-            ? uploadRecordResults[i].value
-            : null;
+          const preCreated = uploadRecordResults[i];
+          let uploadRecord = preCreated?.status === 'fulfilled' ? preCreated.value : null;
 
           if (!uploadRecord) {
             try {
