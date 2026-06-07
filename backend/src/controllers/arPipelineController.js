@@ -859,8 +859,14 @@ async function getInvoiceBatchProgress(req, res, next) {
     let invoiceResults = null;
     if (batch.status !== 'PROCESSING') {
       const uploads = await prisma.arInvoiceUpload.findMany({
-        where:   { batchId },
-        select:  { id: true, responseStatus: true, responseMessage: true, responseBody: true, payloadJson: true },
+        where: { batchId },
+        select: {
+          id: true,
+          responseStatus: true,
+          responseMessage: true,
+          responseBody: true,
+          payloadJson: true,
+        },
         orderBy: { id: 'asc' },
       });
 
