@@ -1,6 +1,7 @@
 /**
  * Standard Receipt Controller Tests
  * Tests CSV parsing, validation, normalization, and upload flow
+ * (SOAP-based: uses numeric Oracle IDs instead of name-based REST fields)
  */
 
 const request = require('supertest');
@@ -9,7 +10,7 @@ const { parse } = require('csv-parse/sync');
 
 // Import the controller functions
 const {
-  previewPayload,
+  previewXml,
   downloadTemplate,
 } = require('../controllers/standardReceiptController');
 
@@ -33,17 +34,23 @@ describe('Standard Receipt Controller', () => {
       // Check for UTF-8 BOM
       expect(response.text).toMatch(/^\uFEFF/);
 
-      // Check headers
+      // Check SOAP-based headers (numeric ID fields)
       expect(response.text).toContain('ReceiptNumber');
-      expect(response.text).toContain('ReceiptMethod');
       expect(response.text).toContain('ReceiptDate');
-      expect(response.text).toContain('BusinessUnit');
-      expect(response.text).toContain('CustomerAccountNumber');
-      expect(response.text).toContain('CustomerSite');
       expect(response.text).toContain('Amount');
-      expect(response.text).toContain('Currency');
-      expect(response.text).toContain('RemittanceBankAccountNumber');
-      expect(response.text).toContain('AccountingDate');
+      expect(response.text).toContain('CurrencyCode');
+      expect(response.text).toContain('ReceiptMethodId');
+      expect(response.text).toContain('RemittanceBankAccountId');
+      expect(response.text).toContain('CustomerId');
+      expect(response.text).toContain('OrgId');
+
+      // Old REST-only fields must NOT appear
+      expect(response.text).not.toContain('ReceiptMethod,');
+      expect(response.text).not.toContain('BusinessUnit');
+      expect(response.text).not.toContain('CustomerAccountNumber');
+      expect(response.text).not.toContain('CustomerSite');
+      expect(response.text).not.toContain('RemittanceBankAccountNumber');
+      expect(response.text).not.toContain('AccountingDate');
 
       // Check sample data
       expect(response.text).toContain('Visa-BLK-ALAR-00000008');
@@ -64,8 +71,8 @@ describe('Standard Receipt Controller', () => {
 
   describe('CSV Validation', () => {
     test('should validate all required fields are present in headers', () => {
-      const csvWithMissingHeaders = `ReceiptNumber,ReceiptMethod,ReceiptDate
-Visa-001,Visa,2026-03-05`;
+      const csvWithMissingHeaders = `ReceiptNumber,ReceiptDate
+Visa-001,2026-03-05`;
 
       const records = parse(csvWithMissingHeaders, {
         columns: true,
@@ -76,15 +83,13 @@ Visa-001,Visa,2026-03-05`;
       const headers = Object.keys(records[0] || {});
       const requiredFields = [
         'ReceiptNumber',
-        'ReceiptMethod',
         'ReceiptDate',
-        'BusinessUnit',
-        'CustomerAccountNumber',
-        'CustomerSite',
         'Amount',
-        'Currency',
-        'RemittanceBankAccountNumber',
-        'AccountingDate',
+        'CurrencyCode',
+        'ReceiptMethodId',
+        'RemittanceBankAccountId',
+        'CustomerId',
+        'OrgId',
       ];
 
       const missingHeaders = requiredFields.filter(
@@ -92,14 +97,14 @@ Visa-001,Visa,2026-03-05`;
       );
 
       expect(missingHeaders.length).toBeGreaterThan(0);
-      expect(missingHeaders).toContain('BusinessUnit');
+      expect(missingHeaders).toContain('OrgId');
       expect(missingHeaders).toContain('Amount');
     });
 
     test('should validate required values are not empty', () => {
-      const csvWithEmptyValues = `ReceiptNumber,ReceiptMethod,ReceiptDate,BusinessUnit,CustomerAccountNumber,CustomerSite,Amount,Currency,RemittanceBankAccountNumber,AccountingDate
-Visa-001,,2026-03-05,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03-05
-Visa-002,Visa,,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03-05`;
+      const csvWithEmptyValues = `ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RemittanceBankAccountId,CustomerId,OrgId
+Visa-001,2026-03-05,422,SAR,,987654321,300000001234567,300000001421038
+Visa-002,,422,SAR,123456789,987654321,300000001234567,300000001421038`;
 
       const records = parse(csvWithEmptyValues, {
         columns: true,
@@ -109,27 +114,25 @@ Visa-002,Visa,,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03
 
       const requiredFields = [
         'ReceiptNumber',
-        'ReceiptMethod',
         'ReceiptDate',
-        'BusinessUnit',
-        'CustomerAccountNumber',
-        'CustomerSite',
         'Amount',
-        'Currency',
-        'RemittanceBankAccountNumber',
-        'AccountingDate',
+        'CurrencyCode',
+        'ReceiptMethodId',
+        'RemittanceBankAccountId',
+        'CustomerId',
+        'OrgId',
       ];
 
-      // Check row 1 (index 0)
+      // Check row 1 (index 0) – empty ReceiptMethodId
       let missingValues = requiredFields.filter((field) => {
         const value = records[0][field];
         return (
           value === undefined || value === null || String(value).trim() === ''
         );
       });
-      expect(missingValues).toContain('ReceiptMethod');
+      expect(missingValues).toContain('ReceiptMethodId');
 
-      // Check row 2 (index 1)
+      // Check row 2 (index 1) – empty ReceiptDate
       missingValues = requiredFields.filter((field) => {
         const value = records[1][field];
         return (
@@ -300,7 +303,7 @@ Visa-002,Visa,,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03
   });
 
   describe('Full Record Normalization', () => {
-    test('should normalize a complete valid record', () => {
+    test('should normalize a complete valid record with SOAP numeric ID fields', () => {
       const normalizeDate = (raw, fieldName) => {
         const value = String(raw ?? '').trim();
         if (!value) throw new Error(`${fieldName} is required`);
@@ -329,49 +332,51 @@ Visa-002,Visa,,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03
 
       const normalizeRow = (row) => {
         return {
-          ReceiptNumber: String(row.ReceiptNumber ?? '').trim(),
-          ReceiptMethod: String(row.ReceiptMethod ?? '').trim(),
-          ReceiptDate: normalizeDate(row.ReceiptDate, 'ReceiptDate'),
-          BusinessUnit: String(row.BusinessUnit ?? '').trim(),
-          CustomerAccountNumber: String(
-            row.CustomerAccountNumber ?? ''
-          ).trim(),
-          CustomerSite: String(row.CustomerSite ?? '').trim(),
-          Amount: normalizeAmount(row.Amount),
-          Currency: String(row.Currency ?? '').trim().toUpperCase(),
-          RemittanceBankAccountNumber: String(
-            row.RemittanceBankAccountNumber ?? ''
-          ).trim(),
-          AccountingDate: normalizeDate(row.AccountingDate, 'AccountingDate'),
+          ReceiptNumber:           String(row.ReceiptNumber           ?? '').trim(),
+          ReceiptDate:             normalizeDate(row.ReceiptDate, 'ReceiptDate'),
+          Amount:                  normalizeAmount(row.Amount),
+          CurrencyCode:            String(row.CurrencyCode            ?? '').trim().toUpperCase(),
+          ReceiptMethodId:         String(row.ReceiptMethodId         ?? '').trim(),
+          RemittanceBankAccountId: String(row.RemittanceBankAccountId ?? '').trim(),
+          CustomerId:              String(row.CustomerId              ?? '').trim(),
+          OrgId:                   String(row.OrgId                   ?? '').trim(),
         };
       };
 
       const testRow = {
-        ReceiptNumber: 'Visa-BLK-ALAR-00000008',
-        ReceiptMethod: 'Visa',
-        ReceiptDate: '2026-03-05',
-        BusinessUnit: 'AlQurashi-KSA',
-        CustomerAccountNumber: '116012',
-        CustomerSite: '100005',
-        Amount: '422',
-        Currency: 'sar',
-        RemittanceBankAccountNumber: '157-95017321-ALARIDAH',
-        AccountingDate: '05-03-2026',
+        ReceiptNumber:           'Visa-BLK-ALAR-00000008',
+        ReceiptDate:             '2026-03-05',
+        Amount:                  '422',
+        CurrencyCode:            'sar',
+        ReceiptMethodId:         '123456789',
+        RemittanceBankAccountId: '987654321',
+        CustomerId:              '300000001234567',
+        OrgId:                   '05-03-2026',  // date-format input for OrgId is unusual but tests normalizeDate
       };
 
-      const normalized = normalizeRow(testRow);
+      // OrgId is a numeric string in real usage; for date normalization test, override
+      const testRowWithDate = { ...testRow, OrgId: '300000001421038' };
+      const testRowForDateConversion = { ...testRow, ReceiptDate: '05-03-2026' };
+
+      const normalized = normalizeRow(testRowWithDate);
 
       expect(normalized.ReceiptNumber).toBe('Visa-BLK-ALAR-00000008');
-      expect(normalized.Currency).toBe('SAR'); // uppercase
-      expect(normalized.AccountingDate).toBe('2026-03-05'); // converted from DD-MM-YYYY
+      expect(normalized.CurrencyCode).toBe('SAR'); // uppercased
+      expect(normalized.ReceiptMethodId).toBe('123456789');
+      expect(normalized.RemittanceBankAccountId).toBe('987654321');
+      expect(normalized.CustomerId).toBe('300000001234567');
+      expect(normalized.OrgId).toBe('300000001421038');
+
+      const normalizedDateConversion = normalizeRow(testRowForDateConversion);
+      expect(normalizedDateConversion.ReceiptDate).toBe('2026-03-05'); // converted from DD-MM-YYYY
     });
   });
 
   describe('CSV Parsing with BOM', () => {
     test('should handle UTF-8 BOM correctly', () => {
       const BOM = '\uFEFF';
-      const csvWithBOM = `${BOM}ReceiptNumber,ReceiptMethod,ReceiptDate,BusinessUnit,CustomerAccountNumber,CustomerSite,Amount,Currency,RemittanceBankAccountNumber,AccountingDate
-Visa-BLK-ALAR-00000008,Visa,2026-03-05,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03-05`;
+      const csvWithBOM = `${BOM}ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RemittanceBankAccountId,CustomerId,OrgId
+Visa-BLK-ALAR-00000008,2026-03-05,422.00,SAR,123456789,987654321,300000001234567,300000001421038`;
 
       const records = parse(csvWithBOM, {
         columns: true,
@@ -400,7 +405,7 @@ Visa-BLK-ALAR-00000008,Visa,2026-03-05,AlQurashi-KSA,116012,100005,422,SAR,157-9
     });
 
     test('should handle CSV with only headers', () => {
-      const headersOnly = `ReceiptNumber,ReceiptMethod,ReceiptDate,BusinessUnit,CustomerAccountNumber,CustomerSite,Amount,Currency,RemittanceBankAccountNumber,AccountingDate`;
+      const headersOnly = `ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RemittanceBankAccountId,CustomerId,OrgId`;
 
       const records = parse(headersOnly, {
         columns: true,
@@ -412,8 +417,8 @@ Visa-BLK-ALAR-00000008,Visa,2026-03-05,AlQurashi-KSA,116012,100005,422,SAR,157-9
     });
 
     test('should handle whitespace in values', () => {
-      const csvWithWhitespace = `ReceiptNumber,ReceiptMethod,ReceiptDate,BusinessUnit,CustomerAccountNumber,CustomerSite,Amount,Currency,RemittanceBankAccountNumber,AccountingDate
-  Visa-001  ,  Visa  ,  2026-03-05  ,  AlQurashi-KSA  ,  116012  ,  100005  ,  422  ,  SAR  ,  157-95017321-ALARIDAH  ,  2026-03-05  `;
+      const csvWithWhitespace = `ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RemittanceBankAccountId,CustomerId,OrgId
+  Visa-001  ,  2026-03-05  ,  422  ,  SAR  ,  123456789  ,  987654321  ,  300000001234567  ,  300000001421038  `;
 
       const records = parse(csvWithWhitespace, {
         columns: true,
@@ -422,12 +427,12 @@ Visa-BLK-ALAR-00000008,Visa,2026-03-05,AlQurashi-KSA,116012,100005,422,SAR,157-9
       });
 
       expect(records[0].ReceiptNumber).toBe('Visa-001');
-      expect(records[0].ReceiptMethod).toBe('Visa');
+      expect(records[0].ReceiptMethodId).toBe('123456789');
     });
 
-    test('should handle special characters and Arabic text', () => {
-      const csvWithArabic = `ReceiptNumber,ReceiptMethod,ReceiptDate,BusinessUnit,CustomerAccountNumber,CustomerSite,Amount,Currency,RemittanceBankAccountNumber,AccountingDate
-Visa-العربية-001,Visa,2026-03-05,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03-05`;
+    test('should handle special characters and Arabic text in ReceiptNumber', () => {
+      const csvWithArabic = `ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RemittanceBankAccountId,CustomerId,OrgId
+Visa-العربية-001,2026-03-05,422,SAR,123456789,987654321,300000001234567,300000001421038`;
 
       const records = parse(csvWithArabic, {
         columns: true,
@@ -440,3 +445,4 @@ Visa-العربية-001,Visa,2026-03-05,AlQurashi-KSA,116012,100005,422,SAR,157-
     });
   });
 });
+
