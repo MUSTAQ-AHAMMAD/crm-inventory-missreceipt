@@ -1,47 +1,53 @@
 /**
- * Standard Receipt controller.
- * Transforms CSV rows into REST payloads and sends them to Oracle's
- * standardReceipts REST endpoint.
+ * Standard Receipt controller - migrated to SOAP to match Java FusionReceiptClient.
+ * Transforms CSV rows into SOAP envelopes and sends them to Oracle's
+ * StandardReceiptService (createStandardReceipt operation).
+ *
+ * Field mapping from Java StandardReceiptRequest:
+ *   ReceiptNumber           - unique receipt identifier
+ *   ReceiptDate             - receipt date (also used for GlDate and DepositDate)
+ *   Amount                  - receipt amount (positive)
+ *   CurrencyCode            - ISO currency code (e.g. SAR)
+ *   ReceiptMethodId         - numeric payment method ID from Oracle Fusion
+ *   RemittanceBankAccountId - numeric bank / cash account ID from Oracle Fusion
+ *   CustomerId              - numeric customer party ID from Oracle Fusion
+ *   OrgId                   - numeric Oracle Fusion business unit / org ID
  */
 
 const { parse } = require('csv-parse/sync');
-const axios = require('axios');
 const pLimit = require('p-limit');
-const pRetry = require('p-retry');
 const prisma = require('../services/prisma');
+const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
+// CSV fields matching Java StandardReceiptRequest model (ID-based, not name-based)
 const REQUIRED_FIELDS = [
   'ReceiptNumber',
-  'ReceiptMethod',
   'ReceiptDate',
-  'BusinessUnit',
-  'CustomerAccountNumber',
-  'CustomerSite',
   'Amount',
-  'Currency',
-  'RemittanceBankAccountNumber',
-  'AccountingDate',
+  'CurrencyCode',
+  'ReceiptMethodId',
+  'RemittanceBankAccountId',
+  'CustomerId',
+  'OrgId',
 ];
 
 const TEMPLATE_FIELDS = [...REQUIRED_FIELDS];
 
-// Configuration for parallel processing and retries
-const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 5;
-const MAX_RETRIES = parseInt(process.env.MAX_RETRIES) || 3;
-const RETRY_MIN_TIMEOUT = 1000; // 1 second
-const RETRY_MAX_TIMEOUT = 10000; // 10 seconds
+// SOAP namespaces - StandardReceiptService (same service used by createApplyReceipt)
+const SOAP_ENV_NS   = 'http://schemas.xmlsoap.org/soap/envelope/';
+const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/types/';
+const SOAP_COM_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/';
 
-function asText(data) {
-  if (data == null) return '';
-  if (typeof data === 'string') return data;
-  if (Buffer.isBuffer(data)) return data.toString('utf-8');
-  if (data?.data && Array.isArray(data.data)) {
-    return Buffer.from(data.data).toString('utf-8');
-  }
-  if (typeof data === 'object' && data.toString) {
-    return data.toString();
-  }
-  return String(data);
+const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 3;
+
+function escapeXml(value) {
+  if (value == null) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 }
 
 function snippet(text, length = 400) {
@@ -111,16 +117,14 @@ function normalizeAmount(raw) {
 
 function normalizeRow(row) {
   return {
-    ReceiptNumber: String(row.ReceiptNumber ?? '').trim(),
-    ReceiptMethod: String(row.ReceiptMethod ?? '').trim(),
-    ReceiptDate: normalizeDate(row.ReceiptDate, 'ReceiptDate'),
-    BusinessUnit: String(row.BusinessUnit ?? '').trim(),
-    CustomerAccountNumber: String(row.CustomerAccountNumber ?? '').trim(),
-    CustomerSite: String(row.CustomerSite ?? '').trim(),
-    Amount: normalizeAmount(row.Amount),
-    Currency: String(row.Currency ?? '').trim().toUpperCase(),
-    RemittanceBankAccountNumber: String(row.RemittanceBankAccountNumber ?? '').trim(),
-    AccountingDate: normalizeDate(row.AccountingDate, 'AccountingDate'),
+    ReceiptNumber:           String(row.ReceiptNumber           ?? '').trim(),
+    ReceiptDate:             normalizeDate(row.ReceiptDate, 'ReceiptDate'),
+    Amount:                  normalizeAmount(row.Amount),
+    CurrencyCode:            String(row.CurrencyCode            ?? '').trim().toUpperCase(),
+    ReceiptMethodId:         String(row.ReceiptMethodId         ?? '').trim(),
+    RemittanceBankAccountId: String(row.RemittanceBankAccountId ?? '').trim(),
+    CustomerId:              String(row.CustomerId              ?? '').trim(),
+    OrgId:                   String(row.OrgId                   ?? '').trim(),
   };
 }
 
@@ -157,7 +161,65 @@ function normalizeRecords(records) {
   return normalized;
 }
 
-async function previewPayload(req, res, next) {
+/**
+ * Generates a SOAP envelope for createStandardReceipt matching
+ * Java FusionStdReceiptTransform.mapStdReceiptModel().
+ *
+ * All three date fields (ReceiptDate, GlDate, DepositDate) use the same
+ * value from the CSV ReceiptDate column, matching the Java transform.
+ */
+function generateSoapEnvelope(row) {
+  const requiredFields = [
+    'ReceiptNumber', 'ReceiptDate', 'Amount', 'CurrencyCode',
+    'ReceiptMethodId', 'RemittanceBankAccountId', 'CustomerId', 'OrgId',
+  ];
+  for (const field of requiredFields) {
+    if (row[field] === undefined || row[field] === null || row[field] === '') {
+      throw new Error(`Missing required field: ${field}`);
+    }
+  }
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
+  xmlns:typ="${SOAP_TYPES_NS}"
+  xmlns:com="${SOAP_COM_NS}">
+  <soapenv:Header/>
+  <soapenv:Body>
+    <typ:createStandardReceipt>
+      <typ:standardReceipt>
+        <com:Amount>${escapeXml(row.Amount)}</com:Amount>
+        <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
+        <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
+        <com:GlDate>${escapeXml(row.ReceiptDate)}</com:GlDate>
+        <com:DepositDate>${escapeXml(row.ReceiptDate)}</com:DepositDate>
+        <com:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</com:ReceiptMethodId>
+        <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
+        <com:RemittanceBankAccountId>${escapeXml(row.RemittanceBankAccountId)}</com:RemittanceBankAccountId>
+        <com:CustomerId>${escapeXml(row.CustomerId)}</com:CustomerId>
+        <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
+      </typ:standardReceipt>
+    </typ:createStandardReceipt>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+}
+
+/**
+ * Sends the SOAP envelope to Oracle's StandardReceiptService.
+ */
+async function sendSoapRequest(soapXml, receiptNumber) {
+  const endpoint = process.env.ORACLE_STANDARD_RECEIPT_SOAP_URL;
+  if (!endpoint) {
+    throw new Error('Oracle SOAP configuration missing. Check ORACLE_STANDARD_RECEIPT_SOAP_URL in .env');
+  }
+
+  console.log(`\n[StandardReceipt] Sending SOAP request for ${receiptNumber}`);
+  const soapClient = createOracleSoapClient(endpoint);
+  const response = await soapClient.callWithCustomEnvelope(soapXml, 'createStandardReceipt');
+  console.log(`✅ Success for ${receiptNumber} - HTTP ${response.status}`);
+  return { success: true, data: response.data, status: response.status };
+}
+
+async function previewXml(req, res, next) {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'CSV file is required.' });
@@ -188,7 +250,8 @@ async function previewPayload(req, res, next) {
 
     const previews = normalizedRecords.map((row, i) => ({
       rowNumber: i + 2,
-      payload: row,
+      receiptNumber: row.ReceiptNumber,
+      xml: generateSoapEnvelope(row),
     }));
 
     return res.json({ totalRows: normalizedRecords.length, previews });
@@ -203,8 +266,8 @@ async function upload(req, res, next) {
       return res.status(400).json({ error: 'CSV file is required.' });
     }
 
-    if (!process.env.ORACLE_STANDARD_RECEIPT_API_URL) {
-      return res.status(500).json({ error: 'Oracle standard receipt API URL is not configured.' });
+    if (!process.env.ORACLE_STANDARD_RECEIPT_SOAP_URL) {
+      return res.status(500).json({ error: 'Oracle standard receipt SOAP URL is not configured. Check ORACLE_STANDARD_RECEIPT_SOAP_URL in .env' });
     }
 
     const records = parse(req.file.buffer, {
@@ -241,118 +304,54 @@ async function upload(req, res, next) {
       },
     });
 
-    const oracleAuth = Buffer.from(
-      `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
-    ).toString('base64');
-
     let successCount = 0;
     let failureCount = 0;
     const failures = [];
     const responseLogs = [];
     let firstErrorMessage = '';
     let lastSuccessMessage = '';
-    const logContext = `Endpoint=${process.env.ORACLE_STANDARD_RECEIPT_API_URL}`;
     const startTime = Date.now();
 
-    // Create a limit function for concurrent requests
     const limit = pLimit(CONCURRENT_REQUESTS);
 
-    // Process all rows with parallel processing and retry logic
     const processingPromises = normalizedRecords.map((row, i) => {
       return limit(async () => {
         const rowNumber = i + 2;
-        const requestPreview = snippet(JSON.stringify(row));
+        const soapXml = generateSoapEnvelope(row);
 
         try {
-          // Use p-retry for automatic retries with exponential backoff
-          const response = await pRetry(
-            async () => {
-              const res = await axios.post(process.env.ORACLE_STANDARD_RECEIPT_API_URL, row, {
-                headers: {
-                  'Content-Type': 'application/json',
-                  Accept: 'application/json',
-                  Authorization: `Basic ${oracleAuth}`,
-                },
-                timeout: 30000,
-                validateStatus: () => true,
-              });
+          console.log(`\n📤 Processing Row ${rowNumber}: ${row.ReceiptNumber}`);
 
-              // Throw error for retryable status codes
-              if (res.status >= 500 && res.status < 600) {
-                throw new Error(`HTTP ${res.status}: Server error`);
-              }
+          const result = await sendSoapRequest(soapXml, row.ReceiptNumber);
 
-              return res;
-            },
-            {
-              retries: MAX_RETRIES,
-              minTimeout: RETRY_MIN_TIMEOUT,
-              maxTimeout: RETRY_MAX_TIMEOUT,
-              onFailedAttempt: (error) => {
-                console.warn(
-                  `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} Retry ${error.attemptNumber}/${MAX_RETRIES}: ${error.message}`
-                );
-              },
-            }
-          );
+          successCount++;
+          if (!lastSuccessMessage) lastSuccessMessage = snippet(result.data || 'Success');
+          const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SUCCESS | Receipt: ${row.ReceiptNumber}`;
+          responseLogs.push(logLine);
+          console.log(`✅ ${logLine}`);
 
-          const responseText = asText(response.data);
-          if (response.status >= 400) {
-            failureCount++;
-            const errorDetail = snippet(responseText || `HTTP ${response.status}`);
-            failures.push({
-              uploadId: uploadRecord.id,
-              rowNumber,
-              rawData: JSON.stringify(row),
-              errorMessage: errorDetail,
-              requestPayload: JSON.stringify(row, null, 2),
-              responseBody: snippet(responseText, 2000),
-              responseStatus: response.status,
-            });
-            if (!firstErrorMessage) {
-              firstErrorMessage = `Row ${rowNumber}: ${errorDetail}`;
-            }
-            const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED: ${errorDetail} | HTTP ${response.status} | ${logContext} | Request: ${requestPreview}`;
-            responseLogs.push(logLine);
-            console.error(logLine);
-          } else {
-            successCount++;
-            const successSnippet = snippet(responseText || 'Success');
-            if (!lastSuccessMessage) {
-              lastSuccessMessage = successSnippet;
-            }
-            const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SUCCESS | Receipt: ${row.ReceiptNumber || 'N/A'} | HTTP ${response.status} | Response: ${successSnippet} | ${logContext}`;
-            responseLogs.push(logLine);
-            console.log(logLine);
-          }
-        } catch (apiErr) {
+        } catch (error) {
           failureCount++;
-          const responseText = asText(apiErr.response?.data);
-          const errorDetail = snippet(
-            responseText ||
-              apiErr.message ||
-              'Oracle standard receipt API error'
-          );
+          const errorMessage = error.message || 'Unknown error';
+          if (!firstErrorMessage) firstErrorMessage = `Row ${rowNumber}: ${snippet(errorMessage)}`;
+
           failures.push({
             uploadId: uploadRecord.id,
             rowNumber,
             rawData: JSON.stringify(row),
-            errorMessage: errorDetail,
-            requestPayload: JSON.stringify(row, null, 2),
-            responseBody: snippet(responseText || apiErr.message, 2000),
-            responseStatus: apiErr.response?.status || null,
+            errorMessage: errorMessage.substring(0, 500),
+            requestPayload: soapXml.substring(0, 2000),
+            responseBody: (error.response?.data ?? error.message ?? '').substring(0, 2000),
+            responseStatus: error.response?.status || null,
           });
-          if (!firstErrorMessage) {
-            firstErrorMessage = `Row ${rowNumber}: ${errorDetail}`;
-          }
-          const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (API): ${errorDetail} | ${logContext} | Request: ${requestPreview}`;
+
+          const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED: ${snippet(errorMessage)} | Receipt: ${row.ReceiptNumber}`;
           responseLogs.push(logLine);
-          console.error(logLine);
+          console.error(`❌ ${logLine}`);
         }
       });
     });
 
-    // Wait for all requests to complete
     await Promise.all(processingPromises);
 
     const endTime = Date.now();
@@ -363,29 +362,22 @@ async function upload(req, res, next) {
       await prisma.standardReceiptFailure.createMany({ data: failures });
     }
 
-    const finalStatus =
-      failureCount === 0 ? 'SUCCESS' : successCount === 0 ? 'FAILED' : 'PARTIAL';
+    const finalStatus = failureCount === 0 ? 'SUCCESS' : successCount === 0 ? 'FAILED' : 'PARTIAL';
     const responseMessage =
-      firstErrorMessage ||
-      lastSuccessMessage ||
-      `${successCount} succeeded, ${failureCount} failed`;
+      firstErrorMessage || lastSuccessMessage || `${successCount} succeeded, ${failureCount} failed`;
     const performanceLog = `Total time: ${totalTime}s | Avg per record: ${avgTimePerRecord}s | Concurrency: ${CONCURRENT_REQUESTS}`;
     const responseLog =
-      responseLogs.length > 0 ? responseLogs.join('\n') + '\n\n' + performanceLog : responseMessage + '\n' + performanceLog;
+      responseLogs.length > 0
+        ? responseLogs.join('\n') + '\n\n' + performanceLog
+        : responseMessage + '\n' + performanceLog;
 
     const updatedUpload = await prisma.standardReceiptUpload.update({
       where: { id: uploadRecord.id },
-      data: {
-        successCount,
-        failureCount,
-        status: finalStatus,
-        responseMessage,
-        responseLog,
-      },
+      data: { successCount, failureCount, status: finalStatus, responseMessage, responseLog },
     });
 
     console.log(
-      `[StandardReceipt] Upload #${uploadRecord.id} COMPLETE | Total: ${normalizedRecords.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus} | Time: ${totalTime}s | Avg: ${avgTimePerRecord}s/record`
+      `[StandardReceipt] Upload #${uploadRecord.id} COMPLETE | Total: ${normalizedRecords.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus} | Time: ${totalTime}s`
     );
 
     return res.json({
@@ -397,7 +389,6 @@ async function upload(req, res, next) {
       processingTimeSeconds: parseFloat(totalTime),
       averageTimePerRecord: parseFloat(avgTimePerRecord),
       concurrency: CONCURRENT_REQUESTS,
-      maxRetries: MAX_RETRIES,
     });
   } catch (err) {
     next(err);
@@ -504,8 +495,9 @@ async function getUploadProgress(req, res, next) {
 
 function downloadTemplate(_req, res) {
   const header = TEMPLATE_FIELDS.join(',');
+  // Sample uses numeric Oracle IDs matching Java StandardReceiptRequest
   const sample =
-    'Visa-BLK-ALAR-00000008,Visa,2026-03-05,AlQurashi-KSA,116012,100005,422,SAR,157-95017321-ALARIDAH,2026-03-05';
+    'Visa-BLK-ALAR-00000008,2026-03-05,422.00,SAR,123456789,987654321,300000001234567,300000001421038';
   // Add UTF-8 BOM (Byte Order Mark) to ensure proper encoding of Arabic and other Unicode characters
   const BOM = '\uFEFF';
   const csv = `${BOM}${header}\n${sample}\n`;
@@ -516,7 +508,7 @@ function downloadTemplate(_req, res) {
 }
 
 module.exports = {
-  previewPayload,
+  previewXml,
   upload,
   listUploads,
   getUpload,

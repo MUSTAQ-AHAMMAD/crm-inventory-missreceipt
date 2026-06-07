@@ -18,7 +18,7 @@ const REQUIRED_FIELDS = [
   'OrgId',
   'ReceiptNumber',
   'ReceivableActivityName',
-  'BankAccountNumber',
+  'BankAccountName',
 ];
 
 // Static OrgId value to avoid scientific notation issues from CSV
@@ -111,7 +111,7 @@ function normalizeRow(row) {
     GlDate: normalizeDate(row.GlDate, 'GlDate'),
     ReceiptMethodName: row.ReceiptMethodName ? String(row.ReceiptMethodName).trim() : undefined,
     ReceivableActivityName: String(row.ReceivableActivityName ?? '').trim(),
-    BankAccountNumber: String(row.BankAccountNumber ?? '').trim(),
+    BankAccountName: String(row.BankAccountName ?? '').trim(),
     OrgId: STATIC_ORG_ID,
   };
 }
@@ -146,7 +146,7 @@ function generateSoapEnvelope(row) {
   const requiredFields = [
     'Amount', 'CurrencyCode', 'ReceiptNumber', 'ReceiptDate',
     'DepositDate', 'GlDate', 'ReceivableActivityName',
-    'BankAccountNumber', 'OrgId',
+    'BankAccountName', 'OrgId',
   ];
 
   for (const field of requiredFields) {
@@ -175,7 +175,7 @@ function generateSoapEnvelope(row) {
         <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
         <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
 ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
-        <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
+        <com:BankAccountName>${escapeXml(row.BankAccountName)}</com:BankAccountName>
         <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
       </typ:miscellaneousReceipt>
     </typ:createMiscellaneousReceipt>
@@ -485,7 +485,7 @@ async function getUploadProgress(req, res, next) {
  */
 function downloadTemplate(_req, res) {
   const header = TEMPLATE_FIELDS.join(',');
-  const sample = '-100.00,SAR,2024-01-20,2024-01-20,2024-01-20,300000001421038,REC001,Bank Charge,123456789';
+  const sample = '-100.00,SAR,2024-01-20,2024-01-20,2024-01-20,300000001421038,REC001,Bank Charge,AL Jazeerah Bank Example Account - Acc # 015795017321006';
   const BOM = '\uFEFF';
   const csv = `${BOM}${header}\n${sample}\n`;
 

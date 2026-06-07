@@ -8,7 +8,7 @@ const multer = require('multer');
 const { authenticate } = require('../middleware/auth');
 const { activityLogger } = require('../middleware/activityLogger');
 const {
-  previewPayload,
+  previewXml,
   upload,
   listUploads,
   getUpload,
@@ -35,7 +35,7 @@ router.get('/template', downloadTemplate);
 
 // Protected routes
 router.use(authenticate, activityLogger);
-router.post('/preview', csvUpload.single('file'), previewPayload);
+router.post('/preview', csvUpload.single('file'), previewXml);
 router.post('/upload', csvUpload.single('file'), upload);
 router.get('/uploads', listUploads);
 router.get('/uploads/:id', getUpload);
