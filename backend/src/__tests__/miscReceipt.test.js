@@ -39,7 +39,7 @@ describe('Misc Receipt Controller', () => {
       expect(response.text).toContain('OrgId');
       expect(response.text).toContain('ReceiptNumber');
       expect(response.text).toContain('ReceivableActivityName');
-      expect(response.text).toContain('BankAccountNumber');
+      expect(response.text).toContain('BankAccountName');
 
       // Check sample data (negative amount)
       expect(response.text).toContain('-100.00');
@@ -80,7 +80,7 @@ describe('Misc Receipt Controller', () => {
         'OrgId',
         'ReceiptNumber',
         'ReceivableActivityName',
-        'BankAccountNumber',
+        'BankAccountName',
       ];
 
       const missingHeaders = requiredFields.filter(
@@ -93,7 +93,7 @@ describe('Misc Receipt Controller', () => {
     });
 
     test('should validate required values are not empty', () => {
-      const csvWithEmptyValues = `Amount,CurrencyCode,DepositDate,ReceiptDate,GlDate,OrgId,ReceiptNumber,ReceivableActivityName,BankAccountNumber
+      const csvWithEmptyValues = `Amount,CurrencyCode,DepositDate,ReceiptDate,GlDate,OrgId,ReceiptNumber,ReceivableActivityName,BankAccountName
 -100,SAR,,2024-01-20,2024-01-20,101,REC001,Misc Activity,123456789
 ,SAR,2024-01-20,2024-01-20,2024-01-20,101,REC002,Misc Activity,123456789`;
 
@@ -112,7 +112,7 @@ describe('Misc Receipt Controller', () => {
         'OrgId',
         'ReceiptNumber',
         'ReceivableActivityName',
-        'BankAccountNumber',
+        'BankAccountName',
       ];
 
       // Check row 1 (index 0)
@@ -319,7 +319,7 @@ describe('Misc Receipt Controller', () => {
         <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
         <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
 ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
-        <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
+        <com:BankAccountName>${escapeXml(row.BankAccountName)}</com:BankAccountName>
         <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
       </com:MiscellaneousReceipt>
     </typ:createMiscellaneousReceipt>
@@ -335,7 +335,7 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
         DepositDate: '2024-01-20',
         GlDate: '2024-01-20',
         ReceivableActivityName: 'Misc Activity',
-        BankAccountNumber: '123456789',
+        BankAccountName: '123456789',
         OrgId: '101',
       };
 
@@ -396,7 +396,7 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
         <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
         <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
 ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
-        <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
+        <com:BankAccountName>${escapeXml(row.BankAccountName)}</com:BankAccountName>
         <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
       </com:MiscellaneousReceipt>
     </typ:createMiscellaneousReceipt>
@@ -413,7 +413,7 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
         GlDate: '2024-01-20',
         ReceiptMethodName: 'Credit Card',
         ReceivableActivityName: 'Misc Activity',
-        BankAccountNumber: '123456789',
+        BankAccountName: '123456789',
         OrgId: '101',
       };
 
@@ -460,7 +460,7 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
     });
 
     test('should handle CSV with only headers', () => {
-      const headersOnly = `Amount,CurrencyCode,DepositDate,ReceiptDate,GlDate,OrgId,ReceiptNumber,ReceivableActivityName,BankAccountNumber`;
+      const headersOnly = `Amount,CurrencyCode,DepositDate,ReceiptDate,GlDate,OrgId,ReceiptNumber,ReceivableActivityName,BankAccountName`;
 
       const records = parse(headersOnly, {
         columns: true,
@@ -472,7 +472,7 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
     });
 
     test('should handle whitespace in values', () => {
-      const csvWithWhitespace = `Amount,CurrencyCode,DepositDate,ReceiptDate,GlDate,OrgId,ReceiptNumber,ReceivableActivityName,BankAccountNumber
+      const csvWithWhitespace = `Amount,CurrencyCode,DepositDate,ReceiptDate,GlDate,OrgId,ReceiptNumber,ReceivableActivityName,BankAccountName
   -100  ,  SAR  ,  2024-01-20  ,  2024-01-20  ,  2024-01-20  ,  101  ,  REC001  ,  Misc Activity  ,  123456789  `;
 
       const records = parse(csvWithWhitespace, {

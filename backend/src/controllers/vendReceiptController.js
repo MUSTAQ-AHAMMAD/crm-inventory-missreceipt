@@ -506,7 +506,7 @@ async function generateReceipts(req, res, next) {
           GlDate:                date,
           ReceiptMethodName:     canonicalName,
           ReceivableActivityName: 'Bank Charge',
-          BankAccountNumber:     bankAccountText,
+          BankAccountName:       bankAccountText,
           OrgId:                 STATIC_ORG_ID,
           // metadata for display
           _meta: { subinventory, date, paymentType, txnNumber, method: canonicalName, bankCharge, taxRate },
@@ -730,7 +730,7 @@ async function submitMiscReceipts(req, res, next) {
               receiptDate:      apiPayload.ReceiptDate ? new Date(apiPayload.ReceiptDate) : null,
               receiptMethodName: apiPayload.ReceiptMethodName || null,
               receiptNumber:    apiPayload.ReceiptNumber,
-              bankAccNumber:    apiPayload.BankAccountNumber || null,
+              bankAccNumber:    apiPayload.BankAccountName || null,
               recActivityName:  apiPayload.ReceivableActivityName || null,
               amount:           parseFloat(apiPayload.Amount) || null,
               region:           DEFAULT_REGION,
