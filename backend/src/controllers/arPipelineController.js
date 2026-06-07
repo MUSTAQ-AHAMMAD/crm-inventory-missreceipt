@@ -22,10 +22,10 @@ const axios = require('axios');
 const pLimit = require('p-limit');
 const pRetry = require('p-retry');
 
-const CONCURRENT_REQUESTS = 2;
+const CONCURRENT_REQUESTS = 5;
 const MAX_RETRIES = 2;
-const RETRY_MIN_TIMEOUT = 2000;
-const RETRY_MAX_TIMEOUT = 8000;
+const RETRY_MIN_TIMEOUT = 500;
+const RETRY_MAX_TIMEOUT = 3000;
 const ORACLE_INVOICE_TIMEOUT = 120000; // Oracle AR invoice creation can take up to 2 minutes
 
 // SOAP namespaces (same as applyReceiptController)
@@ -701,20 +701,47 @@ async function createInvoiceBatch(req, res, next) {
       const oracleAuth = Buffer.from(`${username}:${password}`).toString('base64');
       const limit = pLimit(CONCURRENT_REQUESTS);
 
-      let successCount = 0;
-      let failureCount = 0;
-
-      const tasks = payloads.map((payload, i) =>
-        limit(async () => {
-          // Persist per-payload upload record linked to this batch
-          const uploadRecord = await prisma.arInvoiceUpload.create({
+      // Pre-create all upload records in parallel so the rate-limited workers
+      // don't spend a concurrency slot on DB writes before starting Oracle calls.
+      // allSettled ensures a single DB failure doesn't abort the whole batch.
+      const uploadRecordResults = await Promise.allSettled(
+        payloads.map((payload) =>
+          prisma.arInvoiceUpload.create({
             data: {
               userId:         req.user.id,
               batchId:        batch.id,
               payloadJson:    JSON.stringify(payload),
               responseStatus: 'PROCESSING',
             },
-          });
+          })
+        )
+      );
+
+      let successCount = 0;
+      let failureCount = 0;
+
+      const tasks = payloads.map((payload, i) =>
+        limit(async () => {
+          // Use the pre-created record if available; otherwise create it now as a fallback.
+          const preCreated = uploadRecordResults[i];
+          let uploadRecord = preCreated?.status === 'fulfilled' ? preCreated.value : null;
+
+          if (!uploadRecord) {
+            try {
+              uploadRecord = await prisma.arInvoiceUpload.create({
+                data: {
+                  userId:         req.user.id,
+                  batchId:        batch.id,
+                  payloadJson:    JSON.stringify(payload),
+                  responseStatus: 'PROCESSING',
+                },
+              });
+            } catch (dbErr) {
+              console.error(`[Pipeline] Could not create upload record for payload ${i + 1}: ${dbErr.message}`);
+              failureCount++;
+              return;
+            }
+          }
 
           let responseStatus  = 'SUCCESS';
           let responseMessage = 'Invoice created successfully';
