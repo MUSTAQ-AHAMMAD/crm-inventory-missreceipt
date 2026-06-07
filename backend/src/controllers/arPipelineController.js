@@ -59,7 +59,9 @@ function parseOracleDateToUTCMidnight(value) {
   if (m) return new Date(`${m[1]}T00:00:00.000Z`);
   // Fallback: try generic Date parse
   const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d;
+  return Number.isNaN(d.getTime())
+    ? null
+    : new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
 /** Extract numeric invoice number embedded in a receipt number like "Mada-2912269" */

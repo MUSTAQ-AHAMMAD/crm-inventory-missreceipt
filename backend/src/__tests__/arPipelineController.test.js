@@ -217,6 +217,31 @@ describe('AR Pipeline Controller', () => {
       );
     });
 
+    test('stores Oracle offset timestamps as UTC-midnight dates', async () => {
+      prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42 });
+      prisma.arInvoiceBatch.update.mockResolvedValue({});
+
+      axios.post.mockResolvedValue({
+        status: 201,
+        data: {
+          ...samplePayload,
+          TransactionNumber: '100001',
+          CustomerTrxId: '9999',
+          TransactionDate: '2025-06-01T00:00:00+03:00',
+          AccountingDate: '2025-06-01T12:34:56+03:00',
+          receivablesInvoiceLines: [],
+        },
+      });
+
+      await request(app).post('/').send({ payloads: [samplePayload] });
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setTimeout(r, 150));
+
+      const createCall = prisma.fusionInvoiceHeader.create.mock.calls[0][0];
+      expect(createCall.data.txnDate.toISOString()).toBe('2025-06-01T00:00:00.000Z');
+      expect(createCall.data.glDate.toISOString()).toBe('2025-06-01T00:00:00.000Z');
+    });
+
     test('background: marks batch SUCCESS when all invoices succeed', async () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42 });
       prisma.arInvoiceBatch.update.mockResolvedValue({});

@@ -241,37 +241,70 @@ function buildStandardSoapEnvelope(row) {
 }
 
 /**
- * Look up the Oracle customer party ID (CustomerId) for a given account number
- * by finding a previous successful standard receipt for an invoice with that
- * billToAccNumber, then returning the customerId stored in FusionStandardReceipt.
+ * Look up the Oracle customer party ID (CustomerId) for a given account number.
  *
- * Returns null when no prior receipt exists for this account (first-time store).
+ * Strategy 1: Invoice-chain lookup (works after the first successful submission)
+ *   Find FusionInvoiceHeader entries with the matching billToAccNumber, then
+ *   look for a FusionStandardReceipt whose receipt number ends with -{txnNumber}.
+ *
+ * Strategy 2: Bank-account-ID fallback (works with seeded historical data)
+ *   If strategy 1 yields nothing, search FusionStandardReceipt directly by
+ *   remittanceBankAccId.  Because each store has a unique Oracle bank account ID
+ *   (from VendhqRegister.bankAccountId) and seeded historical receipts include
+ *   this ID, the correct party ID can be retrieved without a matching invoice
+ *   header.  This prevents first-run failures for stores present in seed data.
+ *
+ * @param {string|number} customerAccNumber - billToAccNumber from the invoice header
+ * @param {string|null}   bankAccountId     - VendhqRegister.bankAccountId (optional)
+ * Returns null when neither strategy locates a party ID.
  */
-async function lookupCustomerPartyId(customerAccNumber) {
-  if (!customerAccNumber) return null;
-  // billToAccNumber is stored as Int; coerce to integer for the DB lookup
-  const accNum = typeof customerAccNumber === 'number'
-    ? customerAccNumber
-    : parseInt(String(customerAccNumber).replace(/\D/g, ''), 10);
-  if (isNaN(accNum) || accNum <= 0) return null;
+async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null) {
+  if (!customerAccNumber && !bankAccountId) return null;
 
-  // Find invoice headers for this customer account number
-  const invoices = await prisma.fusionInvoiceHeader.findMany({
-    where: { billToAccNumber: accNum, status: 'SUCCESS' },
-    select: { txnNumber: true },
-    orderBy: { createdAt: 'desc' },
-    take: 5,
-  });
+  // ── Strategy 1: invoice header → receipt chain ───────────────────────────
+  if (customerAccNumber) {
+    // billToAccNumber is stored as Int; coerce to integer for the DB lookup
+    const accNum = typeof customerAccNumber === 'number'
+      ? customerAccNumber
+      : parseInt(String(customerAccNumber).replace(/\D/g, ''), 10);
 
-  for (const inv of invoices) {
-    if (!inv.txnNumber) continue;
-    // Match receipt numbers of the form "{Method}-{txnNumber}"
+    if (!isNaN(accNum) && accNum > 0) {
+      const invoices = await prisma.fusionInvoiceHeader.findMany({
+        where: { billToAccNumber: accNum, status: 'SUCCESS' },
+        select: { txnNumber: true },
+        orderBy: { createdAt: 'desc' },
+        take: 5,
+      });
+
+      for (const inv of invoices) {
+        if (!inv.txnNumber) continue;
+        // Match receipt numbers of the form "{Method}-{txnNumber}"
+        const receipt = await prisma.fusionStandardReceipt.findFirst({
+          where: {
+            receiptNumber: { endsWith: `-${inv.txnNumber}` },
+            customerId:    { not: null },
+            status:        'Success',
+          },
+          select: { customerId: true },
+        });
+        if (receipt?.customerId) return receipt.customerId;
+      }
+    }
+  }
+
+  // ── Strategy 2: bank account ID fallback (seeded historical data) ─────────
+  // Each store has a unique Oracle bank account ID stored in VendhqRegister.
+  // Historical (seeded) FusionStandardReceipt rows carry the same bank account
+  // ID in remittanceBankAccId, so we can retrieve the party ID per store
+  // without needing a matching FusionInvoiceHeader entry.
+  if (bankAccountId) {
     const receipt = await prisma.fusionStandardReceipt.findFirst({
       where: {
-        receiptNumber: { endsWith: `-${inv.txnNumber}` },
-        customerId:    { not: null },
-        status:        'Success',
+        remittanceBankAccId: String(bankAccountId),
+        customerId:          { not: null },
+        status:              'Success',
       },
+      orderBy: { createdAt: 'desc' },
       select: { customerId: true },
     });
     if (receipt?.customerId) return receipt.customerId;
@@ -653,8 +686,13 @@ async function submitStandardReceipts(req, res, next) {
         // Strip internal _meta before processing
         const { _meta, ...apiPayload } = payload;
 
-        // Look up Oracle customer party ID from prior successful receipts
-        const customerId = await lookupCustomerPartyId(apiPayload.CustomerAccountNumber);
+        // Look up Oracle customer party ID from prior successful receipts.
+        // Pass the bank account ID as a fallback so seeded historical receipts
+        // are searched when no invoice-linked receipt exists yet (first-run).
+        const customerId = await lookupCustomerPartyId(
+          apiPayload.CustomerAccountNumber,
+          apiPayload.RemittanceBankAccountNumber || null,
+        );
 
         // Build SOAP row: map REST-oriented payload fields to SOAP field names
         if (!customerId) {
