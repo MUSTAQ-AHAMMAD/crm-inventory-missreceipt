@@ -101,7 +101,13 @@ async function previewPayload(req, res, next) {
  */
 function parseOracleDate(value) {
   if (!value) return null;
-  const d = new Date(value);
+  // Always extract the YYYY-MM-DD part and store as UTC midnight so that the
+  // date-range queries in findInvoiceHeader (which use midnight-UTC boundaries)
+  // reliably match regardless of whether Oracle includes a timezone offset.
+  const s = String(value).trim();
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return new Date(`${m[1]}T00:00:00.000Z`);
+  const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d;
 }
 

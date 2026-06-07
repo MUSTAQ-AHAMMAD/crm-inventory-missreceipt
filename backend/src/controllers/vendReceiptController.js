@@ -284,11 +284,27 @@ async function findInvoiceHeader(subinventory, date, paymentType) {
     });
   }
 
+  // 3b. Fallback: match by billToAccNumber when billToLocation produced no results
+  if (headers.length === 0 && customerAccNumber) {
+    const accountNumber = parseInt(customerAccNumber, 10);
+    if (!isNaN(accountNumber)) {
+      headers = await prisma.fusionInvoiceHeader.findMany({
+        where: {
+          billToAccNumber: accountNumber,
+          txnDate: { gte: dayStart, lte: dayEnd },
+          status: 'SUCCESS',
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+      });
+    }
+  }
+
   // 4. Fallback: match by billToCustName containing the subinventory code
   if (headers.length === 0) {
     headers = await prisma.fusionInvoiceHeader.findMany({
       where: {
-        billToCustName: { contains: subinventory },
+        billToCustName: { contains: subinventory, mode: 'insensitive' },
         txnDate: { gte: dayStart, lte: dayEnd },
         status: 'SUCCESS',
       },
@@ -406,9 +422,16 @@ async function generateReceipts(req, res, next) {
       }
       const invoiceInfo = invoiceCache[invoiceCacheKey];
 
-      if (!invoiceInfo || !invoiceInfo.txnNumber) {
+      if (!invoiceInfo) {
         warnings.push(
           `No invoice found for store=${subinventory}, date=${date}, type=${paymentType}. Skipping ${rawMethod}.`
+        );
+        continue;
+      }
+
+      if (!invoiceInfo.txnNumber) {
+        warnings.push(
+          `Invoice found for store=${subinventory}, date=${date}, type=${paymentType} but TransactionNumber is missing (Oracle may not have returned it). Skipping ${rawMethod}.`
         );
         continue;
       }
