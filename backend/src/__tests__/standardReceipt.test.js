@@ -1,7 +1,7 @@
 /**
  * Standard Receipt Controller Tests
  * Tests CSV parsing, validation, normalization, and upload flow
- * (SOAP-based: uses numeric Oracle IDs instead of name-based REST fields)
+ * (SOAP-based: RegisterName in CSV → RemittanceBankAccountId resolved from VendhqRegister)
  */
 
 const request = require('supertest');
@@ -34,17 +34,18 @@ describe('Standard Receipt Controller', () => {
       // Check for UTF-8 BOM
       expect(response.text).toMatch(/^\uFEFF/);
 
-      // Check SOAP-based headers (numeric ID fields)
+      // Check SOAP-based headers (RegisterName instead of RemittanceBankAccountId)
       expect(response.text).toContain('ReceiptNumber');
       expect(response.text).toContain('ReceiptDate');
       expect(response.text).toContain('Amount');
       expect(response.text).toContain('CurrencyCode');
       expect(response.text).toContain('ReceiptMethodId');
-      expect(response.text).toContain('RemittanceBankAccountId');
+      expect(response.text).toContain('RegisterName');
       expect(response.text).toContain('CustomerId');
       expect(response.text).toContain('OrgId');
 
-      // Old REST-only fields must NOT appear
+      // Old fields must NOT appear
+      expect(response.text).not.toContain('RemittanceBankAccountId');
       expect(response.text).not.toContain('ReceiptMethod,');
       expect(response.text).not.toContain('BusinessUnit');
       expect(response.text).not.toContain('CustomerAccountNumber');
@@ -87,7 +88,7 @@ Visa-001,2026-03-05`;
         'Amount',
         'CurrencyCode',
         'ReceiptMethodId',
-        'RemittanceBankAccountId',
+        'RegisterName',
         'CustomerId',
         'OrgId',
       ];
@@ -102,9 +103,9 @@ Visa-001,2026-03-05`;
     });
 
     test('should validate required values are not empty', () => {
-      const csvWithEmptyValues = `ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RemittanceBankAccountId,CustomerId,OrgId
-Visa-001,2026-03-05,422,SAR,,987654321,300000001234567,300000001421038
-Visa-002,,422,SAR,123456789,987654321,300000001234567,300000001421038`;
+      const csvWithEmptyValues = `ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RegisterName,CustomerId,OrgId
+Visa-001,2026-03-05,422,SAR,,AZIZMALL,300000001234567,300000001421038
+Visa-002,,422,SAR,300000001518646,AZIZMALL,300000001234567,300000001421038`;
 
       const records = parse(csvWithEmptyValues, {
         columns: true,
@@ -118,7 +119,7 @@ Visa-002,,422,SAR,123456789,987654321,300000001234567,300000001421038`;
         'Amount',
         'CurrencyCode',
         'ReceiptMethodId',
-        'RemittanceBankAccountId',
+        'RegisterName',
         'CustomerId',
         'OrgId',
       ];
@@ -303,7 +304,7 @@ Visa-002,,422,SAR,123456789,987654321,300000001234567,300000001421038`;
   });
 
   describe('Full Record Normalization', () => {
-    test('should normalize a complete valid record with SOAP numeric ID fields', () => {
+    test('should normalize a complete valid record with RegisterName instead of RemittanceBankAccountId', () => {
       const normalizeDate = (raw, fieldName) => {
         const value = String(raw ?? '').trim();
         if (!value) throw new Error(`${fieldName} is required`);
@@ -332,38 +333,36 @@ Visa-002,,422,SAR,123456789,987654321,300000001234567,300000001421038`;
 
       const normalizeRow = (row) => {
         return {
-          ReceiptNumber:           String(row.ReceiptNumber           ?? '').trim(),
-          ReceiptDate:             normalizeDate(row.ReceiptDate, 'ReceiptDate'),
-          Amount:                  normalizeAmount(row.Amount),
-          CurrencyCode:            String(row.CurrencyCode            ?? '').trim().toUpperCase(),
-          ReceiptMethodId:         String(row.ReceiptMethodId         ?? '').trim(),
-          RemittanceBankAccountId: String(row.RemittanceBankAccountId ?? '').trim(),
-          CustomerId:              String(row.CustomerId              ?? '').trim(),
-          OrgId:                   String(row.OrgId                   ?? '').trim(),
+          ReceiptNumber:   String(row.ReceiptNumber   ?? '').trim(),
+          ReceiptDate:     normalizeDate(row.ReceiptDate, 'ReceiptDate'),
+          Amount:          normalizeAmount(row.Amount),
+          CurrencyCode:    String(row.CurrencyCode    ?? '').trim().toUpperCase(),
+          ReceiptMethodId: String(row.ReceiptMethodId ?? '').trim(),
+          RegisterName:    String(row.RegisterName    ?? '').trim(),
+          CustomerId:      String(row.CustomerId      ?? '').trim(),
+          OrgId:           String(row.OrgId           ?? '').trim(),
         };
       };
 
       const testRow = {
-        ReceiptNumber:           'Visa-BLK-ALAR-00000008',
-        ReceiptDate:             '2026-03-05',
-        Amount:                  '422',
-        CurrencyCode:            'sar',
-        ReceiptMethodId:         '123456789',
-        RemittanceBankAccountId: '987654321',
-        CustomerId:              '300000001234567',
-        OrgId:                   '05-03-2026',  // date-format input for OrgId is unusual but tests normalizeDate
+        ReceiptNumber:   'Visa-BLK-ALAR-00000008',
+        ReceiptDate:     '2026-03-05',
+        Amount:          '422',
+        CurrencyCode:    'sar',
+        ReceiptMethodId: '300000001518646',
+        RegisterName:    'AZIZMALL',
+        CustomerId:      '300000001234567',
+        OrgId:           '300000001421038',
       };
 
-      // OrgId is a numeric string in real usage; for date normalization test, override
-      const testRowWithDate = { ...testRow, OrgId: '300000001421038' };
       const testRowForDateConversion = { ...testRow, ReceiptDate: '05-03-2026' };
 
-      const normalized = normalizeRow(testRowWithDate);
+      const normalized = normalizeRow(testRow);
 
       expect(normalized.ReceiptNumber).toBe('Visa-BLK-ALAR-00000008');
       expect(normalized.CurrencyCode).toBe('SAR'); // uppercased
-      expect(normalized.ReceiptMethodId).toBe('123456789');
-      expect(normalized.RemittanceBankAccountId).toBe('987654321');
+      expect(normalized.ReceiptMethodId).toBe('300000001518646');
+      expect(normalized.RegisterName).toBe('AZIZMALL');
       expect(normalized.CustomerId).toBe('300000001234567');
       expect(normalized.OrgId).toBe('300000001421038');
 
@@ -375,8 +374,8 @@ Visa-002,,422,SAR,123456789,987654321,300000001234567,300000001421038`;
   describe('CSV Parsing with BOM', () => {
     test('should handle UTF-8 BOM correctly', () => {
       const BOM = '\uFEFF';
-      const csvWithBOM = `${BOM}ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RemittanceBankAccountId,CustomerId,OrgId
-Visa-BLK-ALAR-00000008,2026-03-05,422.00,SAR,123456789,987654321,300000001234567,300000001421038`;
+      const csvWithBOM = `${BOM}ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RegisterName,CustomerId,OrgId
+Visa-BLK-ALAR-00000008,2026-03-05,422.00,SAR,300000001518646,AZIZMALL,300000001234567,300000001421038`;
 
       const records = parse(csvWithBOM, {
         columns: true,
@@ -405,7 +404,7 @@ Visa-BLK-ALAR-00000008,2026-03-05,422.00,SAR,123456789,987654321,300000001234567
     });
 
     test('should handle CSV with only headers', () => {
-      const headersOnly = `ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RemittanceBankAccountId,CustomerId,OrgId`;
+      const headersOnly = `ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RegisterName,CustomerId,OrgId`;
 
       const records = parse(headersOnly, {
         columns: true,
@@ -417,8 +416,8 @@ Visa-BLK-ALAR-00000008,2026-03-05,422.00,SAR,123456789,987654321,300000001234567
     });
 
     test('should handle whitespace in values', () => {
-      const csvWithWhitespace = `ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RemittanceBankAccountId,CustomerId,OrgId
-  Visa-001  ,  2026-03-05  ,  422  ,  SAR  ,  123456789  ,  987654321  ,  300000001234567  ,  300000001421038  `;
+      const csvWithWhitespace = `ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RegisterName,CustomerId,OrgId
+  Visa-001  ,  2026-03-05  ,  422  ,  SAR  ,  300000001518646  ,  AZIZMALL  ,  300000001234567  ,  300000001421038  `;
 
       const records = parse(csvWithWhitespace, {
         columns: true,
@@ -427,12 +426,13 @@ Visa-BLK-ALAR-00000008,2026-03-05,422.00,SAR,123456789,987654321,300000001234567
       });
 
       expect(records[0].ReceiptNumber).toBe('Visa-001');
-      expect(records[0].ReceiptMethodId).toBe('123456789');
+      expect(records[0].ReceiptMethodId).toBe('300000001518646');
+      expect(records[0].RegisterName).toBe('AZIZMALL');
     });
 
     test('should handle special characters and Arabic text in ReceiptNumber', () => {
-      const csvWithArabic = `ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RemittanceBankAccountId,CustomerId,OrgId
-Visa-العربية-001,2026-03-05,422,SAR,123456789,987654321,300000001234567,300000001421038`;
+      const csvWithArabic = `ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RegisterName,CustomerId,OrgId
+Visa-العربية-001,2026-03-05,422,SAR,300000001518646,AZIZMALL,300000001234567,300000001421038`;
 
       const records = parse(csvWithArabic, {
         columns: true,

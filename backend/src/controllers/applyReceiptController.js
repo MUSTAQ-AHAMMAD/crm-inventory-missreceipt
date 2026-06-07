@@ -1,20 +1,29 @@
 /**
  * Apply Receipt controller.
- * Processes CSV with invoice numbers and receipt numbers, looks up IDs from Oracle REST APIs,
- * then applies receipts via SOAP StandardReceiptService using OracleSoapClient.
+ * Implements the same processing as Java FusionApplyReceiptTransform:
+ * - CSV provides TransactionNumber (invoice), ReceiptNumber, AmountApplied,
+ *   ReceiptCurrency, TransactionSource, and AccountingDate directly.
+ * - No REST ID lookups needed; Oracle resolves business keys internally.
+ * - SOAP fields mirror Java exactly:
+ *     TransactionNumber, ReceiptNumber, AmountApplied, ReceiptCurrency,
+ *     TransactionSource, AccountingDate, ApplicationDate
  */
 
 const { parse } = require('csv-parse/sync');
-const axios = require('axios');
 const pLimit = require('p-limit');
 const pRetry = require('p-retry');
 const prisma = require('../services/prisma');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
-// CSV column names - InvoiceNumber plus any number of receipt columns
-const REQUIRED_FIELDS = ['InvoiceNumber'];
-// Note: RECEIPT_FIELDS will be dynamically detected from CSV headers
-// Users can have ReceiptNumber1, ReceiptNumber2, ... ReceiptNumberN (unlimited)
+// CSV columns matching Java ApplyReceiptRequest model fields
+const REQUIRED_FIELDS = [
+  'TransactionNumber',
+  'ReceiptNumber',
+  'AmountApplied',
+  'ReceiptCurrency',
+  'TransactionSource',
+  'AccountingDate',
+];
 
 // Configuration for parallel processing and retries
 const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 5;
@@ -26,10 +35,8 @@ const RETRY_MAX_TIMEOUT = 10000; // 10 seconds
 const SOAP_ENV_NS   = 'http://schemas.xmlsoap.org/soap/envelope/';
 const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/types/';
 const SOAP_COM_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/';
-const SOAP_APP_NS   = 'http://xmlns.oracle.com/apps/flex/financials/receivables/receipts/shared/standardReceiptService/commonService/ApplyReceiptDff/';
 
-const SOAP_ACTION        = 'createApplyReceipt';
-const SOAP_ACTION_HEADER = `"${SOAP_ACTION}"`;
+const SOAP_ACTION = 'createApplyReceipt';
 
 function asText(data) {
   if (data == null) return '';
@@ -57,57 +64,53 @@ function extractSoapFaultMessage(text) {
   return textMatch ? textMatch[1].trim() : null;
 }
 
+function escapeXml(value) {
+  if (value == null) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 /**
- * Normalizes date from Oracle API to YYYY-MM-DD format.
- * Oracle REST APIs return dates in ISO 8601 format (e.g., "2025-05-02T00:00:00.000+00:00"),
- * but SOAP APIs require just the date part in YYYY-MM-DD format.
+ * Normalizes a date value to YYYY-MM-DD.
+ * Accepts YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, DD/MM/YYYY, or Excel serial numbers.
  */
-function normalizeOracleDate(dateValue) {
-  if (!dateValue) return null;
+function normalizeDate(raw, fieldName) {
+  const value = String(raw ?? '').trim();
+  if (!value) throw new Error(`${fieldName} is required`);
 
-  const dateString = String(dateValue).trim();
-  if (!dateString) return null;
+  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) return value;
 
-  // If already in YYYY-MM-DD format, return as-is
-  const isoDateMatch = dateString.match(/^(\d{4}-\d{2}-\d{2})$/);
-  if (isoDateMatch) return isoDateMatch[1];
+  const dmyMatch = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (dmyMatch) return `${dmyMatch[3]}-${dmyMatch[2]}-${dmyMatch[1]}`;
 
-  // Extract date from ISO 8601 timestamp (e.g., "2025-05-02T00:00:00.000+00:00")
-  const isoTimestampMatch = dateString.match(/^(\d{4}-\d{2}-\d{2})[T\s]/);
-  if (isoTimestampMatch) return isoTimestampMatch[1];
+  const isoSlashMatch = value.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if (isoSlashMatch) return `${isoSlashMatch[1]}-${isoSlashMatch[2]}-${isoSlashMatch[3]}`;
 
-  // Try parsing as JavaScript Date and formatting
-  try {
-    const date = new Date(dateString);
-    if (!isNaN(date.getTime())) {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, '0');
-      const day = String(date.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    }
-  } catch (e) {
-    // Fall through to return null
+  const dmySlashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (dmySlashMatch) return `${dmySlashMatch[3]}-${dmySlashMatch[2]}-${dmySlashMatch[1]}`;
+
+  const isNumeric = /^\d+(\.\d+)?$/.test(value);
+  if (isNumeric) {
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30));
+    const serial = parseFloat(value);
+    const adjusted = serial > 60 ? serial - 1 : serial;
+    const date = new Date(excelEpoch.getTime() + adjusted * 86400000);
+    const y = String(date.getUTCFullYear()).padStart(4, '0');
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(date.getUTCDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
 
-  return null;
+  throw new Error(`${fieldName} must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or DD/MM/YYYY format`);
 }
 
 /**
- * Extracts receipt number fields from CSV headers.
- * Dynamically detects all columns matching the pattern ReceiptNumber*
- */
-function getReceiptFields(headers) {
-  return headers
-    .filter(h => h.match(/^ReceiptNumber\d+$/))
-    .sort((a, b) => {
-      const numA = parseInt(a.replace('ReceiptNumber', ''));
-      const numB = parseInt(b.replace('ReceiptNumber', ''));
-      return numA - numB;
-    });
-}
-
-/**
- * Validates CSV structure - must have InvoiceNumber and at least one ReceiptNumber column
+ * Validates CSV structure — all required columns must be present and non-empty.
  */
 function validateCsv(records) {
   if (!records || records.length === 0) {
@@ -115,36 +118,19 @@ function validateCsv(records) {
   }
 
   const headers = Object.keys(records[0] || {}).map((h) => h.trim());
-
-  // Check for required InvoiceNumber column
-  if (!headers.includes('InvoiceNumber')) {
-    return 'CSV is missing required column: InvoiceNumber';
+  const missingHeaders = REQUIRED_FIELDS.filter((f) => !headers.includes(f));
+  if (missingHeaders.length > 0) {
+    return `CSV is missing required columns: ${missingHeaders.join(', ')}`;
   }
 
-  // Dynamically detect all ReceiptNumber columns
-  const receiptFields = getReceiptFields(headers);
-
-  // Check that at least one receipt number column exists
-  if (receiptFields.length === 0) {
-    return 'CSV must have at least one receipt number column (ReceiptNumber1, ReceiptNumber2, etc.)';
-  }
-
-  // Validate each row has invoice number
   for (let i = 0; i < records.length; i++) {
     const row = records[i];
-    const invoiceNum = String(row.InvoiceNumber ?? '').trim();
-    if (!invoiceNum) {
-      return `Row ${i + 2}: InvoiceNumber is required`;
-    }
-
-    // Check that at least one receipt number is provided
-    const hasReceipt = receiptFields.some(field => {
-      const val = String(row[field] ?? '').trim();
-      return val !== '';
+    const missingValues = REQUIRED_FIELDS.filter((f) => {
+      const v = row[f];
+      return v === undefined || v === null || String(v).trim() === '';
     });
-
-    if (!hasReceipt) {
-      return `Row ${i + 2}: At least one ReceiptNumber must be provided`;
+    if (missingValues.length > 0) {
+      return `Row ${i + 2} is missing values for: ${missingValues.join(', ')}`;
     }
   }
 
@@ -152,135 +138,52 @@ function validateCsv(records) {
 }
 
 /**
- * Normalizes a single CSV row - extracts invoice and receipt numbers
- * Dynamically detects all ReceiptNumber columns
+ * Normalizes a single CSV row — mirrors Java ApplyReceiptRequest fields.
  */
 function normalizeRow(row) {
-  const headers = Object.keys(row).map(h => h.trim());
-  const receiptFields = getReceiptFields(headers);
-
-  const invoiceNumber = String(row.InvoiceNumber ?? '').trim();
-  const receiptNumbers = receiptFields
-    .map(field => String(row[field] ?? '').trim())
-    .filter(val => val !== '');
-
   return {
-    invoiceNumber,
-    receiptNumbers,
+    TransactionNumber: String(row.TransactionNumber ?? '').trim(),
+    ReceiptNumber:     String(row.ReceiptNumber     ?? '').trim(),
+    AmountApplied:     String(row.AmountApplied     ?? '').trim(),
+    ReceiptCurrency:   String(row.ReceiptCurrency   ?? '').trim().toUpperCase(),
+    TransactionSource: String(row.TransactionSource ?? '').trim(),
+    AccountingDate:    normalizeDate(row.AccountingDate, 'AccountingDate'),
   };
 }
 
 /**
- * Looks up CustomerTransactionId from Oracle REST API by invoice number
+ * Builds the SOAP XML envelope for createApplyReceipt, matching Java
+ * FusionApplyReceiptTransform.mapApplyReceiptModel():
+ *   - TransactionNumber  → invoice transaction number (business key)
+ *   - ReceiptNumber      → receipt number (business key)
+ *   - AmountApplied      → amount to apply
+ *   - ReceiptCurrency    → ISO currency code
+ *   - TransactionSource  → transaction source used on the invoice
+ *   - AccountingDate     → accounting date (also used as ApplicationDate)
+ *   - ApplicationDate    → application date (same value as AccountingDate)
  */
-async function lookupInvoice(invoiceNumber, oracleAuth) {
-  const url = process.env.ORACLE_RECEIVABLES_INVOICES_API_URL;
-  const query = `TransactionNumber=${invoiceNumber}`;
-
-  const response = await axios.get(`${url}?q=${encodeURIComponent(query)}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: `Basic ${oracleAuth}`,
-    },
-    timeout: 30000,
-  });
-
-  const items = response.data?.items || [];
-  if (items.length === 0) {
-    throw new Error(`Invoice '${invoiceNumber}' not found in Oracle`);
+function buildApplyReceiptXml(row) {
+  if (!row.TransactionNumber || !row.ReceiptNumber || !row.AmountApplied ||
+      !row.ReceiptCurrency   || !row.TransactionSource || !row.AccountingDate) {
+    throw new Error('Missing required fields for createApplyReceipt SOAP call');
   }
-
-  // Normalize TransactionDate from ISO 8601 timestamp to YYYY-MM-DD format
-  const rawTransactionDate = items[0].TransactionDate;
-  const normalizedDate = normalizeOracleDate(rawTransactionDate);
-
-  console.log(`[ApplyReceipt] Invoice ${invoiceNumber} TransactionDate: ${rawTransactionDate} -> ${normalizedDate}`);
-
-  return {
-    customerTrxId: String(items[0].CustomerTransactionId),
-    transactionDate: normalizedDate,
-    data: items[0],
-  };
-}
-
-/**
- * Looks up StandardReceiptId, Amount, and ReceiptDate from Oracle REST API by receipt number
- */
-async function lookupReceipt(receiptNumber, oracleAuth) {
-  const url = process.env.ORACLE_STANDARD_RECEIPTS_LOOKUP_API_URL;
-  const query = `ReceiptNumber="${receiptNumber}"`;
-
-  const response = await axios.get(`${url}?q=${encodeURIComponent(query)}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: `Basic ${oracleAuth}`,
-    },
-    timeout: 30000,
-  });
-
-  const items = response.data?.items || [];
-  if (items.length === 0) {
-    throw new Error(`Receipt '${receiptNumber}' not found in Oracle`);
-  }
-
-  const receipt = items[0];
-  return {
-    receiptId: String(receipt.StandardReceiptId),
-    amount: String(receipt.Amount),
-    receiptDate: String(receipt.ReceiptDate),
-    data: receipt,
-  };
-}
-
-/**
- * Builds SOAP XML envelope for the createApplyReceipt operation.
- *
- * Correct envelope structure (per Oracle WSDL):
- *   typ:createApplyReceipt
- *     └─ typ:applyReceipt          <- wrapper element
- *          ├─ com:AmountApplied
- *          ├─ com:ReceiptId
- *          ├─ com:CustomerTrxId
- *          ├─ com:ApplicationDate
- *          └─ com:AccountingDate
- *
- * `transactionDate` is the invoice TransactionDate from the first lookup API
- * and is used for both ApplicationDate and AccountingDate.
- * Includes proper XML declaration and validation.
- */
-function buildApplyReceiptXml(customerTrxId, receiptId, amount, transactionDate) {
-  // Validate inputs
-  if (!customerTrxId || !receiptId || !amount || !transactionDate) {
-    throw new Error('Missing required parameters for createApplyReceipt SOAP call');
-  }
-
-  // Escape special XML characters
-  const escapeXml = (str) => {
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&apos;');
-  };
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
   xmlns:soapenv="${SOAP_ENV_NS}"
   xmlns:typ="${SOAP_TYPES_NS}"
-  xmlns:com="${SOAP_COM_NS}"
-  xmlns:app="${SOAP_APP_NS}">
+  xmlns:com="${SOAP_COM_NS}">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:createApplyReceipt>
       <typ:applyReceipt>
-        <com:AmountApplied>${escapeXml(amount)}</com:AmountApplied>
-        <com:ReceiptId>${escapeXml(receiptId)}</com:ReceiptId>
-        <com:CustomerTrxId>${escapeXml(customerTrxId)}</com:CustomerTrxId>
-        <com:ApplicationDate>${escapeXml(transactionDate)}</com:ApplicationDate>
-        <com:AccountingDate>${escapeXml(transactionDate)}</com:AccountingDate>
+        <com:TransactionNumber>${escapeXml(row.TransactionNumber)}</com:TransactionNumber>
+        <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
+        <com:AmountApplied>${escapeXml(row.AmountApplied)}</com:AmountApplied>
+        <com:ReceiptCurrency>${escapeXml(row.ReceiptCurrency)}</com:ReceiptCurrency>
+        <com:TransactionSource>${escapeXml(row.TransactionSource)}</com:TransactionSource>
+        <com:AccountingDate>${escapeXml(row.AccountingDate)}</com:AccountingDate>
+        <com:ApplicationDate>${escapeXml(row.AccountingDate)}</com:ApplicationDate>
       </typ:applyReceipt>
     </typ:createApplyReceipt>
   </soapenv:Body>
@@ -288,42 +191,28 @@ function buildApplyReceiptXml(customerTrxId, receiptId, amount, transactionDate)
 }
 
 /**
- * Sends SOAP request to apply receipt using OracleSoapClient
+ * Sends the SOAP createApplyReceipt request using OracleSoapClient.
  */
-async function applyReceiptSoap(customerTrxId, receiptId, amount, transactionDate) {
-  const soapXml = buildApplyReceiptXml(customerTrxId, receiptId, amount, transactionDate);
+async function applyReceiptSoap(row) {
+  const soapXml = buildApplyReceiptXml(row);
   const url = process.env.ORACLE_APPLY_RECEIPT_SOAP_URL;
 
   if (!url) {
     throw new Error('ORACLE_APPLY_RECEIPT_SOAP_URL not configured in .env');
   }
 
-  try {
-    console.log(`[ApplyReceipt] Sending SOAP request to ${url}`);
-    console.log(`[ApplyReceipt] CustomerTrxId: ${customerTrxId}, ReceiptId: ${receiptId}, Amount: ${amount}, TransactionDate: ${transactionDate}`);
+  console.log(`[ApplyReceipt] Sending SOAP for TrxNumber: ${row.TransactionNumber}, Receipt: ${row.ReceiptNumber}, Amount: ${row.AmountApplied}`);
 
-    // Create SOAP client with automatic authentication and error handling
-    const soapClient = createOracleSoapClient(url);
+  const soapClient = createOracleSoapClient(url);
+  const response = await soapClient.callWithCustomEnvelope(soapXml, SOAP_ACTION);
 
-    const response = await soapClient.callWithCustomEnvelope(soapXml, SOAP_ACTION);
-
-    console.log(`[ApplyReceipt] SOAP request successful - HTTP ${response.status}`);
-
-    // Convert OracleSoapClient response to expected format
-    return {
-      status: response.status,
-      statusText: response.statusText,
-      data: response.data,
-    };
-
-  } catch (error) {
-    console.error(`[ApplyReceipt] SOAP request failed: ${error.message}`);
-    throw error;
-  }
+  console.log(`[ApplyReceipt] SOAP successful - HTTP ${response.status}`);
+  return { status: response.status, statusText: response.statusText, data: response.data };
 }
 
 /**
- * Preview endpoint - parses CSV and shows what would be sent (with placeholders)
+ * Preview endpoint - parses CSV and shows the exact SOAP payloads that would be sent.
+ * No Oracle API calls are made; all data comes directly from the CSV (Java approach).
  */
 async function previewPayload(req, res, next) {
   try {
@@ -347,38 +236,34 @@ async function previewPayload(req, res, next) {
       return res.status(400).json({ error: validationError });
     }
 
-    const previews = [];
-    for (let i = 0; i < records.length; i++) {
-      const normalized = normalizeRow(records[i]);
-
-      for (const receiptNum of normalized.receiptNumbers) {
-        previews.push({
-          rowNumber: i + 2,
-          invoiceNumber: normalized.invoiceNumber,
-          receiptNumber: receiptNum,
-          soapTemplate: buildApplyReceiptXml(
-            '{CustomerTrxId}',
-            '{ReceiptId}',
-            '{AmountApplied}',
-            '{ApplicationDate/AccountingDate}'
-          ),
-        });
-      }
+    let normalizedRecords;
+    try {
+      normalizedRecords = records.map((r, i) => {
+        try { return normalizeRow(r); }
+        catch (e) { throw new Error(`Row ${i + 2}: ${e.message}`); }
+      });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
     }
 
-    return res.json({
-      totalRows: records.length,
-      totalApplications: previews.length,
-      previews
-    });
+    const previews = normalizedRecords.map((row, i) => ({
+      rowNumber: i + 2,
+      transactionNumber: row.TransactionNumber,
+      receiptNumber: row.ReceiptNumber,
+      amountApplied: row.AmountApplied,
+      soapPayload: buildApplyReceiptXml(row),
+    }));
+
+    return res.json({ totalRows: records.length, previews });
   } catch (err) {
     next(err);
   }
 }
 
 /**
- * Verify endpoint - parses CSV, looks up all IDs, and builds actual SOAP payloads for verification
- * This allows the user to review the exact payloads before sending to SOAP API
+ * Verify endpoint - same as preview but validates CSV data without calling Oracle.
+ * With the Java approach, there is nothing extra to verify since all fields come
+ * directly from the CSV.
  */
 async function verifyPayload(req, res, next) {
   try {
@@ -386,17 +271,8 @@ async function verifyPayload(req, res, next) {
       return res.status(400).json({ error: 'CSV file is required.' });
     }
 
-    // Validate environment configuration
-    const requiredEnvVars = [
-      'ORACLE_RECEIVABLES_INVOICES_API_URL',
-      'ORACLE_STANDARD_RECEIPTS_LOOKUP_API_URL',
-      'ORACLE_APPLY_RECEIPT_SOAP_URL',
-    ];
-    const missing = requiredEnvVars.filter(v => !process.env[v]);
-    if (missing.length > 0) {
-      return res.status(500).json({
-        error: `Missing required environment variables: ${missing.join(', ')}`
-      });
+    if (!process.env.ORACLE_APPLY_RECEIPT_SOAP_URL) {
+      return res.status(500).json({ error: 'Missing required environment variable: ORACLE_APPLY_RECEIPT_SOAP_URL' });
     }
 
     const records = parse(req.file.buffer, {
@@ -415,111 +291,33 @@ async function verifyPayload(req, res, next) {
       return res.status(400).json({ error: validationError });
     }
 
-    const normalizedRecords = records.map(normalizeRow);
-    const oracleAuth = Buffer.from(
-      `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
-    ).toString('base64');
-
-    const verifiedPayloads = [];
-    const errors = [];
-    const limit = pLimit(CONCURRENT_REQUESTS);
-
-    // Process all rows with parallel processing to build payloads
-    const processingPromises = normalizedRecords.map((row, rowIndex) => {
-      return limit(async () => {
-        const rowNumber = rowIndex + 2;
-        const { invoiceNumber, receiptNumbers } = row;
-
-        // Step 1: Look up invoice to get CustomerTrxId
-        let customerTrxId = null;
-        let transactionDate = null;
-        try {
-          const invoiceResult = await pRetry(
-            async () => lookupInvoice(invoiceNumber, oracleAuth),
-            {
-              retries: MAX_RETRIES,
-              minTimeout: RETRY_MIN_TIMEOUT,
-              maxTimeout: RETRY_MAX_TIMEOUT,
-            }
-          );
-          customerTrxId = invoiceResult.customerTrxId;
-          transactionDate = invoiceResult.transactionDate;
-        } catch (invoiceErr) {
-          // Invoice lookup failed - all receipts for this row fail
-          const errorMsg = invoiceErr.message || 'Invoice lookup failed';
-          for (const receiptNum of receiptNumbers) {
-            errors.push({
-              rowNumber,
-              invoiceNumber,
-              receiptNumber: receiptNum,
-              error: errorMsg,
-              step: 'INVOICE_LOOKUP',
-            });
-          }
-          return; // Skip receipt processing for this row
-        }
-
-        // Step 2: For each receipt, look it up and build SOAP payload
-        for (const receiptNum of receiptNumbers) {
-          try {
-            // Look up receipt details
-            const receiptResult = await pRetry(
-              async () => lookupReceipt(receiptNum, oracleAuth),
-              {
-                retries: MAX_RETRIES,
-                minTimeout: RETRY_MIN_TIMEOUT,
-                maxTimeout: RETRY_MAX_TIMEOUT,
-              }
-            );
-
-            const receiptId = receiptResult.receiptId;
-            const amount = receiptResult.amount;
-            const receiptDate = receiptResult.receiptDate;
-            const applicationDate = transactionDate || receiptDate;
-
-            // Build the actual SOAP payload
-            const soapPayload = buildApplyReceiptXml(
-              customerTrxId,
-              receiptId,
-              amount,
-              applicationDate
-            );
-
-            verifiedPayloads.push({
-              rowNumber,
-              invoiceNumber,
-              receiptNumber: receiptNum,
-              customerTrxId,
-              receiptId,
-              amount,
-              applicationDate,
-              soapPayload,
-            });
-          } catch (err) {
-            // Receipt lookup failed
-            const errorMsg = err.message || 'Receipt lookup failed';
-            errors.push({
-              rowNumber,
-              invoiceNumber,
-              receiptNumber: receiptNum,
-              error: errorMsg,
-              step: 'RECEIPT_LOOKUP',
-            });
-          }
-        }
+    let normalizedRecords;
+    try {
+      normalizedRecords = records.map((r, i) => {
+        try { return normalizeRow(r); }
+        catch (e) { throw new Error(`Row ${i + 2}: ${e.message}`); }
       });
-    });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
 
-    // Wait for all processing to complete
-    await Promise.all(processingPromises);
+    const verifiedPayloads = normalizedRecords.map((row, i) => ({
+      rowNumber: i + 2,
+      transactionNumber: row.TransactionNumber,
+      receiptNumber: row.ReceiptNumber,
+      amountApplied: row.AmountApplied,
+      receiptCurrency: row.ReceiptCurrency,
+      transactionSource: row.TransactionSource,
+      accountingDate: row.AccountingDate,
+      soapPayload: buildApplyReceiptXml(row),
+    }));
 
     return res.json({
       totalRows: records.length,
-      totalApplications: normalizedRecords.reduce((sum, r) => sum + r.receiptNumbers.length, 0),
       verifiedPayloadsCount: verifiedPayloads.length,
-      errorsCount: errors.length,
+      errorsCount: 0,
       verifiedPayloads,
-      errors,
+      errors: [],
     });
   } catch (err) {
     next(err);
@@ -527,7 +325,9 @@ async function verifyPayload(req, res, next) {
 }
 
 /**
- * Upload endpoint - processes CSV and applies receipts to invoices
+ * Upload endpoint - processes CSV and sends createApplyReceipt SOAP calls to Oracle.
+ * Mirrors Java FusionReceiptClient.saveApplyStandardReceipt() processing flow:
+ *   for each row → build SOAP from business keys → send to Oracle.
  */
 async function upload(req, res, next) {
   try {
@@ -535,16 +335,9 @@ async function upload(req, res, next) {
       return res.status(400).json({ error: 'CSV file is required.' });
     }
 
-    // Validate environment configuration
-    const requiredEnvVars = [
-      'ORACLE_RECEIVABLES_INVOICES_API_URL',
-      'ORACLE_STANDARD_RECEIPTS_LOOKUP_API_URL',
-      'ORACLE_APPLY_RECEIPT_SOAP_URL',
-    ];
-    const missing = requiredEnvVars.filter(v => !process.env[v]);
-    if (missing.length > 0) {
+    if (!process.env.ORACLE_APPLY_RECEIPT_SOAP_URL) {
       return res.status(500).json({
-        error: `Missing required environment variables: ${missing.join(', ')}`
+        error: 'Missing required environment variable: ORACLE_APPLY_RECEIPT_SOAP_URL',
       });
     }
 
@@ -564,7 +357,15 @@ async function upload(req, res, next) {
       return res.status(400).json({ error: validationError });
     }
 
-    const normalizedRecords = records.map(normalizeRow);
+    let normalizedRecords;
+    try {
+      normalizedRecords = records.map((r, i) => {
+        try { return normalizeRow(r); }
+        catch (e) { throw new Error(`Row ${i + 2}: ${e.message}`); }
+      });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
 
     // Create upload record
     const uploadRecord = await prisma.applyReceiptUpload.create({
@@ -572,15 +373,11 @@ async function upload(req, res, next) {
         userId: req.user.id,
         filename: req.file.originalname,
         totalRecords: normalizedRecords.length,
-        totalReceipts: normalizedRecords.reduce((sum, r) => sum + r.receiptNumbers.length, 0),
+        totalReceipts: normalizedRecords.length,
         status: 'PROCESSING',
         responseLog: '',
       },
     });
-
-    const oracleAuth = Buffer.from(
-      `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
-    ).toString('base64');
 
     let successCount = 0;
     let failureCount = 0;
@@ -590,227 +387,114 @@ async function upload(req, res, next) {
     let lastSuccessMessage = '';
     const startTime = Date.now();
 
-    // Process all rows with parallel processing
+    // Process all rows in parallel — one SOAP call per row (Java approach)
     const limit = pLimit(CONCURRENT_REQUESTS);
 
     const processingPromises = normalizedRecords.map((row, rowIndex) => {
       return limit(async () => {
         const rowNumber = rowIndex + 2;
-        const { invoiceNumber, receiptNumbers } = row;
 
-        // Step 1: Look up invoice to get CustomerTrxId
-        let customerTrxId = null;
-        let transactionDate = null;
         try {
-          const invoiceResult = await pRetry(
-            async () => lookupInvoice(invoiceNumber, oracleAuth),
-            {
-              retries: MAX_RETRIES,
-              minTimeout: RETRY_MIN_TIMEOUT,
-              maxTimeout: RETRY_MAX_TIMEOUT,
-            }
+          const applyResponse = await pRetry(
+            async () => applyReceiptSoap(row),
+            { retries: MAX_RETRIES, minTimeout: RETRY_MIN_TIMEOUT, maxTimeout: RETRY_MAX_TIMEOUT }
           );
-          customerTrxId = invoiceResult.customerTrxId;
-          transactionDate = invoiceResult.transactionDate;
 
-          responseLogs.push(
-            `[ApplyReceipt] Upload #${uploadRecord.id} Row ${rowNumber} Invoice lookup SUCCESS | Invoice: ${invoiceNumber} | CustomerTrxId: ${customerTrxId} | TransactionDate: ${transactionDate || 'N/A'}`
-          );
-        } catch (invoiceErr) {
-          // Invoice lookup failed - all receipts for this row fail
-          for (const receiptNum of receiptNumbers) {
+          const responseText = asText(applyResponse.data);
+
+          if (applyResponse.status >= 400 || responseText.includes('soap:Fault') || responseText.includes('faultstring')) {
             failureCount++;
-            const errorMsg = invoiceErr.message || 'Invoice lookup failed';
+            const faultMsg = extractSoapFaultMessage(responseText) || `HTTP ${applyResponse.status}`;
             failures.push({
               uploadId: uploadRecord.id,
               rowNumber,
-              invoiceNumber,
-              receiptNumber: receiptNum,
-              errorMessage: errorMsg,
-              errorStep: 'INVOICE_LOOKUP',
-              requestPayload: `GET ${process.env.ORACLE_RECEIVABLES_INVOICES_API_URL}?q=TransactionNumber=${invoiceNumber}`,
-              responseBody: snippet(asText(invoiceErr.response?.data), 2000),
-              responseStatus: invoiceErr.response?.status || null,
+              invoiceNumber: row.TransactionNumber,
+              receiptNumber: row.ReceiptNumber,
+              errorMessage: faultMsg,
+              errorStep: 'APPLY_RECEIPT',
+              requestPayload: snippet(buildApplyReceiptXml(row), 2000),
+              responseBody: snippet(responseText, 2000),
+              responseStatus: applyResponse.status,
               customerTrxId: null,
               receiptId: null,
             });
-
             if (!firstErrorMessage) {
-              firstErrorMessage = `Row ${rowNumber}: ${errorMsg}`;
+              firstErrorMessage = `Row ${rowNumber} Receipt ${row.ReceiptNumber}: ${faultMsg}`;
             }
-
             responseLogs.push(
-              `[ApplyReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (Invoice Lookup) | Invoice: ${invoiceNumber} | ${errorMsg}`
+              `[ApplyReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED | TrxNumber: ${row.TransactionNumber} | Receipt: ${row.ReceiptNumber} | ${faultMsg}`
+            );
+          } else {
+            successCount++;
+            lastSuccessMessage = `Applied receipt ${row.ReceiptNumber} to invoice ${row.TransactionNumber}`;
+            responseLogs.push(
+              `[ApplyReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SUCCESS | TrxNumber: ${row.TransactionNumber} | Receipt: ${row.ReceiptNumber} | HTTP ${applyResponse.status}`
             );
           }
-          return; // Skip receipt processing for this row
-        }
-
-        // Step 2 & 3: For each receipt, look it up and apply it
-        for (const receiptNum of receiptNumbers) {
-          let receiptId = null;
-          let amount = null;
-          let receiptDate = null;
-          // ApplicationDate/AccountingDate must come from the invoice
-          // TransactionDate (first lookup API). Fall back to the receipt
-          // date only if the invoice did not return a TransactionDate.
-          let applicationDate = transactionDate;
-
-          try {
-            // Look up receipt details
-            const receiptResult = await pRetry(
-              async () => lookupReceipt(receiptNum, oracleAuth),
-              {
-                retries: MAX_RETRIES,
-                minTimeout: RETRY_MIN_TIMEOUT,
-                maxTimeout: RETRY_MAX_TIMEOUT,
-              }
-            );
-
-            receiptId = receiptResult.receiptId;
-            amount = receiptResult.amount;
-            receiptDate = receiptResult.receiptDate;
-            if (!applicationDate) {
-              applicationDate = receiptDate;
-            }
-
-            responseLogs.push(
-              `[ApplyReceipt] Upload #${uploadRecord.id} Row ${rowNumber} Receipt lookup SUCCESS | Receipt: ${receiptNum} | ReceiptId: ${receiptId} | Amount: ${amount}`
-            );
-
-            // Apply the receipt via SOAP
-            const applyResponse = await pRetry(
-              async () => applyReceiptSoap(customerTrxId, receiptId, amount, applicationDate),
-              {
-                retries: MAX_RETRIES,
-                minTimeout: RETRY_MIN_TIMEOUT,
-                maxTimeout: RETRY_MAX_TIMEOUT,
-              }
-            );
-
-            const responseText = asText(applyResponse.data);
-
-            if (applyResponse.status >= 400 || responseText.includes('soap:Fault') || responseText.includes('faultstring')) {
-              // SOAP fault or HTTP error
-              failureCount++;
-              const faultMsg = extractSoapFaultMessage(responseText) || `HTTP ${applyResponse.status}`;
-              failures.push({
-                uploadId: uploadRecord.id,
-                rowNumber,
-                invoiceNumber,
-                receiptNumber: receiptNum,
-                errorMessage: faultMsg,
-                errorStep: 'APPLY_RECEIPT',
-                requestPayload: buildApplyReceiptXml(customerTrxId, receiptId, amount, applicationDate),
-                responseBody: snippet(responseText, 2000),
-                responseStatus: applyResponse.status,
-                customerTrxId,
-                receiptId,
-              });
-
-              if (!firstErrorMessage) {
-                firstErrorMessage = `Row ${rowNumber} Receipt ${receiptNum}: ${faultMsg}`;
-              }
-
-              responseLogs.push(
-                `[ApplyReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (Apply) | Receipt: ${receiptNum} | ${faultMsg}`
-              );
-            } else {
-              // Success
-              successCount++;
-              lastSuccessMessage = `Applied receipt ${receiptNum} to invoice ${invoiceNumber}`;
-              responseLogs.push(
-                `[ApplyReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SUCCESS | Invoice: ${invoiceNumber} | Receipt: ${receiptNum} | HTTP ${applyResponse.status}`
-              );
-            }
-
-          } catch (err) {
-            // Receipt lookup or apply failed
-            failureCount++;
-            const errorMsg = err.message || 'Receipt processing failed';
-            const errorStep = receiptId ? 'APPLY_RECEIPT' : 'RECEIPT_LOOKUP';
-
-            failures.push({
-              uploadId: uploadRecord.id,
-              rowNumber,
-              invoiceNumber,
-              receiptNumber: receiptNum,
-              errorMessage: errorMsg,
-              errorStep,
-              requestPayload: receiptId
-                ? buildApplyReceiptXml(customerTrxId, receiptId, amount, applicationDate)
-                : `GET ${process.env.ORACLE_STANDARD_RECEIPTS_LOOKUP_API_URL}?q=ReceiptNumber="${receiptNum}"`,
-              responseBody: snippet(asText(err.response?.data), 2000),
-              responseStatus: err.response?.status || null,
-              customerTrxId,
-              receiptId,
-            });
-
-            if (!firstErrorMessage) {
-              firstErrorMessage = `Row ${rowNumber} Receipt ${receiptNum}: ${errorMsg}`;
-            }
-
-            responseLogs.push(
-              `[ApplyReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED (${errorStep}) | Receipt: ${receiptNum} | ${errorMsg}`
-            );
+        } catch (err) {
+          failureCount++;
+          const errorMsg = err.message || 'Apply receipt failed';
+          failures.push({
+            uploadId: uploadRecord.id,
+            rowNumber,
+            invoiceNumber: row.TransactionNumber,
+            receiptNumber: row.ReceiptNumber,
+            errorMessage: errorMsg,
+            errorStep: 'APPLY_RECEIPT',
+            requestPayload: snippet(buildApplyReceiptXml(row), 2000),
+            responseBody: snippet(asText(err.response?.data), 2000),
+            responseStatus: err.response?.status || null,
+            customerTrxId: null,
+            receiptId: null,
+          });
+          if (!firstErrorMessage) {
+            firstErrorMessage = `Row ${rowNumber} Receipt ${row.ReceiptNumber}: ${errorMsg}`;
           }
+          responseLogs.push(
+            `[ApplyReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED | TrxNumber: ${row.TransactionNumber} | Receipt: ${row.ReceiptNumber} | ${errorMsg}`
+          );
         }
       });
     });
 
-    // Wait for all processing to complete
     await Promise.all(processingPromises);
 
     const endTime = Date.now();
     const totalTime = ((endTime - startTime) / 1000).toFixed(2);
-    const totalApplications = normalizedRecords.reduce((sum, r) => sum + r.receiptNumbers.length, 0);
-    const avgTimePerApplication = (totalTime / totalApplications).toFixed(2);
+    const avgTime = normalizedRecords.length > 0
+      ? (totalTime / normalizedRecords.length).toFixed(2) : '0.00';
 
-    // Save failures to database
     if (failures.length > 0) {
       await prisma.applyReceiptFailure.createMany({ data: failures });
     }
 
-    // Determine final status
     const finalStatus =
       failureCount === 0 ? 'SUCCESS' : successCount === 0 ? 'FAILED' : 'PARTIAL';
-
     const responseMessage =
-      firstErrorMessage ||
-      lastSuccessMessage ||
-      `${successCount} succeeded, ${failureCount} failed`;
+      firstErrorMessage || lastSuccessMessage || `${successCount} succeeded, ${failureCount} failed`;
+    const performanceLog = `Total time: ${totalTime}s | Avg per row: ${avgTime}s | Concurrency: ${CONCURRENT_REQUESTS}`;
+    const responseLog = responseLogs.length > 0
+      ? responseLogs.join('\n') + '\n\n' + performanceLog
+      : responseMessage + '\n' + performanceLog;
 
-    const performanceLog = `Total time: ${totalTime}s | Avg per application: ${avgTimePerApplication}s | Concurrency: ${CONCURRENT_REQUESTS}`;
-    const responseLog =
-      responseLogs.length > 0
-        ? responseLogs.join('\n') + '\n\n' + performanceLog
-        : responseMessage + '\n' + performanceLog;
-
-    // Update upload record with final results
     const updatedUpload = await prisma.applyReceiptUpload.update({
       where: { id: uploadRecord.id },
-      data: {
-        successCount,
-        failureCount,
-        status: finalStatus,
-        responseMessage,
-        responseLog,
-      },
+      data: { successCount, failureCount, status: finalStatus, responseMessage, responseLog },
     });
 
     console.log(
-      `[ApplyReceipt] Upload #${uploadRecord.id} COMPLETE | Total Rows: ${normalizedRecords.length} | Total Applications: ${totalApplications} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus} | Time: ${totalTime}s`
+      `[ApplyReceipt] Upload #${uploadRecord.id} COMPLETE | Rows: ${normalizedRecords.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus} | Time: ${totalTime}s`
     );
 
     return res.json({
       uploadId: updatedUpload.id,
       totalRecords: normalizedRecords.length,
-      totalReceipts: totalApplications,
+      totalReceipts: normalizedRecords.length,
       successCount,
       failureCount,
       status: finalStatus,
       processingTimeSeconds: parseFloat(totalTime),
-      averageTimePerApplication: parseFloat(avgTimePerApplication),
+      averageTimePerRow: parseFloat(avgTime),
       concurrency: CONCURRENT_REQUESTS,
       maxRetries: MAX_RETRIES,
     });
@@ -918,16 +602,15 @@ async function getUploadProgress(req, res, next) {
 }
 
 /**
- * Download CSV template
- * Generates template with InvoiceNumber and 6 receipt columns as examples
+ * Download CSV template — matches Java ApplyReceiptRequest fields:
+ *   TransactionNumber, ReceiptNumber, AmountApplied, ReceiptCurrency,
+ *   TransactionSource, AccountingDate
  */
 function downloadTemplate(_req, res) {
-  // Generate dynamic header with InvoiceNumber + ReceiptNumber1-6 as example
-  const header = ['InvoiceNumber', 'ReceiptNumber1', 'ReceiptNumber2', 'ReceiptNumber3', 'ReceiptNumber4', 'ReceiptNumber5', 'ReceiptNumber6'].join(',');
-  const sample = 'BLK-ALAR-00000008,mada-12244,visa-12244,mastercard-12244,amex-12244,apple-12244,google-12244';
-  const sample2 = 'BLK-ALAR-00000009,mada-12245,,,,,';
+  const header = REQUIRED_FIELDS.join(',');
+  const sample = 'BLK-ALAR-00000008,mada-12244,5000.00,SAR,Manual,2024-01-20';
+  const sample2 = 'BLK-ALAR-00000009,visa-12245,3500.50,SAR,Manual,2024-01-21';
 
-  // Add UTF-8 BOM for proper encoding
   const BOM = '\uFEFF';
   const csv = `${BOM}${header}\n${sample}\n${sample2}\n`;
 

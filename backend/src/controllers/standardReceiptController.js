@@ -3,15 +3,16 @@
  * Transforms CSV rows into SOAP envelopes and sends them to Oracle's
  * StandardReceiptService (createStandardReceipt operation).
  *
- * Field mapping from Java StandardReceiptRequest:
- *   ReceiptNumber           - unique receipt identifier
- *   ReceiptDate             - receipt date (also used for GlDate and DepositDate)
- *   Amount                  - receipt amount (positive)
- *   CurrencyCode            - ISO currency code (e.g. SAR)
- *   ReceiptMethodId         - numeric payment method ID from Oracle Fusion
- *   RemittanceBankAccountId - numeric bank / cash account ID from Oracle Fusion
- *   CustomerId              - numeric customer party ID from Oracle Fusion
- *   OrgId                   - numeric Oracle Fusion business unit / org ID
+ * Field mapping from Java StandardReceiptRequest / FusionStdReceiptMapping:
+ *   ReceiptNumber   - unique receipt identifier (format: PaymentType-TransactionNumber)
+ *   ReceiptDate     - receipt date (also used for GlDate and DepositDate)
+ *   Amount          - receipt amount (positive)
+ *   CurrencyCode    - ISO currency code (e.g. SAR)
+ *   ReceiptMethodId - numeric payment method ID from Oracle Fusion
+ *   RegisterName    - VendhqRegister.registerName; used to derive RemittanceBankAccountId
+ *                     (Java: receiptIsCash ? register.cashAccountId : register.bankAccountId)
+ *   CustomerId      - numeric customer party ID from Oracle Fusion
+ *   OrgId           - numeric Oracle Fusion business unit / org ID
  */
 
 const { parse } = require('csv-parse/sync');
@@ -19,14 +20,17 @@ const pLimit = require('p-limit');
 const prisma = require('../services/prisma');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
-// CSV fields matching Java StandardReceiptRequest model (ID-based, not name-based)
+// CSV fields – RegisterName replaces RemittanceBankAccountId so users provide a register
+// name instead of a raw Oracle ID.  The controller resolves the correct bank account ID
+// (cashAccountId or bankAccountId) from VendhqRegister + FusionReceiptMethod, exactly
+// mirroring Java FusionStdReceiptMapping.mapToStandardReceipt().
 const REQUIRED_FIELDS = [
   'ReceiptNumber',
   'ReceiptDate',
   'Amount',
   'CurrencyCode',
   'ReceiptMethodId',
-  'RemittanceBankAccountId',
+  'RegisterName',
   'CustomerId',
   'OrgId',
 ];
@@ -37,6 +41,7 @@ const TEMPLATE_FIELDS = [...REQUIRED_FIELDS];
 const SOAP_ENV_NS   = 'http://schemas.xmlsoap.org/soap/envelope/';
 const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/types/';
 const SOAP_COM_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/';
+const SOAP_ADF_NS   = 'http://xmlns.oracle.com/adf/svc/types/';
 
 const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 3;
 
@@ -117,14 +122,14 @@ function normalizeAmount(raw) {
 
 function normalizeRow(row) {
   return {
-    ReceiptNumber:           String(row.ReceiptNumber           ?? '').trim(),
-    ReceiptDate:             normalizeDate(row.ReceiptDate, 'ReceiptDate'),
-    Amount:                  normalizeAmount(row.Amount),
-    CurrencyCode:            String(row.CurrencyCode            ?? '').trim().toUpperCase(),
-    ReceiptMethodId:         String(row.ReceiptMethodId         ?? '').trim(),
-    RemittanceBankAccountId: String(row.RemittanceBankAccountId ?? '').trim(),
-    CustomerId:              String(row.CustomerId              ?? '').trim(),
-    OrgId:                   String(row.OrgId                   ?? '').trim(),
+    ReceiptNumber:   String(row.ReceiptNumber   ?? '').trim(),
+    ReceiptDate:     normalizeDate(row.ReceiptDate, 'ReceiptDate'),
+    Amount:          normalizeAmount(row.Amount),
+    CurrencyCode:    String(row.CurrencyCode    ?? '').trim().toUpperCase(),
+    ReceiptMethodId: String(row.ReceiptMethodId ?? '').trim(),
+    RegisterName:    String(row.RegisterName    ?? '').trim(),
+    CustomerId:      String(row.CustomerId      ?? '').trim(),
+    OrgId:           String(row.OrgId           ?? '').trim(),
   };
 }
 
@@ -162,11 +167,61 @@ function normalizeRecords(records) {
 }
 
 /**
+ * Mirrors Java FusionStdReceiptMapping lines 33-35:
+ *   setRemittanceBankAccountId(
+ *     receiptMethodMeta.getReceiptIsCash().equals("1")
+ *       ? registerDetails.getCashAccountId().longValue()
+ *       : registerDetails.getBankAccountId().longValue());
+ *
+ * Looks up VendhqRegister by RegisterName, looks up FusionReceiptMethod by
+ * ReceiptMethodId, and returns the appropriate Oracle bank account ID string.
+ * Falls back to parsing the ReceiptNumber prefix ("Cash-...") when the receipt
+ * method is not found in FusionReceiptMethod.
+ * Note: FusionReceiptMethod.receiptIsCash is stored as a Boolean in Prisma.
+ */
+async function resolveRemittanceBankAccountId(row, rowNumber) {
+  const register = await prisma.vendhqRegister.findFirst({
+    where: { registerName: row.RegisterName },
+  });
+  if (!register) {
+    throw new Error(
+      `Row ${rowNumber}: Register '${row.RegisterName}' not found in VendhqRegister. ` +
+      `Check the RegisterName column.`
+    );
+  }
+
+  // Determine isCash: prefer DB lookup, fallback to ReceiptNumber prefix ("Cash-...")
+  const receiptMethod = await prisma.fusionReceiptMethod.findFirst({
+    where: { receiptMethodId: row.ReceiptMethodId },
+  });
+  const isCash = receiptMethod
+    ? receiptMethod.receiptIsCash === true
+    : row.ReceiptNumber.toUpperCase().startsWith('CASH-');
+
+  const remittanceBankAccountId = isCash
+    ? register.cashAccountId
+    : register.bankAccountId;
+
+  if (!remittanceBankAccountId) {
+    const needed = isCash ? 'cashAccountId' : 'bankAccountId';
+    throw new Error(
+      `Row ${rowNumber}: Register '${row.RegisterName}' has no ${needed}. ` +
+      `Update VendhqRegister with the correct Oracle bank account ID.`
+    );
+  }
+
+  return String(remittanceBankAccountId);
+}
+
+/**
  * Generates a SOAP envelope for createStandardReceipt matching
  * Java FusionStdReceiptTransform.mapStdReceiptModel().
  *
  * All three date fields (ReceiptDate, GlDate, DepositDate) use the same
  * value from the CSV ReceiptDate column, matching the Java transform.
+ *
+ * NOTE: row.RemittanceBankAccountId must be populated by
+ * resolveRemittanceBankAccountId() before this function is called.
  */
 function generateSoapEnvelope(row) {
   const requiredFields = [
@@ -182,12 +237,16 @@ function generateSoapEnvelope(row) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
   xmlns:typ="${SOAP_TYPES_NS}"
-  xmlns:com="${SOAP_COM_NS}">
+  xmlns:com="${SOAP_COM_NS}"
+  xmlns:adf="${SOAP_ADF_NS}">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:createStandardReceipt>
       <typ:standardReceipt>
-        <com:Amount>${escapeXml(row.Amount)}</com:Amount>
+        <com:Amount>
+          <adf:Value>${escapeXml(row.Amount)}</adf:Value>
+          <adf:CurrencyCode>${escapeXml(row.CurrencyCode)}</adf:CurrencyCode>
+        </com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
         <com:GlDate>${escapeXml(row.ReceiptDate)}</com:GlDate>
@@ -248,13 +307,25 @@ async function previewXml(req, res, next) {
       return res.status(400).json({ error: err.message });
     }
 
-    const previews = normalizedRecords.map((row, i) => ({
+    // Resolve RemittanceBankAccountId from VendhqRegister for each row
+    const enrichedRecords = [];
+    for (let i = 0; i < normalizedRecords.length; i++) {
+      const rowNumber = i + 2;
+      try {
+        const remittanceBankAccountId = await resolveRemittanceBankAccountId(normalizedRecords[i], rowNumber);
+        enrichedRecords.push({ ...normalizedRecords[i], RemittanceBankAccountId: remittanceBankAccountId });
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
+
+    const previews = enrichedRecords.map((row, i) => ({
       rowNumber: i + 2,
       receiptNumber: row.ReceiptNumber,
       xml: generateSoapEnvelope(row),
     }));
 
-    return res.json({ totalRows: normalizedRecords.length, previews });
+    return res.json({ totalRows: enrichedRecords.length, previews });
   } catch (err) {
     next(err);
   }
@@ -293,12 +364,24 @@ async function upload(req, res, next) {
       return res.status(400).json({ error: err.message });
     }
 
+    // Resolve RemittanceBankAccountId from VendhqRegister for each row before upload
+    const enrichedRecords = [];
+    for (let i = 0; i < normalizedRecords.length; i++) {
+      const rowNumber = i + 2;
+      try {
+        const remittanceBankAccountId = await resolveRemittanceBankAccountId(normalizedRecords[i], rowNumber);
+        enrichedRecords.push({ ...normalizedRecords[i], RemittanceBankAccountId: remittanceBankAccountId });
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
+
     const uploadRecord = await prisma.standardReceiptUpload.create({
       data: {
         userId: req.user.id,
         filename: req.file.originalname,
-        payloadJson: JSON.stringify(normalizedRecords, null, 2),
-        totalRecords: normalizedRecords.length,
+        payloadJson: JSON.stringify(enrichedRecords, null, 2),
+        totalRecords: enrichedRecords.length,
         status: 'PROCESSING',
         responseLog: '',
       },
@@ -314,7 +397,7 @@ async function upload(req, res, next) {
 
     const limit = pLimit(CONCURRENT_REQUESTS);
 
-    const processingPromises = normalizedRecords.map((row, i) => {
+    const processingPromises = enrichedRecords.map((row, i) => {
       return limit(async () => {
         const rowNumber = i + 2;
         const soapXml = generateSoapEnvelope(row);
@@ -356,7 +439,7 @@ async function upload(req, res, next) {
 
     const endTime = Date.now();
     const totalTime = ((endTime - startTime) / 1000).toFixed(2);
-    const avgTimePerRecord = (totalTime / normalizedRecords.length).toFixed(2);
+    const avgTimePerRecord = (totalTime / enrichedRecords.length).toFixed(2);
 
     if (failures.length > 0) {
       await prisma.standardReceiptFailure.createMany({ data: failures });
@@ -377,12 +460,12 @@ async function upload(req, res, next) {
     });
 
     console.log(
-      `[StandardReceipt] Upload #${uploadRecord.id} COMPLETE | Total: ${normalizedRecords.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus} | Time: ${totalTime}s`
+      `[StandardReceipt] Upload #${uploadRecord.id} COMPLETE | Total: ${enrichedRecords.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus} | Time: ${totalTime}s`
     );
 
     return res.json({
       uploadId: updatedUpload.id,
-      totalRecords: normalizedRecords.length,
+      totalRecords: enrichedRecords.length,
       successCount,
       failureCount,
       status: finalStatus,
@@ -495,9 +578,10 @@ async function getUploadProgress(req, res, next) {
 
 function downloadTemplate(_req, res) {
   const header = TEMPLATE_FIELDS.join(',');
-  // Sample uses numeric Oracle IDs matching Java StandardReceiptRequest
+  // Sample row: RegisterName replaces RemittanceBankAccountId – use your store's register name
+  // (matches VendhqRegister.registerName, e.g. AZIZMALL, WADILABAN, RASHIDABHA …)
   const sample =
-    'Visa-BLK-ALAR-00000008,2026-03-05,422.00,SAR,123456789,987654321,300000001234567,300000001421038';
+    'Visa-BLK-ALAR-00000008,2026-03-05,422.00,SAR,300000001518646,AZIZMALL,300000001234567,300000001421038';
   // Add UTF-8 BOM (Byte Order Mark) to ensure proper encoding of Arabic and other Unicode characters
   const BOM = '\uFEFF';
   const csv = `${BOM}${header}\n${sample}\n`;
