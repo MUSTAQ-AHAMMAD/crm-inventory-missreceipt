@@ -33,6 +33,7 @@ model User {
   arInvoiceData      ArInvoiceData[]
   activityLogs       ActivityLog[]
   vendReceiptBatches VendReceiptBatch[]
+  arInvoiceBatches   ArInvoiceBatch[]
 }
 
 // Tracks each bulk inventory CSV upload and its processing results
@@ -195,6 +196,23 @@ model ArInvoiceUpload {
   responseBody    String?  // Full Oracle API response
   httpStatus      Int?     // HTTP status code from Oracle
   createdAt       DateTime @default(now())
+  batchId         Int?     // FK to ArInvoiceBatch (null for legacy records)
+  batch           ArInvoiceBatch? @relation(fields: [batchId], references: [id])
+}
+
+// Tracks a batch of AR Invoice creations submitted together
+model ArInvoiceBatch {
+  id           Int              @id @default(autoincrement())
+  userId       Int
+  user         User             @relation(fields: [userId], references: [id])
+  totalRecords Int              @default(0)
+  successCount Int              @default(0)
+  failureCount Int              @default(0)
+  status       String           @default("PROCESSING") // PROCESSING, SUCCESS, FAILED, PARTIAL
+  message      String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  uploads      ArInvoiceUpload[]
 }
 
 // Audit log for all user actions within the system

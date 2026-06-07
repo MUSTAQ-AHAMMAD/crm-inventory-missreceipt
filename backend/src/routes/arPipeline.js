@@ -15,6 +15,7 @@ const {
   listStandardReceipts,
   listMiscReceipts,
   createInvoiceBatch,
+  getInvoiceBatchProgress,
 } = require('../controllers/arPipelineController');
 
 const router = express.Router();
@@ -32,6 +33,9 @@ router.post('/submit-apply', submitApply);
 
 // Batch AR Invoice creation (pipeline flow)
 router.post('/create-invoice-batch', createInvoiceBatch);
+
+// Poll for batch progress
+router.get('/invoice-batch/:batchId/progress', getInvoiceBatchProgress);
 
 // Individual step data lists
 router.get('/invoices', listInvoices);

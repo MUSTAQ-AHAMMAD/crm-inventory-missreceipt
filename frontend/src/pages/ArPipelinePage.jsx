@@ -618,9 +618,10 @@ export default function ArPipelinePage() {
 
   // ── Step 1 state ──────────────────────────────────────────────────────────
   const [s1, setS1] = useState({
-    status: 'idle', // idle | generating | generated | creating | done | error
+    status: 'idle', // idle | generating | generated | creating | done | error | partial
     payloads: null,        // { positivePayloads, negativePayloads, stats }
-    createResults: null,   // { total, successCount, failureCount, results }
+    createResults: null,   // { total, successCount, failureCount }
+    batchId: null,         // batchId returned from create-invoice-batch (async)
     error: '',
   })
 
@@ -639,6 +640,33 @@ export default function ArPipelinePage() {
     queryFn:  () => api.get('/ar-pipeline/summary').then((r) => r.data),
     refetchInterval: 0,
   })
+
+  // ─── Invoice batch progress polling ──────────────────────────────────────
+  const { data: batchProgress } = useQuery({
+    queryKey: ['arInvoiceBatchProgress', s1.batchId],
+    queryFn:  () => api.get(`/ar-pipeline/invoice-batch/${s1.batchId}/progress`).then((r) => r.data),
+    enabled:  !!(s1.batchId && s1.status === 'creating'),
+    refetchInterval: (data) => {
+      if (!data) return 2000
+      return data.status === 'PROCESSING' ? 2000 : false
+    },
+  })
+
+  // When batch finishes, update s1 state
+  useEffect(() => {
+    if (!batchProgress || s1.status !== 'creating') return
+    const { status, successCount, failureCount, totalRecords } = batchProgress
+    if (status === 'PROCESSING') return
+    const newStatus = failureCount === 0 ? 'done' : successCount === 0 ? 'error' : 'partial'
+    setS1(prev => ({
+      ...prev,
+      status: newStatus,
+      createResults: { total: totalRecords, successCount, failureCount },
+      error: failureCount > 0 && successCount === 0 ? `All ${failureCount} invoices failed.` : '',
+    }))
+    refetchSummary()
+    queryClient.invalidateQueries({ queryKey: ['arPipelinePendingApply'] })
+  }, [batchProgress, s1.status, refetchSummary, queryClient])
 
   // ─── Derived flags ────────────────────────────────────────────────────────
   const filesReady       = !!(paymentFile && salesFile)
@@ -689,21 +717,13 @@ export default function ArPipelinePage() {
 
   const handleCreateInvoices = async () => {
     if (!allInvoicePayloads.length) return
-    setS1(prev => ({ ...prev, status: 'creating', createResults: null, error: '' }))
+    setS1(prev => ({ ...prev, status: 'creating', createResults: null, batchId: null, error: '' }))
     try {
       const res = await api.post('/ar-pipeline/create-invoice-batch', {
         payloads: allInvoicePayloads,
       })
-      const { total, successCount, failureCount, results } = res.data
-      const newStatus = failureCount === 0 ? 'done' : successCount === 0 ? 'error' : 'partial'
-      setS1(prev => ({
-        ...prev,
-        status: newStatus,
-        createResults: { total, successCount, failureCount, results },
-        error: failureCount > 0 && successCount === 0 ? `All ${failureCount} invoices failed.` : '',
-      }))
-      refetchSummary()
-      queryClient.invalidateQueries({ queryKey: ['arPipelinePendingApply'] })
+      // Respond with batchId immediately; polling useQuery handles completion
+      setS1(prev => ({ ...prev, batchId: res.data.batchId }))
     } catch (err) {
       const msg = err.response?.data?.error || 'Batch invoice creation failed.'
       setS1(prev => ({ ...prev, status: 'error', error: msg }))
@@ -960,6 +980,29 @@ export default function ArPipelinePage() {
             </div>
           )}
 
+          {/* Live progress during batch creation */}
+          {s1.status === 'creating' && batchProgress && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
+              <p className="font-semibold text-blue-700 mb-2">⏳ Processing invoices in background…</p>
+              <div className="flex items-center gap-3">
+                <div className="flex-1 bg-blue-100 rounded-full h-2 overflow-hidden">
+                  <div
+                    className="bg-blue-500 h-2 rounded-full transition-all"
+                    style={{ width: `${batchProgress.totalRecords > 0 ? Math.round((batchProgress.processed / batchProgress.totalRecords) * 100) : 0}%` }}
+                  />
+                </div>
+                <span className="text-xs text-blue-700 whitespace-nowrap">
+                  {batchProgress.processed} / {batchProgress.totalRecords}
+                </span>
+              </div>
+              {(batchProgress.successCount > 0 || batchProgress.failureCount > 0) && (
+                <p className="text-xs text-blue-600 mt-1">
+                  ✓ {batchProgress.successCount} succeeded · ✗ {batchProgress.failureCount} failed
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Creation results */}
           {s1.createResults && (
             <div className="space-y-3">
@@ -982,10 +1025,6 @@ export default function ArPipelinePage() {
                   Transaction numbers are now available for receipt generation → proceed to Step 2.
                 </p>
               </div>
-
-              {/* Per-invoice results */}
-              <div className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Creation Results</div>
-              <InvoiceResultsTable results={s1.createResults.results} />
             </div>
           )}
         </div>
