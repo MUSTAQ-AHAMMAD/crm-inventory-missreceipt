@@ -301,28 +301,58 @@ async function uploadVendInvoice(req, res, next) {
 
         const { subinventoryCode, branch, paymentTypes } = storeData;
 
-        // Extract date from sales lines (using Order Ref/Date column)
-        const saleDate = normalizeDate(getFirstNonEmpty(row, ['Order Lines/Order Ref/Date', 'Order Ref/Date', 'Date']), 'Sale Date');
+        // Extract date from sales lines. Try multiple column name variants to handle
+        // different Vend/YASMEEN export formats.
+        const saleDate = normalizeDate(getFirstNonEmpty(row, [
+          'Order Lines/Order Ref/Date',
+          'Order Ref/Date',
+          'Order Lines/Date',
+          'Order Date',
+          'Sale Date',
+          'Transaction Date',
+          'Order Lines/Transaction Date',
+          'Date',
+        ]), 'Sale Date');
 
         // Extract line item details
         const itemNumber = getFirstNonEmpty(row, ['Order Lines/Product Barcode', 'Order Lines/Product/Barcode', 'Product Barcode', 'Barcode', 'Item Number']);
         const description = getFirstNonEmpty(row, ['Order Lines/Product/Name', 'Order Lines/Product', 'Product', 'Description']);
         const quantity = parseNumericField(row, ['Order Lines/Base Quantity', 'Base Quantity', 'Order Lines/Quantity', 'Quantity', 'Qty']);
-        const unitSellingPrice = parseNumericField(row, [
-          // 'Order Lines/Subtotal w/o Tax' is the per-line subtotal exported by Vend;
-          // the user confirmed this column should be mapped directly to UnitSellingPrice.
+
+        // Compute UnitSellingPrice as: Subtotal w/o Tax ÷ Base Quantity
+        // 'Order Lines/Subtotal w/o Tax' (standard Vend) and 'Order Lines/Tax Excl.'
+        // (YASMEEN export) both represent the per-line total excluding tax. Dividing
+        // by quantity converts the line total into the per-unit price that Oracle AR
+        // expects in UnitSellingPrice.
+        const subtotalRaw = getFirstNonEmpty(row, [
           'Order Lines/Subtotal w/o Tax',
           'Subtotal w/o Tax',
-          'Order Lines/Unit Price',
-          'Unit Price',
-          'Order Lines/Sell Price',
-          'Order Lines/Selling Price',
-          'Selling Price',
-          'Price',
-          'Order Lines/Tax Incl',
-          'Tax Incl',
-          'Total',
+          'Order Lines/Tax Excl.',
+          'Order Lines/Tax Excl',
+          'Tax Excl.',
+          'Tax Excl',
         ]);
+        let unitSellingPrice;
+        if (subtotalRaw) {
+          // Column holds the line total (subtotal); divide by quantity to get unit price.
+          const subtotalValue = parseFloat(subtotalRaw.replace(/,/g, '')) || 0;
+          unitSellingPrice = quantity > 0 ? subtotalValue / quantity : subtotalValue;
+        } else {
+          // Fall back to direct unit-price columns (no division needed).
+          unitSellingPrice = parseNumericField(row, [
+            'Order Lines/Unit Price',
+            'Unit Price',
+            'Order Lines/Sell Price',
+            'Order Lines/Selling Price',
+            'Selling Price',
+            'Price',
+            'Order Lines/Tax Incl.',
+            'Order Lines/Tax Incl',
+            'Tax Incl.',
+            'Tax Incl',
+            'Total',
+          ]);
+        }
 
         // Try to extract payment method from sales line (if available)
         // Payment method field might be named: "Payment Method", "Order Lines/Payment Method", etc.
