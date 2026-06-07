@@ -165,12 +165,13 @@ async function storeInvoiceResponse({ uploadId, status, message, oracleData, pay
   // Only insert line records when the invoice was successfully created in Oracle.
   if (status === 'SUCCESS') {
     const lines = src.receivablesInvoiceLines ?? fallback.receivablesInvoiceLines ?? [];
-    for (const line of lines) {
-      await prisma.fusionInvoiceLine.create({
-        data: {
+    if (lines.length > 0) {
+      const now = new Date();
+      await prisma.fusionInvoiceLine.createMany({
+        data: lines.map((line) => ({
           requestId:        uploadId,
           status,
-          requestDate:      new Date(),
+          requestDate:      now,
           headerId:         header.id,
           invoiceNumber:    txnNumberRaw != null ? String(txnNumberRaw) : null,
           lineNumber:       line.LineNumber       != null ? parseInt(line.LineNumber, 10)       : null,
@@ -185,7 +186,7 @@ async function storeInvoiceResponse({ uploadId, status, message, oracleData, pay
           salesOrder:       line.SalesOrder        ?? null,
           salesOrderLine:   line.SalesOrderLine    != null ? parseInt(line.SalesOrderLine, 10) : null,
           region:           'SA',
-        },
+        })),
       });
     }
   }
@@ -292,7 +293,7 @@ async function createInvoice(req, res, next) {
     const uploadRecord = await prisma.arInvoiceUpload.create({
       data: {
         userId: req.user.id,
-        payloadJson: JSON.stringify(payload, null, 2),
+        payloadJson: JSON.stringify(payload),
         responseStatus: 'PROCESSING',
       },
     });
