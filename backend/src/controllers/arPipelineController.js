@@ -46,6 +46,22 @@ function toDateString(val) {
   return m ? m[1] : null;
 }
 
+/**
+ * Parse an Oracle date string to a UTC-midnight Date object.
+ * Always extracts the YYYY-MM-DD component and ignores any time/timezone so
+ * that the stored txnDate aligns with the midnight-UTC range used by
+ * findInvoiceHeader in vendReceiptController.
+ */
+function parseOracleDateToUTCMidnight(value) {
+  if (!value) return null;
+  const s = String(value).trim();
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return new Date(`${m[1]}T00:00:00.000Z`);
+  // Fallback: try generic Date parse
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 /** Extract numeric invoice number embedded in a receipt number like "Mada-2912269" */
 function extractInvoiceNumberFromReceipt(receiptNumber) {
   if (!receiptNumber) return null;
@@ -766,8 +782,8 @@ async function createInvoiceBatch(req, res, next) {
                 paymentTermsName: src.PaymentTerms         ?? payload.PaymentTerms         ?? null,
                 txnSource:        src.TransactionSource    ?? payload.TransactionSource    ?? null,
                 txnType:          src.TransactionType      ?? payload.TransactionType      ?? null,
-                txnDate:          src.TransactionDate      ? new Date(src.TransactionDate)  : null,
-                glDate:           src.AccountingDate       ? new Date(src.AccountingDate)   : null,
+                txnDate:          parseOracleDateToUTCMidnight(src.TransactionDate  ?? payload.TransactionDate),
+                glDate:           parseOracleDateToUTCMidnight(src.AccountingDate   ?? payload.AccountingDate),
                 currencyCode:     src.InvoiceCurrencyCode  ?? payload.InvoiceCurrencyCode  ?? null,
                 txnNumber:        txnNumberRaw ? parseInt(txnNumberRaw, 10) : null,
                 customerTxnId:    custTxnIdRaw ? parseInt(custTxnIdRaw, 10) : null,
