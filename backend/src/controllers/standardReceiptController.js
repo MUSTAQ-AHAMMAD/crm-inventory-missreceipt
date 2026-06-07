@@ -176,6 +176,7 @@ function normalizeRecords(records) {
  * ReceiptMethodId, and returns the appropriate Oracle bank account ID string.
  * Falls back to parsing the ReceiptNumber prefix ("Cash-...") when the receipt
  * method is not found in FusionReceiptMethod.
+ * Note: FusionReceiptMethod.receiptIsCash is stored as a Boolean in Prisma.
  */
 async function resolveRemittanceBankAccountId(row, rowNumber) {
   const register = await prisma.vendhqRegister.findFirst({
@@ -188,17 +189,17 @@ async function resolveRemittanceBankAccountId(row, rowNumber) {
     );
   }
 
-  // Determine isCash: prefer DB lookup, fallback to ReceiptNumber prefix
+  // Determine isCash: prefer DB lookup, fallback to ReceiptNumber prefix ("Cash-...")
   const receiptMethod = await prisma.fusionReceiptMethod.findFirst({
     where: { receiptMethodId: row.ReceiptMethodId },
   });
   const isCash = receiptMethod
-    ? receiptMethod.receiptIsCash
-    : row.ReceiptNumber.toUpperCase().startsWith('CASH');
+    ? receiptMethod.receiptIsCash === true
+    : row.ReceiptNumber.toUpperCase().startsWith('CASH-');
 
   const remittanceBankAccountId = isCash
-    ? (register.cashAccountId || register.bankAccountId)
-    : (register.bankAccountId || register.cashAccountId);
+    ? register.cashAccountId
+    : register.bankAccountId;
 
   if (!remittanceBankAccountId) {
     const needed = isCash ? 'cashAccountId' : 'bankAccountId';
