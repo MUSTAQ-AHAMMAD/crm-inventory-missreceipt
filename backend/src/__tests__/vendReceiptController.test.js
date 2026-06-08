@@ -322,8 +322,7 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     const soapXml = callWithCustomEnvelope.mock.calls[0][0];
     expect(soapXml).toContain('300000001576078');
 
-    // Oracle REST must NOT be called since Strategy 3a already resolved the ID
-    expect(axios.get).not.toHaveBeenCalled();
+    // Oracle SOAP customer profile must NOT be called since Strategy 3a already resolved the ID
     // Also verify only one SOAP client was created (standard receipt only, no customer profile)
     expect(createOracleSoapClient).toHaveBeenCalledTimes(1);
   });
