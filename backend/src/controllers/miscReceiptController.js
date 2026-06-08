@@ -7,6 +7,7 @@ const { parse } = require('csv-parse/sync');
 const pLimit = require('p-limit');
 const prisma = require('../services/prisma');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
+const { buildMiscReceiptEnvelope } = require('../services/soapEnvelopeBuilder');
 
 // Required CSV columns (OrgId is required in CSV but value is ignored - static value used instead)
 // DepositDate removed: Java FusionMiscReceiptTransform only sets ReceiptDate and GlDate
@@ -27,11 +28,6 @@ const STATIC_ORG_ID = '300000001421038';
 
 const TEMPLATE_FIELDS = [...REQUIRED_FIELDS];
 
-// SOAP namespaces - MATCHES WSDL EXACTLY
-const SOAP_ENV_NS    = 'http://schemas.xmlsoap.org/soap/envelope/';
-const SOAP_TYPES_NS  = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/types/';
-const SOAP_COMMON_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
-const SOAP_MIS_NS    = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/model/flex/MiscellaneousReceiptDff/';
 const REQUIRED_CURRENCY = 'SAR';
 
 const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 3;
@@ -137,51 +133,6 @@ function validateCsv(records) {
 }
 
 /**
- * Generates SOAP envelope matching the correct WSDL structure
- * Uses typ: namespace for the operation/wrapper and com: namespace for all fields
- */
-function generateSoapEnvelope(row) {
-  // Validate all required fields are present
-  const requiredFields = [
-    'Amount', 'CurrencyCode', 'ReceiptNumber', 'ReceiptDate',
-    'GlDate', 'ReceivableActivityName',
-    'BankAccountName', 'OrgId',
-  ];
-
-  for (const field of requiredFields) {
-    if (row[field] === undefined || row[field] === null || row[field] === '') {
-      throw new Error(`Missing required field: ${field}`);
-    }
-  }
-
-  const receiptMethodNameTag = row.ReceiptMethodName
-    ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
-    : '';
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
-  xmlns:typ="${SOAP_TYPES_NS}"
-  xmlns:com="${SOAP_COMMON_NS}"
-  xmlns:mis="${SOAP_MIS_NS}">
-  <soapenv:Header/>
-  <soapenv:Body>
-    <typ:createMiscellaneousReceipt>
-      <typ:miscellaneousReceipt>
-        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(row.Amount)}</com:Amount>
-        <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
-        <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
-        <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
-        <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
-${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
-        <com:BankAccountName>${escapeXml(row.BankAccountName)}</com:BankAccountName>
-        <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
-      </typ:miscellaneousReceipt>
-    </typ:createMiscellaneousReceipt>
-  </soapenv:Body>
-</soapenv:Envelope>`;
-}
-
-/**
  * Sends SOAP request using OracleSoapClient with proper authentication and error handling
  */
 async function sendSoapRequest(soapXml, receiptNumber) {
@@ -241,7 +192,7 @@ async function previewXml(req, res, next) {
     const previews = normalizedRecords.map((row, i) => ({
       rowNumber: i + 2,
       receiptNumber: row.ReceiptNumber,
-      xml: generateSoapEnvelope(row),
+      xml: buildMiscReceiptEnvelope(row),
     }));
 
     return res.json({ totalRows: normalizedRecords.length, previews });
@@ -287,7 +238,7 @@ async function upload(req, res, next) {
       data: {
         userId: req.user.id,
         filename: req.file.originalname,
-        xmlPayload: normalizedRecords.map(generateSoapEnvelope).join('\n\n'),
+        xmlPayload: normalizedRecords.map(buildMiscReceiptEnvelope).join('\n\n'),
         totalRecords: normalizedRecords.length,
         responseStatus: 'PROCESSING',
         responseLog: '',
@@ -304,7 +255,7 @@ async function upload(req, res, next) {
     const processingPromises = normalizedRecords.map((row, i) => {
       return limit(async () => {
         const rowNumber = i + 2;
-        const soapXml = generateSoapEnvelope(row);
+        const soapXml = buildMiscReceiptEnvelope(row);
 
         try {
           console.log(`\n📤 Processing Row ${rowNumber}: ${row.ReceiptNumber}`);

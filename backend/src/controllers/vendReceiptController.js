@@ -30,6 +30,7 @@ const pLimit = require('p-limit');
 const prisma = require('../services/prisma');
 const fusionMetadataService = require('../services/fusionSalesMetadataService');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
+const { buildStandardReceiptEnvelope, buildMiscReceiptEnvelope } = require('../services/soapEnvelopeBuilder');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -75,16 +76,6 @@ async function resolveOrgIdByRegion(region) {
   });
   return receipt?.orgId || STATIC_ORG_ID;
 }
-
-// SOAP namespaces for MiscellaneousReceiptService
-const SOAP_ENV_NS    = 'http://schemas.xmlsoap.org/soap/envelope/';
-const SOAP_TYPES_NS  = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/types/';
-const SOAP_COMMON_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
-const SOAP_MIS_NS    = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/model/flex/MiscellaneousReceiptDff/';
-
-// SOAP namespaces for StandardReceiptService (createStandardReceipt)
-const STD_SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/types/';
-const STD_SOAP_COM_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -184,76 +175,6 @@ function round4(n) {
 
 function round2(n) {
   return Math.round(n * 100) / 100;
-}
-
-function escapeXml(v) {
-  return String(v ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-function buildMiscSoapEnvelope(row) {
-  const methodTag = row.ReceiptMethodName
-    ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
-    : '';
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
-  xmlns:typ="${SOAP_TYPES_NS}"
-  xmlns:com="${SOAP_COMMON_NS}"
-  xmlns:mis="${SOAP_MIS_NS}">
-  <soapenv:Header/>
-  <soapenv:Body>
-    <typ:createMiscellaneousReceipt>
-      <typ:miscellaneousReceipt>
-        <com:Amount>${escapeXml(row.Amount)}</com:Amount>
-        <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
-        <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
-        <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
-        <com:DepositDate>${escapeXml(row.DepositDate)}</com:DepositDate>
-        <com:GlDate>${escapeXml(row.GlDate)}</com:GlDate>
-${methodTag}        <com:ReceivableActivityName>${escapeXml(row.ReceivableActivityName)}</com:ReceivableActivityName>
-        <com:BankAccountNumber>${escapeXml(row.BankAccountNumber)}</com:BankAccountNumber>
-        <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
-      </typ:miscellaneousReceipt>
-    </typ:createMiscellaneousReceipt>
-  </soapenv:Body>
-</soapenv:Envelope>`;
-}
-
-/**
- * Builds a SOAP envelope for createStandardReceipt, mirroring
- * standardReceiptController.js / Java FusionStdReceiptTransform.
- *
- * Required fields in row:
- *   ReceiptNumber, ReceiptDate, Amount, CurrencyCode,
- *   ReceiptMethodId, RemittanceBankAccountId, CustomerId, OrgId
- */
-function buildStandardSoapEnvelope(row) {
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
-  xmlns:typ="${STD_SOAP_TYPES_NS}"
-  xmlns:com="${STD_SOAP_COM_NS}">
-  <soapenv:Header/>
-  <soapenv:Body>
-    <typ:createStandardReceipt>
-      <typ:standardReceipt>
-        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(row.Amount)}</com:Amount>
-        <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
-        <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
-        <com:GlDate>${escapeXml(row.ReceiptDate)}</com:GlDate>
-        <com:DepositDate>${escapeXml(row.ReceiptDate)}</com:DepositDate>
-        <com:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</com:ReceiptMethodId>
-        <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
-        <com:RemittanceBankAccountId>${escapeXml(row.RemittanceBankAccountId)}</com:RemittanceBankAccountId>
-        <com:CustomerId>${escapeXml(row.CustomerId)}</com:CustomerId>
-        <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
-      </typ:standardReceipt>
-    </typ:createStandardReceipt>
-  </soapenv:Body>
-</soapenv:Envelope>`;
 }
 
 /**
@@ -759,7 +680,7 @@ async function submitStandardReceipts(req, res, next) {
           return;
         }
 
-        const soapXml = buildStandardSoapEnvelope(soapRow);
+        const soapXml = buildStandardReceiptEnvelope(soapRow);
 
         let soapResponse = null;
         let soapErr = null;
@@ -889,7 +810,7 @@ async function submitMiscReceipts(req, res, next) {
     const tasks = payloads.map((payload, i) =>
       limit(async () => {
         const { _meta, ...apiPayload } = payload;
-        const soapXml = buildMiscSoapEnvelope(apiPayload);
+        const soapXml = buildMiscReceiptEnvelope(apiPayload);
 
         try {
           const soapClient = createOracleSoapClient(process.env.ORACLE_SOAP_URL);
