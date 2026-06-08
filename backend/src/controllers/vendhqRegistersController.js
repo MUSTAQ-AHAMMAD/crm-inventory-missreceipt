@@ -61,6 +61,7 @@ async function createRegister(req, res, next) {
       region,
       giftAccount,
       giftAccountId,
+      customerAccountId,
     } = req.body;
 
     if (!registerId || !registerName) {
@@ -86,6 +87,7 @@ async function createRegister(req, res, next) {
         region: region || null,
         giftAccount: giftAccount || null,
         giftAccountId: giftAccountId || null,
+        customerAccountId: customerAccountId || null,
       },
     });
 
@@ -117,6 +119,7 @@ async function updateRegister(req, res, next) {
       region,
       giftAccount,
       giftAccountId,
+      customerAccountId,
     } = req.body;
 
     if (!registerId || !registerName) {
@@ -144,6 +147,7 @@ async function updateRegister(req, res, next) {
         region: region || null,
         giftAccount: giftAccount || null,
         giftAccountId: giftAccountId || null,
+        customerAccountId: customerAccountId || null,
       },
     });
 
