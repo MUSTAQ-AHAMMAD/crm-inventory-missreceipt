@@ -300,12 +300,13 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
     }
   }
 
-  // ── Strategy 1b: txnNumber → FusionInvoiceHeader → FusionSalesMetadata ───
+  // ── Strategy 1b: txnNumber → FusionInvoiceHeader → FusionSalesMetadata → Oracle REST ───
   // Looks up the invoice by its transaction number, then resolves the matching
   // FusionSalesMetadata record via the invoice's billToLocation (siteNumber).
   // Falls back to matching by billToAccNumber when billToLocation is absent.
-  // Returns billToAccount as the CustomerId – works on first run with no prior
-  // FusionStandardReceipt records.
+  // Uses Oracle REST to convert the account number into the real CUST_ACCOUNT_ID
+  // required by StandardReceipt SOAP — billToAccount is the AR account NUMBER
+  // (e.g. 57014), not the internal CUST_ACCOUNT_ID (e.g. 300000158776674).
   if (txnNumber) {
     const txnNum = parseInt(String(txnNumber).replace(/\D/g, ''), 10);
     if (!isNaN(txnNum) && txnNum > 0) {
@@ -329,8 +330,12 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
           });
         }
         if (meta?.billToAccount) {
-          console.log(`[vendReceipt] Strategy 1b: resolved CustomerId=${meta.billToAccount} from FusionSalesMetadata via txnNumber=${txnNum}`);
-          return String(meta.billToAccount);
+          const realId = await lookupCustomerAccountIdFromOracle(meta.billToAccount);
+          if (realId) {
+            console.log(`[vendReceipt] Strategy 1b: resolved CustomerId=${realId} from Oracle REST via txnNumber=${txnNum}`);
+            return realId;
+          }
+          // Fall through when Oracle REST is unavailable
         }
       }
     }
@@ -396,10 +401,11 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
     }
   }
 
-  // ── Strategy 3b: subinventory → FusionSalesMetadata → billToAccount ───────
+  // ── Strategy 3b: subinventory → FusionSalesMetadata → Oracle REST ────────
   // Direct fallback when no prior FusionStandardReceipt records exist for this
-  // store.  Looks up FusionSalesMetadata by normalized subinventory and returns
-  // billToAccount as the CustomerId.
+  // store.  Looks up FusionSalesMetadata by normalized subinventory, then uses
+  // Oracle REST to convert billToAccount (AR account NUMBER) into the real
+  // CUST_ACCOUNT_ID required by StandardReceipt SOAP.
   if (subinventory) {
     const normalizedSubinventory = String(subinventory)
       .replace(/[\u200B-\u200D\uFEFF]/g, '')
@@ -411,8 +417,12 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
       orderBy: { id: 'asc' },
     });
     if (meta?.billToAccount) {
-      console.log(`[vendReceipt] Strategy 3b: resolved CustomerId=${meta.billToAccount} from FusionSalesMetadata via subinventory=${normalizedSubinventory}`);
-      return String(meta.billToAccount);
+      const realId = await lookupCustomerAccountIdFromOracle(meta.billToAccount);
+      if (realId) {
+        console.log(`[vendReceipt] Strategy 3b: resolved CustomerId=${realId} from Oracle REST via subinventory=${normalizedSubinventory}`);
+        return realId;
+      }
+      // Fall through to Strategy 4
     }
   }
 
