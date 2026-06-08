@@ -3,10 +3,10 @@
  *
  * Covers the lookupCustomerPartyId logic inside submitStandardReceipts:
  *  - Strategy 1:  invoice-header → receipt chain
- *  - Strategy 1b: txnNumber → FusionInvoiceHeader → FusionSalesMetadata → Oracle REST → CUST_ACCOUNT_ID
+ *  - Strategy 1b: txnNumber → FusionInvoiceHeader → FusionSalesMetadata → Oracle SOAP → CUST_ACCOUNT_ID
  *  - Strategy 2:  bank-account-ID fallback (seeded historical data)
- *  - Strategy 3b: subinventory → FusionSalesMetadata → Oracle REST → CUST_ACCOUNT_ID
- *  - Strategy 4:  Oracle REST customer lookup
+ *  - Strategy 3b: subinventory → FusionSalesMetadata → Oracle SOAP → CUST_ACCOUNT_ID
+ *  - Strategy 4:  Oracle SOAP customer lookup (ReceivablesCustomerProfileService)
  *  - Correct SOAP CustomerId population
  */
 
@@ -176,34 +176,39 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     expect(createOracleSoapClient).not.toHaveBeenCalled();
   });
 
-  test('strategy 4: resolves party ID via Oracle REST customer lookup when DB has no records', async () => {
+  test('strategy 4: resolves party ID via Oracle SOAP customer lookup when DB has no records', async () => {
     prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
     prisma.fusionStandardReceipt.findFirst.mockResolvedValue(null);
-    process.env.ORACLE_CUSTOMERS_API_URL = 'http://test.oracle/customers';
-    // Strategy 4: Oracle REST returns CustomerAccountId
-    axios.get.mockResolvedValue({ data: { items: [{ CustomerAccountId: '300000001576078' }] } });
+    process.env.ORACLE_CUSTOMER_PROFILE_SOAP_URL = 'http://test.oracle/customer-profile';
+    // Strategy 4: customer profile SOAP returns CustomerAccountId
+    createOracleSoapClient.mockImplementationOnce(() => ({
+      callWithCustomEnvelope: jest.fn().mockResolvedValue({
+        status: 200,
+        data: '<CustomerAccountId>300000001576078</CustomerAccountId>',
+      }),
+    }));
 
     const res = await request(app)
       .post('/submit-standard')
       .send({ payloads: [BASE_PAYLOAD] });
 
-    delete process.env.ORACLE_CUSTOMERS_API_URL;
+    delete process.env.ORACLE_CUSTOMER_PROFILE_SOAP_URL;
 
     expect(res.status).toBe(200);
     expect(res.body.successCount).toBe(1);
 
-    // SOAP envelope must contain the Oracle CustomerAccountId (not the account number "57013")
-    const { callWithCustomEnvelope } = createOracleSoapClient.mock.results[0].value;
+    // Standard receipt SOAP is results[1]; results[0] is the customer profile client
+    const { callWithCustomEnvelope } = createOracleSoapClient.mock.results[1].value;
     const soapXml = callWithCustomEnvelope.mock.calls[0][0];
+    // SOAP envelope must contain the Oracle CustomerAccountId (not the account number "57013")
     expect(soapXml).toContain('300000001576078');
     expect(soapXml).not.toContain('>57013<');
 
-    // Oracle REST must be queried with AccountNumber (Oracle Fusion field), not CustomerNumber
-    const axiosCalls = axios.get.mock.calls;
-    const firstOracleCall = axiosCalls.find(([, config]) => config?.params?.q?.includes('57013'));
-    expect(firstOracleCall).toBeDefined();
-    expect(firstOracleCall[1].params.q).toMatch(/AccountNumber='57013'/);
-    expect(firstOracleCall[1].params.q).not.toMatch(/CustomerNumber='57013'/);
+    // Verify customer profile SOAP was called with the correct account number
+    const custProfileClient = createOracleSoapClient.mock.results[0].value;
+    const custProfileXml = custProfileClient.callWithCustomEnvelope.mock.calls[0][0];
+    expect(custProfileXml).toContain('57013');
+    expect(custProfileXml).toContain('getActiveCustomerProfile');
   });
 
   test('SOAP success + DB failure: receipt counted as success, error does not propagate', async () => {
@@ -229,7 +234,7 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     expect(res.body.failureCount).toBe(0);
   });
 
-  test('strategy 1b: resolves CustomerId via txnNumber → FusionInvoiceHeader → FusionSalesMetadata → Oracle REST', async () => {
+  test('strategy 1b: resolves CustomerId via txnNumber → FusionInvoiceHeader → FusionSalesMetadata → Oracle SOAP', async () => {
     // No prior receipt records → strategies 1, 2, 3 all return nothing
     prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
     prisma.fusionStandardReceipt.findFirst.mockResolvedValue(null);
@@ -239,9 +244,14 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
       billToAccNumber: 55012,
     });
     prisma.fusionSalesMetadata.findFirst.mockResolvedValue({ billToAccount: 55012 });
-    // Oracle REST converts account number 55012 to real CUST_ACCOUNT_ID
-    process.env.ORACLE_CUSTOMERS_API_URL = 'http://test.oracle/customers';
-    axios.get.mockResolvedValue({ data: { items: [{ CustomerAccountId: '300000158776674' }] } });
+    // Oracle SOAP converts account number 55012 to real CUST_ACCOUNT_ID
+    process.env.ORACLE_CUSTOMER_PROFILE_SOAP_URL = 'http://test.oracle/customer-profile';
+    createOracleSoapClient.mockImplementationOnce(() => ({
+      callWithCustomEnvelope: jest.fn().mockResolvedValue({
+        status: 200,
+        data: '<CustomerAccountId>300000158776674</CustomerAccountId>',
+      }),
+    }));
 
     const payloadWithMeta = {
       ...BASE_PAYLOAD,
@@ -256,15 +266,16 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
         .send({ payloads: [payloadWithMeta] });
     } finally {
       consoleSpy.mockRestore();
-      delete process.env.ORACLE_CUSTOMERS_API_URL;
+      delete process.env.ORACLE_CUSTOMER_PROFILE_SOAP_URL;
     }
 
     expect(res.status).toBe(200);
     expect(res.body.successCount).toBe(1);
 
-    // SOAP envelope must contain the real Oracle CUST_ACCOUNT_ID (not the account number 55012)
-    const { callWithCustomEnvelope } = createOracleSoapClient.mock.results[0].value;
+    // Standard receipt SOAP is results[1]; results[0] is the customer profile client
+    const { callWithCustomEnvelope } = createOracleSoapClient.mock.results[1].value;
     const soapXml = callWithCustomEnvelope.mock.calls[0][0];
+    // SOAP envelope must contain the real Oracle CUST_ACCOUNT_ID (not the account number 55012)
     expect(soapXml).toContain('300000158776674');
     expect(soapXml).not.toContain('>55012<');
 
@@ -313,9 +324,11 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
 
     // Oracle REST must NOT be called since Strategy 3a already resolved the ID
     expect(axios.get).not.toHaveBeenCalled();
+    // Also verify only one SOAP client was created (standard receipt only, no customer profile)
+    expect(createOracleSoapClient).toHaveBeenCalledTimes(1);
   });
 
-  test('strategy 3b: auto-caches CUST_ACCOUNT_ID to VendhqRegister.customerAccountId after Oracle REST success', async () => {
+  test('strategy 3b: auto-caches CUST_ACCOUNT_ID to VendhqRegister.customerAccountId after Oracle SOAP success', async () => {
     // No prior receipt records
     prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
     prisma.fusionInvoiceHeader.findFirst.mockResolvedValue(null);
@@ -327,10 +340,15 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
       cashAccountId: null,
       customerAccountId: null,
     });
-    // Strategy 3b: metadata found, Oracle REST returns ID
+    // Strategy 3b: metadata found, Oracle SOAP returns ID
     prisma.fusionSalesMetadata.findFirst.mockResolvedValue({ billToAccount: 55012 });
-    process.env.ORACLE_CUSTOMERS_API_URL = 'http://test.oracle/customers';
-    axios.get.mockResolvedValue({ data: { items: [{ CustomerAccountId: '300000158776674' }] } });
+    process.env.ORACLE_CUSTOMER_PROFILE_SOAP_URL = 'http://test.oracle/customer-profile';
+    createOracleSoapClient.mockImplementationOnce(() => ({
+      callWithCustomEnvelope: jest.fn().mockResolvedValue({
+        status: 200,
+        data: '<CustomerAccountId>300000158776674</CustomerAccountId>',
+      }),
+    }));
 
     const payloadWithMeta = {
       ...BASE_PAYLOAD,
@@ -345,7 +363,7 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
         .send({ payloads: [payloadWithMeta] });
     } finally {
       consoleSpy.mockRestore();
-      delete process.env.ORACLE_CUSTOMERS_API_URL;
+      delete process.env.ORACLE_CUSTOMER_PROFILE_SOAP_URL;
     }
 
     expect(res.status).toBe(200);
@@ -360,7 +378,7 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     );
   });
 
-  test('strategy 3b: resolves CustomerId via subinventory → FusionSalesMetadata → Oracle REST', async () => {
+  test('strategy 3b: resolves CustomerId via subinventory → FusionSalesMetadata → Oracle SOAP', async () => {
     // No invoice headers or prior receipts at all (brand-new store)
     prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
     prisma.fusionInvoiceHeader.findFirst.mockResolvedValue(null); // no invoice for txnNumber
@@ -369,9 +387,14 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     prisma.vendhqRegister.findFirst.mockResolvedValue(null);
     // Strategy 3b: metadata found directly by subinventory
     prisma.fusionSalesMetadata.findFirst.mockResolvedValue({ billToAccount: 55012 });
-    // Oracle REST converts account number 55012 to real CUST_ACCOUNT_ID
-    process.env.ORACLE_CUSTOMERS_API_URL = 'http://test.oracle/customers';
-    axios.get.mockResolvedValue({ data: { items: [{ CustomerAccountId: '300000158776674' }] } });
+    // Oracle SOAP converts account number 55012 to real CUST_ACCOUNT_ID
+    process.env.ORACLE_CUSTOMER_PROFILE_SOAP_URL = 'http://test.oracle/customer-profile';
+    createOracleSoapClient.mockImplementationOnce(() => ({
+      callWithCustomEnvelope: jest.fn().mockResolvedValue({
+        status: 200,
+        data: '<CustomerAccountId>300000158776674</CustomerAccountId>',
+      }),
+    }));
 
     const payloadWithMeta = {
       ...BASE_PAYLOAD,
@@ -386,13 +409,14 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
         .send({ payloads: [payloadWithMeta] });
     } finally {
       consoleSpy.mockRestore();
-      delete process.env.ORACLE_CUSTOMERS_API_URL;
+      delete process.env.ORACLE_CUSTOMER_PROFILE_SOAP_URL;
     }
 
     expect(res.status).toBe(200);
     expect(res.body.successCount).toBe(1);
 
-    const { callWithCustomEnvelope } = createOracleSoapClient.mock.results[0].value;
+    // Standard receipt SOAP is results[1]; results[0] is the customer profile client
+    const { callWithCustomEnvelope } = createOracleSoapClient.mock.results[1].value;
     const soapXml = callWithCustomEnvelope.mock.calls[0][0];
     // SOAP envelope must contain the real Oracle CUST_ACCOUNT_ID (not the account number 55012)
     expect(soapXml).toContain('300000158776674');
@@ -501,8 +525,13 @@ describe('submitStandardReceipts – skip rules', () => {
   test('processes normal receipts (positive, no credit, non-zero) without skipping', async () => {
     prisma.fusionStandardReceipt.findFirst.mockResolvedValue(null);
     prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
-    axios.get.mockResolvedValue({ data: { items: [{ CustomerAccountId: '300000001576078' }] } });
-    process.env.ORACLE_CUSTOMERS_API_URL = 'http://test.oracle/customers';
+    process.env.ORACLE_CUSTOMER_PROFILE_SOAP_URL = 'http://test.oracle/customer-profile';
+    createOracleSoapClient.mockImplementationOnce(() => ({
+      callWithCustomEnvelope: jest.fn().mockResolvedValue({
+        status: 200,
+        data: '<CustomerAccountId>300000001576078</CustomerAccountId>',
+      }),
+    }));
 
     const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     const res = await request(app)
@@ -510,7 +539,7 @@ describe('submitStandardReceipts – skip rules', () => {
       .send({ payloads: [BASE_PAYLOAD] });
     consoleSpy.mockRestore();
 
-    delete process.env.ORACLE_CUSTOMERS_API_URL;
+    delete process.env.ORACLE_CUSTOMER_PROFILE_SOAP_URL;
 
     expect(res.status).toBe(200);
     expect(res.body.skipCount).toBe(0);

@@ -25,13 +25,12 @@
  *   amount      = 0 - miscCharges
  */
 
-const axios = require('axios');
 const XLSX = require('xlsx');
 const pLimit = require('p-limit');
 const prisma = require('../services/prisma');
 const fusionMetadataService = require('../services/fusionSalesMetadataService');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
-const { buildStandardReceiptEnvelope, buildMiscReceiptEnvelope } = require('../services/soapEnvelopeBuilder');
+const { buildStandardReceiptEnvelope, buildMiscReceiptEnvelope, buildCustomerProfileEnvelope, CUST_PROFILE_SOAP_ACTION } = require('../services/soapEnvelopeBuilder');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -180,65 +179,40 @@ function round2(n) {
 
 /**
  * Resolve Oracle CustomerAccountId from a customer account number via the
- * Oracle Fusion REST API.
+ * Oracle Fusion SOAP ReceivablesCustomerProfileService.
  *
- * Mirrors Java FusionCustomerProfileClient.getCustomerAccountId(accountNumber)
- * and oracle-crm oracleClient.getCustomer(accountNumber).
+ * Mirrors Java FusionCustomerProfileClient.getCustomerAccountId(accountNumber):
+ *   customerProfileService.getActiveCustomerProfile(customerProfile)
  *
- * Requires ORACLE_CUSTOMERS_API_URL, ORACLE_USERNAME, ORACLE_PASSWORD in .env.
+ * Requires ORACLE_CUSTOMER_PROFILE_SOAP_URL, ORACLE_USERNAME, ORACLE_PASSWORD in .env.
  *
  * @param {string|number} accountNumber - Oracle AR customer account number
  * @returns {string|null} CustomerAccountId as a string, or null on failure
  */
 async function lookupCustomerAccountIdFromOracle(accountNumber) {
-  const url = process.env.ORACLE_CUSTOMERS_API_URL;
-  if (!url || !accountNumber) return null;
+  const soapUrl = process.env.ORACLE_CUSTOMER_PROFILE_SOAP_URL;
+  if (!soapUrl || !accountNumber) return null;
 
-  // Sanitize: Oracle AR account numbers are numeric; strip anything that is not
-  // a digit, letter, hyphen, or underscore before interpolating into the query.
-  // This also removes single-quotes and other special characters, preventing
-  // any injection through the Oracle Fusion SCIM-style q parameter.
-  const safeAccNumber = String(accountNumber).replace(/[^A-Za-z0-9\-_]/g, '');
-  if (!safeAccNumber) return null;
+  try {
+    const soapXml = buildCustomerProfileEnvelope(accountNumber);
+    const soapClient = createOracleSoapClient(soapUrl);
+    const response = await soapClient.callWithCustomEnvelope(soapXml, CUST_PROFILE_SOAP_ACTION);
 
-  const oracleAuth = Buffer.from(
-    `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
-  ).toString('base64');
-
-  // Oracle Fusion REST API uses 'AccountNumber' as the customer account number
-  // field name (maps to HZ_CUST_ACCOUNTS.ACCOUNT_NUMBER).  Some older Oracle
-  // versions also recognise 'CustomerAccountNumber'.  Try both before giving up.
-  // safeAccNumber contains only [A-Za-z0-9\-_] so the interpolation is safe.
-  const queryFields = [
-    { field: 'AccountNumber',        q: `AccountNumber='${safeAccNumber}'` },
-    { field: 'CustomerAccountNumber', q: `CustomerAccountNumber='${safeAccNumber}'` },
-  ];
-
-  for (const { field, q } of queryFields) {
-    try {
-      const response = await axios.get(url, {
-        params: {
-          q,
-          fields: 'CustomerAccountId',
-          limit: 1,
-        },
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          Authorization: `Basic ${oracleAuth}`,
-        },
-        timeout: 30000,
-      });
-      const items = response.data?.items || [];
-      if (items.length > 0 && items[0].CustomerAccountId) {
-        return String(items[0].CustomerAccountId);
-      }
-    } catch (err) {
-      console.warn(`[vendReceipt] Oracle customer lookup via ${field} failed for account '${accountNumber}': ${err.message}`);
+    // Extract CustomerAccountId from the XML response.
+    // The element appears in the customerProfileService namespace but we match by local name
+    // to avoid fragile namespace-prefix coupling.
+    const match = response.data && response.data.match(/<[^>]*:?CustomerAccountId[^>]*>\s*(\d+)\s*<\/[^>]*:?CustomerAccountId>/);
+    if (match) {
+      console.log(`[vendReceipt] SOAP customer lookup resolved CustomerAccountId=${match[1]} for account '${accountNumber}'`);
+      return match[1];
     }
+    console.warn(`[vendReceipt] SOAP customer lookup returned no CustomerAccountId for account '${accountNumber}'`);
+  } catch (err) {
+    console.warn(`[vendReceipt] Oracle SOAP customer lookup failed for account '${accountNumber}': ${err.message}`);
   }
   return null;
 }
+
 
 /**
  * Look up the Oracle customer party ID (CustomerId) for a given account number.
@@ -269,18 +243,19 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
  *   store), use it directly.  This makes the system Oracle-REST-independent after
  *   the first successful resolution.
  *
- * Strategy 3b: Subinventory → FusionSalesMetadata → Oracle REST → CUST_ACCOUNT_ID
+ * Strategy 3b: Subinventory → FusionSalesMetadata → Oracle SOAP → CUST_ACCOUNT_ID
  *   When the subinventory is known but no prior receipt records exist, look up
- *   FusionSalesMetadata directly by subinventory, then use Oracle REST to convert
+ *   FusionSalesMetadata directly by subinventory, then use Oracle SOAP
+ *   (ReceivablesCustomerProfileService.getActiveCustomerProfile) to convert
  *   billToAccount (AR account number) into the real CUST_ACCOUNT_ID.  On success,
  *   the result is written back to VendhqRegister.customerAccountId for Strategy 3a.
  *
- * Strategy 4: Oracle REST customer lookup (first-run / no seeded data).
+ * Strategy 4: Oracle SOAP customer lookup (first-run / no seeded data).
  *   Mirrors Java FusionCustomerProfileClient.getCustomerAccountId(accountNumber).
- *   Calls GET /fscmRestApi/.../customers?q=AccountNumber='...' (falls back to
- *   CustomerAccountNumber='...') to resolve the
- *   Oracle-internal CustomerAccountId when all DB strategies fail.  On success,
- *   the result is written back to VendhqRegister.customerAccountId for Strategy 3a.
+ *   Calls ReceivablesCustomerProfileService.getActiveCustomerProfile(accountNumber)
+ *   via SOAP to resolve the Oracle-internal CustomerAccountId when all DB strategies
+ *   fail.  On success, the result is written back to VendhqRegister.customerAccountId
+ *   for Strategy 3a.
  *
  * @param {string|number} customerAccNumber - billToAccNumber from the invoice header
  * @param {string|null}   bankAccountId     - VendhqRegister.bankAccountId (optional)
