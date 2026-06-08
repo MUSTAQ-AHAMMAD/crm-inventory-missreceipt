@@ -19,6 +19,7 @@ const EMPTY_FORM = {
   region: '',
   giftAccount: '',
   giftAccountId: '',
+  customerAccountId: '',
 }
 
 function formatNullable(value) {
@@ -74,6 +75,7 @@ function RegisterForm({ form, onChange, onSubmit, onCancel, submitting, error, s
         <Field label="Gift Account ID" name="giftAccountId" value={form.giftAccountId} onChange={onChange} />
         <Field label="Version" name="version" value={form.version} onChange={onChange} />
         <Field label="Deleted At" name="deletedAt" value={form.deletedAt} onChange={onChange} placeholder="e.g. 2024-01-01" />
+        <Field label="Customer Account ID" name="customerAccountId" value={form.customerAccountId} onChange={onChange} placeholder="Oracle CUST_ACCOUNT_ID (e.g. 300000158776674)" />
       </div>
       <div className="flex justify-end gap-3 pt-2">
         <button type="button" onClick={onCancel} className="px-4 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">
@@ -165,6 +167,7 @@ export default function VendhqRegistersPage() {
       region: rec.region || '',
       giftAccount: rec.giftAccount || '',
       giftAccountId: rec.giftAccountId || '',
+      customerAccountId: rec.customerAccountId || '',
     })
     setFormError('')
   }
@@ -239,6 +242,7 @@ export default function VendhqRegistersPage() {
                     <th className="px-3 py-2 text-left">Bank Acct ID</th>
                     <th className="px-3 py-2 text-left">Gift Account</th>
                     <th className="px-3 py-2 text-left">Gift Acct ID</th>
+                    <th className="px-3 py-2 text-left">Cust Acct ID</th>
                     <th className="px-3 py-2 text-left">Version</th>
                     <th className="px-3 py-2 text-left">Deleted At</th>
                     <th className="px-3 py-2 text-left">Actions</th>
@@ -258,6 +262,7 @@ export default function VendhqRegistersPage() {
                       <td className="px-3 py-2 font-mono">{formatNullable(rec.bankAccountId)}</td>
                       <td className="px-3 py-2 whitespace-nowrap">{formatNullable(rec.giftAccount)}</td>
                       <td className="px-3 py-2 font-mono">{formatNullable(rec.giftAccountId)}</td>
+                      <td className="px-3 py-2 font-mono">{formatNullable(rec.customerAccountId)}</td>
                       <td className="px-3 py-2">{formatNullable(rec.version)}</td>
                       <td className="px-3 py-2">{formatNullable(rec.deletedAt)}</td>
                       <td className="px-3 py-2">
