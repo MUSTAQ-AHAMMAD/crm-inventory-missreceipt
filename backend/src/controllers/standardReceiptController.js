@@ -349,8 +349,8 @@ async function upload(req, res, next) {
         const rowNumber = i + 2;
         const amountNum = parseFloat(row.Amount);
 
-        // Skip receipts with Amount = 0
-        if (amountNum === 0) {
+        // Skip receipts with Amount = 0 or non-numeric Amount
+        if (!Number.isFinite(amountNum) || amountNum === 0) {
           skipCount++;
           const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SKIPPED: Amount is 0 | Receipt: ${row.ReceiptNumber}`;
           responseLogs.push(logLine);

@@ -811,8 +811,8 @@ async function submitStandardReceipts(req, res, next) {
 
         const amountNum = parseFloat(apiPayload.Amount);
 
-        // Skip receipts with Amount = 0
-        if (amountNum === 0) {
+        // Skip receipts with Amount = 0 or non-numeric Amount
+        if (!Number.isFinite(amountNum) || amountNum === 0) {
           skipCount++;
           logs.push(`[SKIP] Row ${i + 2}: ${apiPayload.ReceiptNumber} | Amount is 0 – skipped`);
           return;
