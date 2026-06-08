@@ -427,7 +427,6 @@ describe('submitStandardReceipts – skip rules', () => {
     prisma.fusionInvoiceHeader.findFirst.mockResolvedValue(null);
     prisma.fusionSalesMetadata.findFirst.mockResolvedValue(null);
     prisma.vendhqRegister.findFirst.mockResolvedValue(null);
-    prisma.vendhqRegister.update.mockResolvedValue({});
     axios.get.mockResolvedValue({ data: { items: [] } });
   });
 

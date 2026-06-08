@@ -439,7 +439,7 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
   // Helper: persist a resolved CUST_ACCOUNT_ID to VendhqRegister so Strategy 3a
   // can short-circuit future lookups without hitting Oracle REST again.
   async function cacheCustomerAccountId(resolvedId) {
-    if (!resolvedId || !cachedReg?.id) return;
+    if (typeof resolvedId !== 'string' || !resolvedId || !cachedReg?.id) return;
     try {
       await prisma.vendhqRegister.update({
         where: { id: cachedReg.id },
