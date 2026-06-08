@@ -162,7 +162,7 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     prisma.fusionStandardReceipt.findFirst.mockResolvedValue(null);
     process.env.ORACLE_CUSTOMERS_API_URL = 'http://test.oracle/customers';
     // Strategy 4: Oracle REST returns CustomerAccountId
-    axios.get.mockResolvedValue({ data: { items: [{ CustomerAccountId: 300000001576078 }] } });
+    axios.get.mockResolvedValue({ data: { items: [{ CustomerAccountId: '300000001576078' }] } });
 
     const res = await request(app)
       .post('/submit-standard')

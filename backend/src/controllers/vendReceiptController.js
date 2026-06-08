@@ -179,7 +179,6 @@ function round2(n) {
 }
 
 /**
-/**
  * Resolve Oracle CustomerAccountId from a customer account number via the
  * Oracle Fusion REST API.
  *
@@ -195,6 +194,11 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
   const url = process.env.ORACLE_CUSTOMERS_API_URL;
   if (!url || !accountNumber) return null;
 
+  // Sanitize: Oracle AR account numbers are numeric; strip anything that is not
+  // a digit, letter, hyphen, or underscore before interpolating into the query.
+  const safeAccNumber = String(accountNumber).replace(/[^A-Za-z0-9\-_]/g, '');
+  if (!safeAccNumber) return null;
+
   const oracleAuth = Buffer.from(
     `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
   ).toString('base64');
@@ -202,7 +206,7 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
   try {
     const response = await axios.get(url, {
       params: {
-        q: `CustomerNumber='${accountNumber}'`,
+        q: `CustomerNumber='${safeAccNumber}'`,
         fields: 'CustomerAccountId',
         limit: 1,
       },
