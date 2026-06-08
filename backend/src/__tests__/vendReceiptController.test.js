@@ -145,4 +145,24 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     const soapXml = callWithCustomEnvelope.mock.calls[0][0];
     expect(soapXml).toContain('57013');
   });
+
+  test('SOAP success + DB failure: receipt counted as success, error does not propagate', async () => {
+    prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
+    prisma.fusionStandardReceipt.findFirst.mockResolvedValue({ customerId: '300000001576078' });
+    // DB write fails after SOAP succeeds
+    prisma.fusionStandardReceipt.create.mockRejectedValue(new Error('DB unavailable'));
+
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const res = await request(app)
+      .post('/submit-standard')
+      .send({ payloads: [BASE_PAYLOAD] });
+
+    consoleSpy.mockRestore();
+
+    // SOAP succeeded → must be counted as success despite DB error
+    expect(res.status).toBe(200);
+    expect(res.body.successCount).toBe(1);
+    expect(res.body.failureCount).toBe(0);
+  });
 });

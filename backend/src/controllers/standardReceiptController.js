@@ -402,20 +402,19 @@ async function upload(req, res, next) {
         const rowNumber = i + 2;
         const soapXml = generateSoapEnvelope(row);
 
+        let soapResult = null;
+        let soapError = null;
+
         try {
           console.log(`\n📤 Processing Row ${rowNumber}: ${row.ReceiptNumber}`);
-
-          const result = await sendSoapRequest(soapXml, row.ReceiptNumber);
-
-          successCount++;
-          if (!lastSuccessMessage) lastSuccessMessage = snippet(result.data || 'Success');
-          const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SUCCESS | Receipt: ${row.ReceiptNumber}`;
-          responseLogs.push(logLine);
-          console.log(`✅ ${logLine}`);
-
+          soapResult = await sendSoapRequest(soapXml, row.ReceiptNumber);
         } catch (error) {
+          soapError = error;
+        }
+
+        if (soapError) {
           failureCount++;
-          const errorMessage = error.message || 'Unknown error';
+          const errorMessage = soapError.message || 'Unknown error';
           if (!firstErrorMessage) firstErrorMessage = `Row ${rowNumber}: ${snippet(errorMessage)}`;
 
           failures.push({
@@ -424,13 +423,65 @@ async function upload(req, res, next) {
             rawData: JSON.stringify(row),
             errorMessage: errorMessage.substring(0, 500),
             requestPayload: soapXml.substring(0, 2000),
-            responseBody: (error.response?.data ?? error.message ?? '').substring(0, 2000),
-            responseStatus: error.response?.status || null,
+            responseBody: (soapError.response?.data ?? soapError.message ?? '').substring(0, 2000),
+            responseStatus: soapError.response?.status || null,
           });
 
           const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} FAILED: ${snippet(errorMessage)} | Receipt: ${row.ReceiptNumber}`;
           responseLogs.push(logLine);
           console.error(`❌ ${logLine}`);
+
+          // Persist failed receipt to FusionStandardReceipt so the AR pipeline
+          // has a complete record of all attempted receipts.
+          try {
+            await prisma.fusionStandardReceipt.create({
+              data: {
+                requestId:    uploadRecord.id,
+                status:       'Failed',
+                message:      errorMessage.substring(0, 500),
+                requestDate:  new Date(),
+                receiptNumber: row.ReceiptNumber,
+                amount:       Number.isFinite(parseFloat(row.Amount)) ? parseFloat(row.Amount) : null,
+                region:       'SA',
+                integMode:    'MANUAL',
+              },
+            });
+          } catch (dbErr) {
+            console.error(`[StandardReceipt] DB save failed for ${row.ReceiptNumber}: ${dbErr.message}`);
+          }
+        } else {
+          successCount++;
+          if (!lastSuccessMessage) lastSuccessMessage = snippet(soapResult.data || 'Success');
+          const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SUCCESS | Receipt: ${row.ReceiptNumber}`;
+          responseLogs.push(logLine);
+          console.log(`✅ ${logLine}`);
+
+          // Persist successful receipt to FusionStandardReceipt so the AR pipeline
+          // can match it against invoices (getSummary / getPendingApply queries this table).
+          try {
+            await prisma.fusionStandardReceipt.create({
+              data: {
+                requestId:           uploadRecord.id,
+                status:              'Success',
+                message:             null,
+                requestDate:         new Date(),
+                currencyCode:        row.CurrencyCode,
+                receiptDate:         row.ReceiptDate ? new Date(row.ReceiptDate) : null,
+                glDate:              row.ReceiptDate ? new Date(row.ReceiptDate) : null,
+                depositDate:         row.ReceiptDate ? new Date(row.ReceiptDate) : null,
+                receiptNumber:       row.ReceiptNumber,
+                receiptMethodId:     row.ReceiptMethodId || null,
+                remittanceBankAccId: row.RemittanceBankAccountId || null,
+                customerId:          row.CustomerId || null,
+                orgId:               row.OrgId || null,
+                amount:              Number.isFinite(parseFloat(row.Amount)) ? parseFloat(row.Amount) : null,
+                region:              'SA',
+                integMode:           'MANUAL',
+              },
+            });
+          } catch (dbErr) {
+            console.error(`[StandardReceipt] DB save failed for ${row.ReceiptNumber}: ${dbErr.message}`);
+          }
         }
       });
     });

@@ -18,6 +18,7 @@ jest.mock('../services/prisma', () => ({
   arInvoiceUpload: {
     create: jest.fn(),
     update: jest.fn(),
+    findMany: jest.fn().mockResolvedValue([]),
   },
   fusionInvoiceHeader: {
     findMany: jest.fn(),

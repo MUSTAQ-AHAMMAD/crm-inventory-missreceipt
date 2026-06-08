@@ -33,6 +33,8 @@ const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
+// Fallback Oracle Org ID used only when region-based lookup fails.
+// Java equivalent: session.getFusionBusinessUnitIdMapfindByRegion(region).getBusinessUnitId()
 const STATIC_ORG_ID = '300000001421038';
 const DEFAULT_CURRENCY = 'SAR';
 const DEFAULT_REGION = 'SA';
@@ -54,6 +56,25 @@ const CASH_ROUNDING_METHODS_UPPER = new Set(['CASH ROUNDING']);
 
 const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 5;
 const MAX_RETRIES = parseInt(process.env.MAX_RETRIES) || 3;
+
+// ─── Org ID Resolution ────────────────────────────────────────────────────────
+/**
+ * Mirrors Java FusionStdReceiptMapping line:
+ *   setOrgId(session.getFusionBusinessUnitIdMapfindByRegion(outletDetail.getRegion())
+ *              .getBusinessUnitId().longValue())
+ *
+ * Looks up the Oracle Org ID for a region from existing FusionStandardReceipt
+ * records (seeded from Oracle historical data). Falls back to STATIC_ORG_ID
+ * when no seeded record is found for the region.
+ */
+async function resolveOrgIdByRegion(region) {
+  if (!region) return STATIC_ORG_ID;
+  const receipt = await prisma.fusionStandardReceipt.findFirst({
+    where: { region: region.toUpperCase(), status: 'Success', orgId: { not: null } },
+    select: { orgId: true },
+  });
+  return receipt?.orgId || STATIC_ORG_ID;
+}
 
 // SOAP namespaces for MiscellaneousReceiptService
 const SOAP_ENV_NS    = 'http://schemas.xmlsoap.org/soap/envelope/';
@@ -571,6 +592,11 @@ async function generateReceipts(req, res, next) {
       const bankAccountText = register?.bankAccount    || '';  // for misc receipt
       const cashAccountId  = register?.cashAccountId  || '';  // for cash standard receipt
 
+      // Resolve the Oracle Org ID from the register's region – mirrors Java
+      // FusionStdReceiptMapping: setOrgId(session.getFusionBusinessUnitIdMapfindByRegion(...))
+      const registerRegion = register?.region || region;
+      const resolvedOrgId  = await resolveOrgIdByRegion(registerRegion);
+
       // ── Standard Receipt ──────────────────────────────────────────────────
       // All NORMAL methods (Cash, Mada, Visa, Master, Debit Card, etc.) get a standard receipt
       const remittanceAccId = (methodUpper === 'CASH' || isCashRounding)
@@ -588,9 +614,10 @@ async function generateReceipts(req, res, next) {
         Currency:                  DEFAULT_CURRENCY,
         RemittanceBankAccountNumber: remittanceAccId,
         AccountingDate:            date,
-        // SOAP-specific fields
+        // SOAP-specific fields (Java FusionStdReceiptMapping)
         ReceiptMethodId:           rm?.receiptMethodId || '',
-        OrgId:                     STATIC_ORG_ID,
+        OrgId:                     resolvedOrgId,
+        Region:                    registerRegion,
         // metadata for display
         _meta: { subinventory, date, paymentType, txnNumber, method: canonicalName },
       });
@@ -623,7 +650,8 @@ async function generateReceipts(req, res, next) {
           ReceiptMethodName:     canonicalName,
           ReceivableActivityName: 'Bank Charge',
           BankAccountName:       bankAccountText,
-          OrgId:                 STATIC_ORG_ID,
+          OrgId:                 resolvedOrgId,
+          Region:                registerRegion,
           // metadata for display
           _meta: { subinventory, date, paymentType, txnNumber, method: canonicalName, bankCharge, taxRate },
         });
@@ -698,6 +726,9 @@ async function submitStandardReceipts(req, res, next) {
         if (!customerId) {
           console.warn(`⚠️ [StandardReceipt] No Oracle party ID found for account ${apiPayload.CustomerAccountNumber} (${apiPayload.ReceiptNumber}). Falling back to account number — Oracle may reject this.`);
         }
+        // Region comes from the generated payload (resolved per-register); used to
+        // persist the correct region to FusionStandardReceipt (not hardcoded DEFAULT_REGION).
+        const payloadRegion = apiPayload.Region || DEFAULT_REGION;
         const soapRow = {
           ReceiptNumber:          apiPayload.ReceiptNumber,
           ReceiptDate:            apiPayload.ReceiptDate,
@@ -724,7 +755,7 @@ async function submitStandardReceipts(req, res, next) {
               requestDate:  new Date(),
               receiptNumber: apiPayload.ReceiptNumber,
               amount:       parseFloat(apiPayload.Amount) || null,
-              region:       DEFAULT_REGION,
+              region:       payloadRegion,
               integMode:    'MANUAL',
               batchId:      batchId || null,
             },
@@ -735,55 +766,68 @@ async function submitStandardReceipts(req, res, next) {
 
         const soapXml = buildStandardSoapEnvelope(soapRow);
 
+        let soapResponse = null;
+        let soapErr = null;
+
         try {
           console.log(`\n📤 [StandardReceipt] Processing Row ${i + 2}: ${soapRow.ReceiptNumber}`);
           const soapClient = createOracleSoapClient(process.env.ORACLE_STANDARD_RECEIPT_SOAP_URL);
-          const response = await soapClient.callWithCustomEnvelope(soapXml, 'createStandardReceipt');
-
-          successCount++;
-
-          await prisma.fusionStandardReceipt.create({
-            data: {
-              requestId:           batchId || null,
-              status:              'Success',
-              message:             null,
-              requestDate:         new Date(),
-              currencyCode:        soapRow.CurrencyCode,
-              receiptDate:         soapRow.ReceiptDate ? new Date(soapRow.ReceiptDate) : null,
-              glDate:              soapRow.ReceiptDate ? new Date(soapRow.ReceiptDate) : null,
-              receiptNumber:       soapRow.ReceiptNumber,
-              receiptMethodId:     soapRow.ReceiptMethodId || null,
-              remittanceBankAccId: soapRow.RemittanceBankAccountId || null,
-              depositDate:         soapRow.ReceiptDate ? new Date(soapRow.ReceiptDate) : null,
-              customerId:          soapRow.CustomerId || null,
-              orgId:               soapRow.OrgId,
-              amount:              parseFloat(soapRow.Amount) || null,
-              region:              DEFAULT_REGION,
-              integMode:           'MANUAL',
-              batchId:             batchId || null,
-            },
-          });
-          logs.push(`[OK] Row ${i + 2}: ${soapRow.ReceiptNumber} | HTTP ${response.status}`);
-          console.log(`✅ [StandardReceipt] Success: ${soapRow.ReceiptNumber}`);
-
+          soapResponse = await soapClient.callWithCustomEnvelope(soapXml, 'createStandardReceipt');
         } catch (err) {
+          soapErr = err;
+        }
+
+        if (soapErr) {
           failureCount++;
-          const errorMessage = snippet(err.message, 500);
-          await prisma.fusionStandardReceipt.create({
-            data: {
-              requestId:    batchId || null,
-              status:       'Failed',
-              message:      errorMessage,
-              requestDate:  new Date(),
-              receiptNumber: soapRow.ReceiptNumber,
-              amount:       parseFloat(soapRow.Amount) || null,
-              region:       DEFAULT_REGION,
-              integMode:    'MANUAL',
-              batchId:      batchId || null,
-            },
-          });
+          const errorMessage = snippet(soapErr.message, 500);
+          try {
+            await prisma.fusionStandardReceipt.create({
+              data: {
+                requestId:    batchId || null,
+                status:       'Failed',
+                message:      errorMessage,
+                requestDate:  new Date(),
+                receiptNumber: soapRow.ReceiptNumber,
+                amount:       parseFloat(soapRow.Amount) || null,
+                region:       payloadRegion,
+                integMode:    'MANUAL',
+                batchId:      batchId || null,
+              },
+            });
+          } catch (dbErr) {
+            console.error(`[StandardReceipt] DB save failed for ${soapRow.ReceiptNumber}: ${dbErr.message}`);
+          }
           logs.push(`[ERROR] Row ${i + 2}: ${soapRow.ReceiptNumber} | ${errorMessage}`);
           console.error(`❌ [StandardReceipt] Failed: ${soapRow.ReceiptNumber} | ${errorMessage}`);
+        } else {
+          successCount++;
+          try {
+            await prisma.fusionStandardReceipt.create({
+              data: {
+                requestId:           batchId || null,
+                status:              'Success',
+                message:             null,
+                requestDate:         new Date(),
+                currencyCode:        soapRow.CurrencyCode,
+                receiptDate:         soapRow.ReceiptDate ? new Date(soapRow.ReceiptDate) : null,
+                glDate:              soapRow.ReceiptDate ? new Date(soapRow.ReceiptDate) : null,
+                receiptNumber:       soapRow.ReceiptNumber,
+                receiptMethodId:     soapRow.ReceiptMethodId || null,
+                remittanceBankAccId: soapRow.RemittanceBankAccountId || null,
+                depositDate:         soapRow.ReceiptDate ? new Date(soapRow.ReceiptDate) : null,
+                customerId:          soapRow.CustomerId || null,
+                orgId:               soapRow.OrgId,
+                amount:              parseFloat(soapRow.Amount) || null,
+                region:              payloadRegion,
+                integMode:           'MANUAL',
+                batchId:             batchId || null,
+              },
+            });
+          } catch (dbErr) {
+            console.error(`[StandardReceipt] DB save failed for ${soapRow.ReceiptNumber}: ${dbErr.message}`);
+          }
+          logs.push(`[OK] Row ${i + 2}: ${soapRow.ReceiptNumber} | HTTP ${soapResponse.status}`);
+          console.log(`✅ [StandardReceipt] Success: ${soapRow.ReceiptNumber}`);
         }
       })
     );
