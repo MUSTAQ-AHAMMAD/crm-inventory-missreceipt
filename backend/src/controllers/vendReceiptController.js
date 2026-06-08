@@ -196,6 +196,8 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
 
   // Sanitize: Oracle AR account numbers are numeric; strip anything that is not
   // a digit, letter, hyphen, or underscore before interpolating into the query.
+  // This also removes single-quotes and other special characters, preventing
+  // any injection through the Oracle Fusion SCIM-style q parameter.
   const safeAccNumber = String(accountNumber).replace(/[^A-Za-z0-9\-_]/g, '');
   if (!safeAccNumber) return null;
 
@@ -206,12 +208,13 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
   // Oracle Fusion REST API uses 'AccountNumber' as the customer account number
   // field name (maps to HZ_CUST_ACCOUNTS.ACCOUNT_NUMBER).  Some older Oracle
   // versions also recognise 'CustomerAccountNumber'.  Try both before giving up.
+  // safeAccNumber contains only [A-Za-z0-9\-_] so the interpolation is safe.
   const queryFields = [
-    `AccountNumber='${safeAccNumber}'`,
-    `CustomerAccountNumber='${safeAccNumber}'`,
+    { field: 'AccountNumber',        q: `AccountNumber='${safeAccNumber}'` },
+    { field: 'CustomerAccountNumber', q: `CustomerAccountNumber='${safeAccNumber}'` },
   ];
 
-  for (const q of queryFields) {
+  for (const { field, q } of queryFields) {
     try {
       const response = await axios.get(url, {
         params: {
@@ -231,7 +234,7 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
         return String(items[0].CustomerAccountId);
       }
     } catch (err) {
-      console.warn(`[vendReceipt] Oracle customer lookup failed (q=${q}) for account '${accountNumber}': ${err.message}`);
+      console.warn(`[vendReceipt] Oracle customer lookup via ${field} failed for account '${accountNumber}': ${err.message}`);
     }
   }
   return null;
