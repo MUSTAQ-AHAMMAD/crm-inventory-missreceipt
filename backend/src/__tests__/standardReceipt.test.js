@@ -530,18 +530,20 @@ describe('Upload Function (FusionStandardReceipt persistence)', () => {
     createOracleSoapClient.mockReturnValue(mockSoapClient);
   });
 
-  test('SOAP envelope uses adf:Value wrapper for Amount (Oracle Money type)', async () => {
+  test('SOAP envelope uses AmountType attribute format (currencyCode XML attribute)', async () => {
     await request(app).post('/upload');
 
     expect(mockSoapClient.callWithCustomEnvelope).toHaveBeenCalled();
     const soapXml = mockSoapClient.callWithCustomEnvelope.mock.calls[0][0];
 
-    // Amount must use the Oracle adf:Money type structure
-    expect(soapXml).toContain('xmlns:adf="http://xmlns.oracle.com/adf/svc/types/"');
-    expect(soapXml).toContain('<adf:Value>422.00</adf:Value>');
-    expect(soapXml).toContain('<adf:CurrencyCode>SAR</adf:CurrencyCode>');
-    // Must NOT send Amount as a plain text node (that causes JBO-27014)
+    // Amount must use the Oracle AmountType simpleContent format: text value + currencyCode attribute
+    expect(soapXml).toContain('<com:Amount currencyCode="SAR">422.00</com:Amount>');
+    // Must NOT use child element formats (those are wrong and cause JBO-27014)
+    expect(soapXml).not.toContain('<adf:Value>');
+    expect(soapXml).not.toContain('<adf:CurrencyCode>');
     expect(soapXml).not.toMatch(/<com:Amount>[\d.]+<\/com:Amount>/);
+    // No adf namespace needed
+    expect(soapXml).not.toContain('xmlns:adf=');
   });
 
   test('SOAP success: FusionStandardReceipt saved with status Success', async () => {

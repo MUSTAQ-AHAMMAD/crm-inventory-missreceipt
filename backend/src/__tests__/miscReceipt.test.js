@@ -299,23 +299,18 @@ describe('Misc Receipt Controller', () => {
           .replace(/'/g, '&apos;');
       };
 
-      const SOAP_ADF_NS = 'http://xmlns.oracle.com/adf/svc/types/';
-
       const generateSoapEnvelope = (row) => {
         const receiptMethodNameTag = row.ReceiptMethodName
           ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
           : '';
 
         return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/" xmlns:com="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/" xmlns:adf="${SOAP_ADF_NS}">
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/" xmlns:com="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:createMiscellaneousReceipt>
       <com:MiscellaneousReceipt>
-        <com:Amount>
-          <adf:Value>${escapeXml(row.Amount)}</adf:Value>
-          <adf:CurrencyCode>${escapeXml(row.CurrencyCode)}</adf:CurrencyCode>
-        </com:Amount>
+        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(row.Amount)}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
@@ -345,7 +340,9 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
       expect(xml).toContain('<?xml version="1.0" encoding="UTF-8"?>');
       expect(xml).toContain('<soapenv:Envelope');
       expect(xml).toContain('<typ:createMiscellaneousReceipt>');
-      expect(xml).toContain('<adf:Value>-100.00</adf:Value>');
+      expect(xml).toContain('<com:Amount currencyCode="SAR">-100.00</com:Amount>');
+      expect(xml).not.toContain('<adf:Value>');
+      expect(xml).not.toContain('xmlns:adf=');
       expect(xml).toContain('<com:CurrencyCode>SAR</com:CurrencyCode>');
       expect(xml).toContain('<com:ReceiptNumber>REC001</com:ReceiptNumber>');
       expect(xml).not.toContain('<com:DepositDate>');
@@ -380,23 +377,18 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
           .replace(/'/g, '&apos;');
       };
 
-      const SOAP_ADF_NS = 'http://xmlns.oracle.com/adf/svc/types/';
-
       const generateSoapEnvelope = (row) => {
         const receiptMethodNameTag = row.ReceiptMethodName
           ? `        <com:ReceiptMethodName>${escapeXml(row.ReceiptMethodName)}</com:ReceiptMethodName>\n`
           : '';
 
         return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/" xmlns:com="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/" xmlns:adf="${SOAP_ADF_NS}">
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:typ="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/types/" xmlns:com="http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:createMiscellaneousReceipt>
       <com:MiscellaneousReceipt>
-        <com:Amount>
-          <adf:Value>${escapeXml(row.Amount)}</adf:Value>
-          <adf:CurrencyCode>${escapeXml(row.CurrencyCode)}</adf:CurrencyCode>
-        </com:Amount>
+        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(row.Amount)}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
