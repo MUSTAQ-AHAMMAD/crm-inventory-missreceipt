@@ -335,6 +335,7 @@ async function upload(req, res, next) {
 
     let successCount = 0;
     let failureCount = 0;
+    let skipCount = 0;
     const failures = [];
     const responseLogs = [];
     let firstErrorMessage = '';
@@ -346,6 +347,48 @@ async function upload(req, res, next) {
     const processingPromises = enrichedRecords.map((row, i) => {
       return limit(async () => {
         const rowNumber = i + 2;
+        const amountNum = parseFloat(row.Amount);
+
+        // Skip receipts with Amount = 0 or non-numeric Amount
+        if (!Number.isFinite(amountNum) || amountNum === 0) {
+          skipCount++;
+          const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SKIPPED: Amount is 0 | Receipt: ${row.ReceiptNumber}`;
+          responseLogs.push(logLine);
+          console.log(`⏭️  ${logLine}`);
+          return;
+        }
+
+        // Skip receipts whose number contains "credit"
+        if (/credit/i.test(row.ReceiptNumber)) {
+          skipCount++;
+          const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SKIPPED: receipt number contains 'credit' | Receipt: ${row.ReceiptNumber}`;
+          responseLogs.push(logLine);
+          console.log(`⏭️  ${logLine}`);
+          return;
+        }
+
+        // Skip negative amounts – handled as miscellaneous receipts, not standard receipts
+        if (amountNum < 0) {
+          skipCount++;
+          const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SKIPPED: negative amount (${row.Amount}) – handled as misc receipt | Receipt: ${row.ReceiptNumber}`;
+          responseLogs.push(logLine);
+          console.log(`⏭️  ${logLine}`);
+          return;
+        }
+
+        // Deduplication: skip SOAP call when receipt already exists in Fusion
+        const existingReceipt = await prisma.fusionStandardReceipt.findFirst({
+          where: { receiptNumber: row.ReceiptNumber, status: 'Success' },
+          select: { id: true },
+        });
+        if (existingReceipt) {
+          skipCount++;
+          const logLine = `[StandardReceipt] Upload #${uploadRecord.id} Row ${rowNumber} SKIPPED: receipt already exists in Fusion | Receipt: ${row.ReceiptNumber}`;
+          responseLogs.push(logLine);
+          console.log(`⏭️  ${logLine}`);
+          return;
+        }
+
         const soapXml = buildStandardReceiptEnvelope(row);
 
         let soapResult = null;
@@ -457,7 +500,7 @@ async function upload(req, res, next) {
     });
 
     console.log(
-      `[StandardReceipt] Upload #${uploadRecord.id} COMPLETE | Total: ${enrichedRecords.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus} | Time: ${totalTime}s`
+      `[StandardReceipt] Upload #${uploadRecord.id} COMPLETE | Total: ${enrichedRecords.length} | Success: ${successCount} | Failed: ${failureCount} | Skipped: ${skipCount} | Status: ${finalStatus} | Time: ${totalTime}s`
     );
 
     return res.json({
@@ -465,6 +508,7 @@ async function upload(req, res, next) {
       totalRecords: enrichedRecords.length,
       successCount,
       failureCount,
+      skipCount,
       status: finalStatus,
       processingTimeSeconds: parseFloat(totalTime),
       averageTimePerRecord: parseFloat(avgTimePerRecord),

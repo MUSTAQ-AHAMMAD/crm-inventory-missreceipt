@@ -8,7 +8,7 @@ jest.mock('../services/prisma', () => ({
   vendhqRegister:          { findFirst: jest.fn() },
   fusionReceiptMethod:     { findFirst: jest.fn() },
   standardReceiptUpload:   { create: jest.fn(), update: jest.fn() },
-  fusionStandardReceipt:   { create: jest.fn() },
+  fusionStandardReceipt:   { create: jest.fn(), findFirst: jest.fn() },
   standardReceiptFailure:  { createMany: jest.fn() },
 }));
 
@@ -523,6 +523,7 @@ describe('Upload Function (FusionStandardReceipt persistence)', () => {
       status: 'SUCCESS',
     });
     prisma.fusionStandardReceipt.create.mockResolvedValue({});
+    prisma.fusionStandardReceipt.findFirst.mockResolvedValue(null); // no duplicate by default
     prisma.standardReceiptFailure.createMany.mockResolvedValue({});
 
     // Default SOAP mock (success)
