@@ -240,11 +240,15 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     };
 
     const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    const res = await request(app)
-      .post('/submit-standard')
-      .send({ payloads: [payloadWithMeta] });
-    consoleSpy.mockRestore();
-    delete process.env.ORACLE_CUSTOMERS_API_URL;
+    let res;
+    try {
+      res = await request(app)
+        .post('/submit-standard')
+        .send({ payloads: [payloadWithMeta] });
+    } finally {
+      consoleSpy.mockRestore();
+      delete process.env.ORACLE_CUSTOMERS_API_URL;
+    }
 
     expect(res.status).toBe(200);
     expect(res.body.successCount).toBe(1);
@@ -280,11 +284,15 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     };
 
     const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    const res = await request(app)
-      .post('/submit-standard')
-      .send({ payloads: [payloadWithMeta] });
-    consoleSpy.mockRestore();
-    delete process.env.ORACLE_CUSTOMERS_API_URL;
+    let res;
+    try {
+      res = await request(app)
+        .post('/submit-standard')
+        .send({ payloads: [payloadWithMeta] });
+    } finally {
+      consoleSpy.mockRestore();
+      delete process.env.ORACLE_CUSTOMERS_API_URL;
+    }
 
     expect(res.status).toBe(200);
     expect(res.body.successCount).toBe(1);

@@ -335,7 +335,7 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
             console.log(`[vendReceipt] Strategy 1b: resolved CustomerId=${realId} from Oracle REST via txnNumber=${txnNum}`);
             return realId;
           }
-          // Fall through when Oracle REST is unavailable
+        // Oracle REST unavailable – fall through to Strategy 2 (bank-account-ID lookup)
         }
       }
     }
@@ -422,7 +422,7 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
         console.log(`[vendReceipt] Strategy 3b: resolved CustomerId=${realId} from Oracle REST via subinventory=${normalizedSubinventory}`);
         return realId;
       }
-      // Fall through to Strategy 4
+      // Oracle REST unavailable – fall through to Strategy 4
     }
   }
 
