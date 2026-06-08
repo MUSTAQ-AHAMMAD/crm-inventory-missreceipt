@@ -255,15 +255,16 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
   // this store.  This covers the case where the seeded FusionStandardReceipt has
   // records for a different account type than the current payment method.
   if (subinventory) {
-    const reg = await prisma.vendhqRegister.findFirst({
+    let reg = await prisma.vendhqRegister.findFirst({
       where: { registerName: { equals: subinventory } },
       select: { bankAccountId: true, cashAccountId: true },
-    }) || (subinventory.length >= 4
-      ? await prisma.vendhqRegister.findFirst({
-          where: { registerName: { startsWith: subinventory.slice(0, 4) } },
-          select: { bankAccountId: true, cashAccountId: true },
-        })
-      : null);
+    });
+    if (!reg && subinventory.length >= 4) {
+      reg = await prisma.vendhqRegister.findFirst({
+        where: { registerName: { startsWith: subinventory.slice(0, 4) } },
+        select: { bankAccountId: true, cashAccountId: true },
+      });
+    }
 
     if (reg) {
       // Collect all account IDs from the register, excluding the one already
@@ -274,10 +275,10 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
         .map(String)
         .filter((id) => id !== triedId);
 
-      for (const accId of candidates) {
+      if (candidates.length > 0) {
         const receipt = await prisma.fusionStandardReceipt.findFirst({
           where: {
-            remittanceBankAccId: accId,
+            remittanceBankAccId: { in: candidates },
             customerId:          { not: null },
             status:              'Success',
           },
