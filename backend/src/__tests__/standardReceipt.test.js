@@ -530,6 +530,20 @@ describe('Upload Function (FusionStandardReceipt persistence)', () => {
     createOracleSoapClient.mockReturnValue(mockSoapClient);
   });
 
+  test('SOAP envelope uses adf:Value wrapper for Amount (Oracle Money type)', async () => {
+    await request(app).post('/upload');
+
+    expect(mockSoapClient.callWithCustomEnvelope).toHaveBeenCalled();
+    const soapXml = mockSoapClient.callWithCustomEnvelope.mock.calls[0][0];
+
+    // Amount must use the Oracle adf:Money type structure
+    expect(soapXml).toContain('xmlns:adf="http://xmlns.oracle.com/adf/svc/types/"');
+    expect(soapXml).toContain('<adf:Value>422.00</adf:Value>');
+    expect(soapXml).toContain('<adf:CurrencyCode>SAR</adf:CurrencyCode>');
+    // Must NOT send Amount as a plain text node (that causes JBO-27014)
+    expect(soapXml).not.toMatch(/<com:Amount>[\d.]+<\/com:Amount>/);
+  });
+
   test('SOAP success: FusionStandardReceipt saved with status Success', async () => {
     const res = await request(app).post('/upload');
     expect(res.status).toBe(200);
