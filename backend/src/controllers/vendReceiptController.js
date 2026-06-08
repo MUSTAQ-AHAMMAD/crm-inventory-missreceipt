@@ -196,6 +196,8 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
 
   // Sanitize: Oracle AR account numbers are numeric; strip anything that is not
   // a digit, letter, hyphen, or underscore before interpolating into the query.
+  // This also removes single-quotes and other special characters, preventing
+  // any injection through the Oracle Fusion SCIM-style q parameter.
   const safeAccNumber = String(accountNumber).replace(/[^A-Za-z0-9\-_]/g, '');
   if (!safeAccNumber) return null;
 
@@ -203,26 +205,37 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
     `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
   ).toString('base64');
 
-  try {
-    const response = await axios.get(url, {
-      params: {
-        q: `CustomerNumber='${safeAccNumber}'`,
-        fields: 'CustomerAccountId',
-        limit: 1,
-      },
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Basic ${oracleAuth}`,
-      },
-      timeout: 30000,
-    });
-    const items = response.data?.items || [];
-    if (items.length > 0 && items[0].CustomerAccountId) {
-      return String(items[0].CustomerAccountId);
+  // Oracle Fusion REST API uses 'AccountNumber' as the customer account number
+  // field name (maps to HZ_CUST_ACCOUNTS.ACCOUNT_NUMBER).  Some older Oracle
+  // versions also recognise 'CustomerAccountNumber'.  Try both before giving up.
+  // safeAccNumber contains only [A-Za-z0-9\-_] so the interpolation is safe.
+  const queryFields = [
+    { field: 'AccountNumber',        q: `AccountNumber='${safeAccNumber}'` },
+    { field: 'CustomerAccountNumber', q: `CustomerAccountNumber='${safeAccNumber}'` },
+  ];
+
+  for (const { field, q } of queryFields) {
+    try {
+      const response = await axios.get(url, {
+        params: {
+          q,
+          fields: 'CustomerAccountId',
+          limit: 1,
+        },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Basic ${oracleAuth}`,
+        },
+        timeout: 30000,
+      });
+      const items = response.data?.items || [];
+      if (items.length > 0 && items[0].CustomerAccountId) {
+        return String(items[0].CustomerAccountId);
+      }
+    } catch (err) {
+      console.warn(`[vendReceipt] Oracle customer lookup via ${field} failed for account '${accountNumber}': ${err.message}`);
     }
-  } catch (err) {
-    console.warn(`[vendReceipt] Oracle customer lookup failed for account '${accountNumber}': ${err.message}`);
   }
   return null;
 }
@@ -257,7 +270,8 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
  *
  * Strategy 4: Oracle REST customer lookup (first-run / no seeded data).
  *   Mirrors Java FusionCustomerProfileClient.getCustomerAccountId(accountNumber).
- *   Calls GET /fscmRestApi/.../customers?q=CustomerNumber='...' to resolve the
+ *   Calls GET /fscmRestApi/.../customers?q=AccountNumber='...' (falls back to
+ *   CustomerAccountNumber='...') to resolve the
  *   Oracle-internal CustomerAccountId when all DB strategies fail.
  *
  * @param {string|number} customerAccNumber - billToAccNumber from the invoice header
