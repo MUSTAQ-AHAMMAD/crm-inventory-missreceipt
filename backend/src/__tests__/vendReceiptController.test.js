@@ -20,6 +20,7 @@ jest.mock('../services/prisma', () => ({
   },
   vendhqRegister: {
     findFirst: jest.fn(),
+    update: jest.fn(),
   },
   fusionStandardReceipt: {
     findFirst: jest.fn(),
@@ -90,6 +91,7 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.fusionStandardReceipt.create.mockResolvedValue({});
+    prisma.vendhqRegister.update.mockResolvedValue({});
     // Strategy 4: by default Oracle REST returns no customer (simulates unconfigured or not found)
     axios.get.mockResolvedValue({ data: { items: [] } });
     // Default: all DB lookups return null/empty so strategies fall through cleanly
@@ -270,6 +272,92 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     const findFirstCalls = prisma.fusionInvoiceHeader.findFirst.mock.calls;
     const txnLookup = findFirstCalls.find(([args]) => args?.where?.txnNumber === 2672577);
     expect(txnLookup).toBeDefined();
+  });
+
+  test('strategy 3a: resolves CustomerId from VendhqRegister.customerAccountId (pre-configured)', async () => {
+    // No prior receipt records, no Oracle REST
+    prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
+    prisma.fusionInvoiceHeader.findFirst.mockResolvedValue(null);
+    prisma.fusionStandardReceipt.findFirst.mockResolvedValue(null);
+    prisma.fusionSalesMetadata.findFirst.mockResolvedValue(null);
+    // VendhqRegister has customerAccountId pre-configured by admin
+    prisma.vendhqRegister.findFirst.mockResolvedValue({
+      id: 42,
+      bankAccountId: '300000016780340',
+      cashAccountId: null,
+      customerAccountId: '300000001576078',
+    });
+
+    const payloadWithMeta = {
+      ...BASE_PAYLOAD,
+      _meta: { subinventory: 'EXBSA', date: '2025-05-01', paymentType: 'NORMAL', txnNumber: '2671613', method: 'Visa' },
+    };
+
+    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    let res;
+    try {
+      res = await request(app)
+        .post('/submit-standard')
+        .send({ payloads: [payloadWithMeta] });
+    } finally {
+      consoleSpy.mockRestore();
+    }
+
+    expect(res.status).toBe(200);
+    expect(res.body.successCount).toBe(1);
+
+    // SOAP envelope must contain the pre-configured customerAccountId
+    const { callWithCustomEnvelope } = createOracleSoapClient.mock.results[0].value;
+    const soapXml = callWithCustomEnvelope.mock.calls[0][0];
+    expect(soapXml).toContain('300000001576078');
+
+    // Oracle REST must NOT be called since Strategy 3a already resolved the ID
+    expect(axios.get).not.toHaveBeenCalled();
+  });
+
+  test('strategy 3b: auto-caches CUST_ACCOUNT_ID to VendhqRegister.customerAccountId after Oracle REST success', async () => {
+    // No prior receipt records
+    prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
+    prisma.fusionInvoiceHeader.findFirst.mockResolvedValue(null);
+    prisma.fusionStandardReceipt.findFirst.mockResolvedValue(null);
+    // VendhqRegister found but customerAccountId not yet set
+    prisma.vendhqRegister.findFirst.mockResolvedValue({
+      id: 42,
+      bankAccountId: '300000016780340',
+      cashAccountId: null,
+      customerAccountId: null,
+    });
+    // Strategy 3b: metadata found, Oracle REST returns ID
+    prisma.fusionSalesMetadata.findFirst.mockResolvedValue({ billToAccount: 55012 });
+    process.env.ORACLE_CUSTOMERS_API_URL = 'http://test.oracle/customers';
+    axios.get.mockResolvedValue({ data: { items: [{ CustomerAccountId: '300000158776674' }] } });
+
+    const payloadWithMeta = {
+      ...BASE_PAYLOAD,
+      _meta: { subinventory: 'EXBSA', date: '2025-05-01', paymentType: 'NORMAL', txnNumber: '9999999', method: 'Visa' },
+    };
+
+    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    let res;
+    try {
+      res = await request(app)
+        .post('/submit-standard')
+        .send({ payloads: [payloadWithMeta] });
+    } finally {
+      consoleSpy.mockRestore();
+      delete process.env.ORACLE_CUSTOMERS_API_URL;
+    }
+
+    expect(res.status).toBe(200);
+    expect(res.body.successCount).toBe(1);
+
+    // VendhqRegister.update must have been called to cache the resolved ID
+    expect(prisma.vendhqRegister.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 42 },
+        data:  { customerAccountId: '300000158776674' },
+      })
+    );
   });
 
   test('strategy 3b: resolves CustomerId via subinventory → FusionSalesMetadata → Oracle REST', async () => {
