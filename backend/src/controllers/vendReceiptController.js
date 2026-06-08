@@ -85,7 +85,6 @@ const SOAP_MIS_NS    = 'http://xmlns.oracle.com/apps/financials/receivables/rece
 // SOAP namespaces for StandardReceiptService (createStandardReceipt)
 const STD_SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/types/';
 const STD_SOAP_COM_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/';
-const STD_SOAP_ADF_NS   = 'http://xmlns.oracle.com/adf/svc/types/';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -236,16 +235,12 @@ function buildStandardSoapEnvelope(row) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
   xmlns:typ="${STD_SOAP_TYPES_NS}"
-  xmlns:com="${STD_SOAP_COM_NS}"
-  xmlns:adf="${STD_SOAP_ADF_NS}">
+  xmlns:com="${STD_SOAP_COM_NS}">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:createStandardReceipt>
       <typ:standardReceipt>
-        <com:Amount>
-          <adf:Value>${escapeXml(row.Amount)}</adf:Value>
-          <adf:CurrencyCode>${escapeXml(row.CurrencyCode)}</adf:CurrencyCode>
-        </com:Amount>
+        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(row.Amount)}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
         <com:GlDate>${escapeXml(row.ReceiptDate)}</com:GlDate>
