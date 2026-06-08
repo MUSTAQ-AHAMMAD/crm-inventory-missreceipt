@@ -766,55 +766,68 @@ async function submitStandardReceipts(req, res, next) {
 
         const soapXml = buildStandardSoapEnvelope(soapRow);
 
+        let soapResponse = null;
+        let soapErr = null;
+
         try {
           console.log(`\n📤 [StandardReceipt] Processing Row ${i + 2}: ${soapRow.ReceiptNumber}`);
           const soapClient = createOracleSoapClient(process.env.ORACLE_STANDARD_RECEIPT_SOAP_URL);
-          const response = await soapClient.callWithCustomEnvelope(soapXml, 'createStandardReceipt');
-
-          successCount++;
-
-          await prisma.fusionStandardReceipt.create({
-            data: {
-              requestId:           batchId || null,
-              status:              'Success',
-              message:             null,
-              requestDate:         new Date(),
-              currencyCode:        soapRow.CurrencyCode,
-              receiptDate:         soapRow.ReceiptDate ? new Date(soapRow.ReceiptDate) : null,
-              glDate:              soapRow.ReceiptDate ? new Date(soapRow.ReceiptDate) : null,
-              receiptNumber:       soapRow.ReceiptNumber,
-              receiptMethodId:     soapRow.ReceiptMethodId || null,
-              remittanceBankAccId: soapRow.RemittanceBankAccountId || null,
-              depositDate:         soapRow.ReceiptDate ? new Date(soapRow.ReceiptDate) : null,
-              customerId:          soapRow.CustomerId || null,
-              orgId:               soapRow.OrgId,
-              amount:              parseFloat(soapRow.Amount) || null,
-              region:              payloadRegion,
-              integMode:           'MANUAL',
-              batchId:             batchId || null,
-            },
-          });
-          logs.push(`[OK] Row ${i + 2}: ${soapRow.ReceiptNumber} | HTTP ${response.status}`);
-          console.log(`✅ [StandardReceipt] Success: ${soapRow.ReceiptNumber}`);
-
+          soapResponse = await soapClient.callWithCustomEnvelope(soapXml, 'createStandardReceipt');
         } catch (err) {
+          soapErr = err;
+        }
+
+        if (soapErr) {
           failureCount++;
-          const errorMessage = snippet(err.message, 500);
-          await prisma.fusionStandardReceipt.create({
-            data: {
-              requestId:    batchId || null,
-              status:       'Failed',
-              message:      errorMessage,
-              requestDate:  new Date(),
-              receiptNumber: soapRow.ReceiptNumber,
-              amount:       parseFloat(soapRow.Amount) || null,
-              region:       payloadRegion,
-              integMode:    'MANUAL',
-              batchId:      batchId || null,
-            },
-          });
+          const errorMessage = snippet(soapErr.message, 500);
+          try {
+            await prisma.fusionStandardReceipt.create({
+              data: {
+                requestId:    batchId || null,
+                status:       'Failed',
+                message:      errorMessage,
+                requestDate:  new Date(),
+                receiptNumber: soapRow.ReceiptNumber,
+                amount:       parseFloat(soapRow.Amount) || null,
+                region:       payloadRegion,
+                integMode:    'MANUAL',
+                batchId:      batchId || null,
+              },
+            });
+          } catch (dbErr) {
+            console.error(`[StandardReceipt] DB save failed for ${soapRow.ReceiptNumber}: ${dbErr.message}`);
+          }
           logs.push(`[ERROR] Row ${i + 2}: ${soapRow.ReceiptNumber} | ${errorMessage}`);
           console.error(`❌ [StandardReceipt] Failed: ${soapRow.ReceiptNumber} | ${errorMessage}`);
+        } else {
+          successCount++;
+          try {
+            await prisma.fusionStandardReceipt.create({
+              data: {
+                requestId:           batchId || null,
+                status:              'Success',
+                message:             null,
+                requestDate:         new Date(),
+                currencyCode:        soapRow.CurrencyCode,
+                receiptDate:         soapRow.ReceiptDate ? new Date(soapRow.ReceiptDate) : null,
+                glDate:              soapRow.ReceiptDate ? new Date(soapRow.ReceiptDate) : null,
+                receiptNumber:       soapRow.ReceiptNumber,
+                receiptMethodId:     soapRow.ReceiptMethodId || null,
+                remittanceBankAccId: soapRow.RemittanceBankAccountId || null,
+                depositDate:         soapRow.ReceiptDate ? new Date(soapRow.ReceiptDate) : null,
+                customerId:          soapRow.CustomerId || null,
+                orgId:               soapRow.OrgId,
+                amount:              parseFloat(soapRow.Amount) || null,
+                region:              payloadRegion,
+                integMode:           'MANUAL',
+                batchId:             batchId || null,
+              },
+            });
+          } catch (dbErr) {
+            console.error(`[StandardReceipt] DB save failed for ${soapRow.ReceiptNumber}: ${dbErr.message}`);
+          }
+          logs.push(`[OK] Row ${i + 2}: ${soapRow.ReceiptNumber} | HTTP ${soapResponse.status}`);
+          console.log(`✅ [StandardReceipt] Success: ${soapRow.ReceiptNumber}`);
         }
       })
     );

@@ -4,14 +4,33 @@
  * (SOAP-based: RegisterName in CSV → RemittanceBankAccountId resolved from VendhqRegister)
  */
 
+jest.mock('../services/prisma', () => ({
+  vendhqRegister:          { findFirst: jest.fn() },
+  fusionReceiptMethod:     { findFirst: jest.fn() },
+  standardReceiptUpload:   { create: jest.fn(), update: jest.fn() },
+  fusionStandardReceipt:   { create: jest.fn() },
+  standardReceiptFailure:  { createMany: jest.fn() },
+}));
+
+jest.mock('../services/OracleSoapClient', () => ({
+  createOracleSoapClient: jest.fn(() => ({
+    callWithCustomEnvelope: jest.fn(),
+  })),
+}));
+
+jest.mock('p-limit', () => () => (fn) => fn());
+
 const request = require('supertest');
 const express = require('express');
 const { parse } = require('csv-parse/sync');
+const prisma = require('../services/prisma');
+const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
 // Import the controller functions
 const {
   previewXml,
   downloadTemplate,
+  upload,
 } = require('../controllers/standardReceiptController');
 
 describe('Standard Receipt Controller', () => {
@@ -446,3 +465,118 @@ Visa-العربية-001,2026-03-05,422,SAR,300000001518646,AZIZMALL,300000001234
   });
 });
 
+// ─── Upload Function Tests ──────────────────────────────────────────────────
+
+const UPLOAD_CSV = [
+  'ReceiptNumber,ReceiptDate,Amount,CurrencyCode,ReceiptMethodId,RegisterName,CustomerId,OrgId',
+  'Visa-001,2026-03-05,422.00,SAR,300000001518646,AZIZMALL,300000158776674,300000001421038',
+].join('\n');
+
+function buildUploadApp() {
+  const app = express();
+  app.use(express.json());
+  app.post('/upload', (req, _res, next) => {
+    req.user = { id: 1, role: 'ADMIN' };
+    req.file = { originalname: 'test.csv', buffer: Buffer.from(UPLOAD_CSV) };
+    next();
+  }, upload);
+  app.use((err, _req, res, _next) => res.status(500).json({ error: err.message }));
+  return app;
+}
+
+describe('Upload Function (FusionStandardReceipt persistence)', () => {
+  let app;
+  let mockSoapClient;
+
+  beforeAll(() => {
+    process.env.ORACLE_STANDARD_RECEIPT_SOAP_URL = 'http://test.oracle/soap';
+    app = buildUploadApp();
+  });
+
+  afterAll(() => {
+    delete process.env.ORACLE_STANDARD_RECEIPT_SOAP_URL;
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    // Default prisma mocks
+    prisma.vendhqRegister.findFirst.mockResolvedValue({
+      registerName: 'AZIZMALL',
+      bankAccountId: '300000052407289',
+      cashAccountId: '300000012345678',
+    });
+    prisma.fusionReceiptMethod.findFirst.mockResolvedValue({
+      receiptMethodId: '300000001518646',
+      receiptIsCash: false,
+    });
+    prisma.standardReceiptUpload.create.mockResolvedValue({
+      id: 1,
+      userId: 1,
+      filename: 'test.csv',
+      status: 'PROCESSING',
+    });
+    prisma.standardReceiptUpload.update.mockResolvedValue({
+      id: 1,
+      successCount: 1,
+      failureCount: 0,
+      status: 'SUCCESS',
+    });
+    prisma.fusionStandardReceipt.create.mockResolvedValue({});
+    prisma.standardReceiptFailure.createMany.mockResolvedValue({});
+
+    // Default SOAP mock (success)
+    mockSoapClient = { callWithCustomEnvelope: jest.fn().mockResolvedValue({ status: 200, data: 'OK' }) };
+    createOracleSoapClient.mockReturnValue(mockSoapClient);
+  });
+
+  test('SOAP success: FusionStandardReceipt saved with status Success', async () => {
+    const res = await request(app).post('/upload');
+    expect(res.status).toBe(200);
+    expect(res.body.successCount).toBe(1);
+    expect(res.body.failureCount).toBe(0);
+
+    expect(prisma.fusionStandardReceipt.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status:              'Success',
+          receiptNumber:       'Visa-001',
+          remittanceBankAccId: '300000052407289',
+          customerId:          '300000158776674',
+          orgId:               '300000001421038',
+          integMode:           'MANUAL',
+        }),
+      })
+    );
+  });
+
+  test('SOAP failure: FusionStandardReceipt saved with status Failed', async () => {
+    mockSoapClient.callWithCustomEnvelope.mockRejectedValue(new Error('Oracle SOAP error'));
+
+    const res = await request(app).post('/upload');
+    expect(res.status).toBe(200);
+    expect(res.body.successCount).toBe(0);
+    expect(res.body.failureCount).toBe(1);
+
+    expect(prisma.fusionStandardReceipt.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status:       'Failed',
+          receiptNumber: 'Visa-001',
+          message:      'Oracle SOAP error',
+          integMode:    'MANUAL',
+        }),
+      })
+    );
+  });
+
+  test('SOAP success + DB failure: still counted as success, error logged not thrown', async () => {
+    prisma.fusionStandardReceipt.create.mockRejectedValue(new Error('DB write error'));
+
+    const res = await request(app).post('/upload');
+    expect(res.status).toBe(200);
+    // SOAP succeeded so it must be counted as success despite the DB error
+    expect(res.body.successCount).toBe(1);
+    expect(res.body.failureCount).toBe(0);
+  });
+});
