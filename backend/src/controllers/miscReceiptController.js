@@ -32,7 +32,6 @@ const SOAP_ENV_NS    = 'http://schemas.xmlsoap.org/soap/envelope/';
 const SOAP_TYPES_NS  = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/types/';
 const SOAP_COMMON_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
 const SOAP_MIS_NS    = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/model/flex/MiscellaneousReceiptDff/';
-const SOAP_ADF_NS    = 'http://xmlns.oracle.com/adf/svc/types/';
 const REQUIRED_CURRENCY = 'SAR';
 
 const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 3;
@@ -163,16 +162,12 @@ function generateSoapEnvelope(row) {
 <soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
   xmlns:typ="${SOAP_TYPES_NS}"
   xmlns:com="${SOAP_COMMON_NS}"
-  xmlns:mis="${SOAP_MIS_NS}"
-  xmlns:adf="${SOAP_ADF_NS}">
+  xmlns:mis="${SOAP_MIS_NS}">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:createMiscellaneousReceipt>
       <typ:miscellaneousReceipt>
-        <com:Amount>
-          <adf:Value>${escapeXml(row.Amount)}</adf:Value>
-          <adf:CurrencyCode>${escapeXml(row.CurrencyCode)}</adf:CurrencyCode>
-        </com:Amount>
+        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(row.Amount)}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>

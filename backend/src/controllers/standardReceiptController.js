@@ -241,7 +241,7 @@ function generateSoapEnvelope(row) {
   <soapenv:Body>
     <typ:createStandardReceipt>
       <typ:standardReceipt>
-        <com:Amount>${escapeXml(row.Amount)}</com:Amount>
+        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(row.Amount)}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
         <com:GlDate>${escapeXml(row.ReceiptDate)}</com:GlDate>
