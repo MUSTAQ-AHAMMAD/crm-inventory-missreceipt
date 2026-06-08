@@ -799,6 +799,7 @@ async function submitStandardReceipts(req, res, next) {
 
     let successCount = 0;
     let failureCount = 0;
+    let skipCount = 0;
     const logs = [];
     const limit = pLimit(CONCURRENT_REQUESTS);
     const startTime = Date.now();
@@ -807,6 +808,41 @@ async function submitStandardReceipts(req, res, next) {
       limit(async () => {
         // Strip internal _meta before processing
         const { _meta, ...apiPayload } = payload;
+
+        const amountNum = parseFloat(apiPayload.Amount);
+
+        // Skip receipts with Amount = 0
+        if (amountNum === 0) {
+          skipCount++;
+          logs.push(`[SKIP] Row ${i + 2}: ${apiPayload.ReceiptNumber} | Amount is 0 – skipped`);
+          return;
+        }
+
+        // Skip receipts whose number contains "credit" (e.g. "Credit On Cust-...")
+        if (apiPayload.ReceiptNumber && /credit/i.test(apiPayload.ReceiptNumber)) {
+          skipCount++;
+          logs.push(`[SKIP] Row ${i + 2}: ${apiPayload.ReceiptNumber} | Receipt number contains 'credit' – skipped`);
+          return;
+        }
+
+        // Skip negative amounts – they are handled as miscellaneous receipts, not standard receipts
+        if (amountNum < 0) {
+          skipCount++;
+          logs.push(`[SKIP] Row ${i + 2}: ${apiPayload.ReceiptNumber} | Negative amount (${apiPayload.Amount}) – handled as misc receipt, skipped for standard`);
+          return;
+        }
+
+        // Deduplication: if a receipt with the same number was already successfully created in Fusion,
+        // skip the SOAP call and proceed directly to the Apply Receipt step.
+        const existingReceipt = await prisma.fusionStandardReceipt.findFirst({
+          where: { receiptNumber: apiPayload.ReceiptNumber, status: 'Success' },
+          select: { id: true },
+        });
+        if (existingReceipt) {
+          skipCount++;
+          logs.push(`[SKIP] Row ${i + 2}: ${apiPayload.ReceiptNumber} | Receipt already exists in Fusion – skipping to Apply Receipt step`);
+          return;
+        }
 
         // Look up Oracle CustomerAccountId for this customer.
         // Strategies 1, 2, 3 search prior successful FusionStandardReceipt records in the DB.
@@ -955,6 +991,7 @@ async function submitStandardReceipts(req, res, next) {
       total: payloads.length,
       successCount,
       failureCount,
+      skipCount,
       processingTimeSeconds: parseFloat(elapsed),
       logs,
     });

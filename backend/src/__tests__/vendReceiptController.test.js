@@ -103,7 +103,9 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
       { txnNumber: '12345' },
     ]);
     prisma.fusionStandardReceipt.findFirst
-      // First call: receipt-number endsWith match → returns party ID
+      // First call: dedup check – receipt doesn't already exist
+      .mockResolvedValueOnce(null)
+      // Second call: receipt-number endsWith match → returns party ID
       .mockResolvedValueOnce({ customerId: '300000001576078' });
 
     const res = await request(app)
@@ -123,10 +125,11 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
   test('strategy 2: falls back to bank-account-ID lookup when no invoice chain matches', async () => {
     // No invoice headers found → strategy 1 returns null
     prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
-    // Bank-account-ID query → finds seeded receipt with correct party ID
-    prisma.fusionStandardReceipt.findFirst.mockResolvedValueOnce({
-      customerId: '300000001576078',
-    });
+    prisma.fusionStandardReceipt.findFirst
+      // First call: dedup check – receipt doesn't already exist
+      .mockResolvedValueOnce(null)
+      // Second call: bank-account-ID query → finds seeded receipt with correct party ID
+      .mockResolvedValueOnce({ customerId: '300000001576078' });
 
     const res = await request(app)
       .post('/submit-standard')
@@ -196,7 +199,10 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
 
   test('SOAP success + DB failure: receipt counted as success, error does not propagate', async () => {
     prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
-    prisma.fusionStandardReceipt.findFirst.mockResolvedValue({ customerId: '300000001576078' });
+    // First call: dedup check – no existing receipt; subsequent calls: return party ID
+    prisma.fusionStandardReceipt.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ customerId: '300000001576078' });
     // DB write fails after SOAP succeeds
     prisma.fusionStandardReceipt.create.mockRejectedValue(new Error('DB unavailable'));
 
@@ -282,5 +288,119 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     const metaCalls = prisma.fusionSalesMetadata.findFirst.mock.calls;
     const subinvLookup = metaCalls.find(([args]) => args?.where?.subinventory === 'EXBSA');
     expect(subinvLookup).toBeDefined();
+  });
+});
+
+// ─── Skip-rule tests ──────────────────────────────────────────────────────────
+
+describe('submitStandardReceipts – skip rules', () => {
+  let app;
+
+  beforeAll(() => {
+    process.env.ORACLE_STANDARD_RECEIPT_SOAP_URL = 'http://test.oracle/soap';
+    app = buildApp();
+  });
+
+  afterAll(() => {
+    delete process.env.ORACLE_STANDARD_RECEIPT_SOAP_URL;
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    prisma.fusionStandardReceipt.create.mockResolvedValue({});
+    prisma.fusionStandardReceipt.findFirst.mockResolvedValue(null);
+    prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
+    prisma.fusionInvoiceHeader.findFirst.mockResolvedValue(null);
+    prisma.fusionSalesMetadata.findFirst.mockResolvedValue(null);
+    prisma.vendhqRegister.findFirst.mockResolvedValue(null);
+    axios.get.mockResolvedValue({ data: { items: [] } });
+  });
+
+  test('skips receipt when Amount is 0', async () => {
+    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const res = await request(app)
+      .post('/submit-standard')
+      .send({ payloads: [{ ...BASE_PAYLOAD, Amount: '0' }] });
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(200);
+    expect(res.body.skipCount).toBe(1);
+    expect(res.body.successCount).toBe(0);
+    expect(res.body.failureCount).toBe(0);
+    expect(createOracleSoapClient).not.toHaveBeenCalled();
+    expect(res.body.logs[0]).toMatch(/SKIP.*Amount is 0/);
+  });
+
+  test('skips receipt when receipt number contains "credit" (case-insensitive)', async () => {
+    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const res = await request(app)
+      .post('/submit-standard')
+      .send({ payloads: [{ ...BASE_PAYLOAD, ReceiptNumber: 'Credit On Cust-99999' }] });
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(200);
+    expect(res.body.skipCount).toBe(1);
+    expect(res.body.successCount).toBe(0);
+    expect(res.body.failureCount).toBe(0);
+    expect(createOracleSoapClient).not.toHaveBeenCalled();
+    expect(res.body.logs[0]).toMatch(/SKIP.*credit/i);
+  });
+
+  test('skips receipt when Amount is negative (handled as misc receipt)', async () => {
+    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const res = await request(app)
+      .post('/submit-standard')
+      .send({ payloads: [{ ...BASE_PAYLOAD, Amount: '-50' }] });
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(200);
+    expect(res.body.skipCount).toBe(1);
+    expect(res.body.successCount).toBe(0);
+    expect(res.body.failureCount).toBe(0);
+    expect(createOracleSoapClient).not.toHaveBeenCalled();
+    expect(res.body.logs[0]).toMatch(/SKIP.*[Nn]egative/);
+  });
+
+  test('skips receipt when it already exists in Fusion (deduplication)', async () => {
+    // Dedup check: receipt already exists with status Success
+    prisma.fusionStandardReceipt.findFirst.mockResolvedValueOnce({ id: 42 });
+
+    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const res = await request(app)
+      .post('/submit-standard')
+      .send({ payloads: [BASE_PAYLOAD] });
+    consoleSpy.mockRestore();
+
+    expect(res.status).toBe(200);
+    expect(res.body.skipCount).toBe(1);
+    expect(res.body.successCount).toBe(0);
+    expect(res.body.failureCount).toBe(0);
+    expect(createOracleSoapClient).not.toHaveBeenCalled();
+    expect(res.body.logs[0]).toMatch(/SKIP.*already exists/i);
+
+    // Dedup check must have queried by the correct receipt number and status
+    const dupCheck = prisma.fusionStandardReceipt.findFirst.mock.calls[0][0];
+    expect(dupCheck.where.receiptNumber).toBe('Visa-12345');
+    expect(dupCheck.where.status).toBe('Success');
+  });
+
+  test('processes normal receipts (positive, no credit, non-zero) without skipping', async () => {
+    prisma.fusionStandardReceipt.findFirst.mockResolvedValue(null);
+    prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
+    axios.get.mockResolvedValue({ data: { items: [{ CustomerAccountId: '300000001576078' }] } });
+    process.env.ORACLE_CUSTOMERS_API_URL = 'http://test.oracle/customers';
+
+    const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const res = await request(app)
+      .post('/submit-standard')
+      .send({ payloads: [BASE_PAYLOAD] });
+    consoleSpy.mockRestore();
+
+    delete process.env.ORACLE_CUSTOMERS_API_URL;
+
+    expect(res.status).toBe(200);
+    expect(res.body.skipCount).toBe(0);
+    expect(res.body.successCount).toBe(1);
+    expect(createOracleSoapClient).toHaveBeenCalled();
   });
 });
