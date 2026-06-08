@@ -193,10 +193,11 @@ function round2(n) {
  *
  * @param {string|number} customerAccNumber - billToAccNumber from the invoice header
  * @param {string|null}   bankAccountId     - VendhqRegister.bankAccountId (optional)
- * Returns null when neither strategy locates a party ID.
+ * @param {string|null}   subinventory      - store/subinventory code (optional)
+ * Returns null when no strategy locates a party ID.
  */
-async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null) {
-  if (!customerAccNumber && !bankAccountId) return null;
+async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, subinventory = null) {
+  if (!customerAccNumber && !bankAccountId && !subinventory) return null;
 
   // ── Strategy 1: invoice header → receipt chain ───────────────────────────
   if (customerAccNumber) {
@@ -245,6 +246,48 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null) {
       select: { customerId: true },
     });
     if (receipt?.customerId) return receipt.customerId;
+  }
+
+  // ── Strategy 3: subinventory → VendhqRegister → all account IDs ──────────
+  // When the payload's RemittanceBankAccountNumber is empty (register not found
+  // during generation) OR only one account type was tried in strategy 2, try all
+  // Oracle account IDs (bankAccountId + cashAccountId) from VendhqRegister for
+  // this store.  This covers the case where the seeded FusionStandardReceipt has
+  // records for a different account type than the current payment method.
+  if (subinventory) {
+    let reg = await prisma.vendhqRegister.findFirst({
+      where: { registerName: { equals: subinventory } },
+      select: { bankAccountId: true, cashAccountId: true },
+    });
+    if (!reg && subinventory.length >= 4) {
+      reg = await prisma.vendhqRegister.findFirst({
+        where: { registerName: { startsWith: subinventory.slice(0, 4) } },
+        select: { bankAccountId: true, cashAccountId: true },
+      });
+    }
+
+    if (reg) {
+      // Collect all account IDs from the register, excluding the one already
+      // tried in strategy 2 to avoid a redundant database round-trip.
+      const triedId = bankAccountId ? String(bankAccountId) : null;
+      const candidates = [reg.bankAccountId, reg.cashAccountId]
+        .filter(Boolean)
+        .map(String)
+        .filter((id) => id !== triedId);
+
+      if (candidates.length > 0) {
+        const receipt = await prisma.fusionStandardReceipt.findFirst({
+          where: {
+            remittanceBankAccId: { in: candidates },
+            customerId:          { not: null },
+            status:              'Success',
+          },
+          orderBy: { createdAt: 'desc' },
+          select: { customerId: true },
+        });
+        if (receipt?.customerId) return receipt.customerId;
+      }
+    }
   }
 
   return null;
@@ -633,9 +676,13 @@ async function submitStandardReceipts(req, res, next) {
         // Look up Oracle customer party ID from prior successful receipts.
         // Pass the bank account ID as a fallback so seeded historical receipts
         // are searched when no invoice-linked receipt exists yet (first-run).
+        // Also pass the subinventory so Strategy 3 can try all account IDs from
+        // VendhqRegister (bankAccountId + cashAccountId) when the specific ID in
+        // the payload is not present in the seed data.
         const customerId = await lookupCustomerPartyId(
           apiPayload.CustomerAccountNumber,
           apiPayload.RemittanceBankAccountNumber || null,
+          _meta?.subinventory || null,
         );
 
         // Build SOAP row: map REST-oriented payload fields to SOAP field names
