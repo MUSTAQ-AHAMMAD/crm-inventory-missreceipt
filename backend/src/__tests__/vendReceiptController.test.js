@@ -3,9 +3,9 @@
  *
  * Covers the lookupCustomerPartyId logic inside submitStandardReceipts:
  *  - Strategy 1:  invoice-header → receipt chain
- *  - Strategy 1b: txnNumber → FusionInvoiceHeader → FusionSalesMetadata → billToAccount
+ *  - Strategy 1b: txnNumber → FusionInvoiceHeader → FusionSalesMetadata → Oracle REST → CUST_ACCOUNT_ID
  *  - Strategy 2:  bank-account-ID fallback (seeded historical data)
- *  - Strategy 3b: subinventory → FusionSalesMetadata → billToAccount
+ *  - Strategy 3b: subinventory → FusionSalesMetadata → Oracle REST → CUST_ACCOUNT_ID
  *  - Strategy 4:  Oracle REST customer lookup
  *  - Correct SOAP CustomerId population
  */
@@ -220,7 +220,7 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     expect(res.body.failureCount).toBe(0);
   });
 
-  test('strategy 1b: resolves CustomerId via txnNumber → FusionInvoiceHeader → FusionSalesMetadata', async () => {
+  test('strategy 1b: resolves CustomerId via txnNumber → FusionInvoiceHeader → FusionSalesMetadata → Oracle REST', async () => {
     // No prior receipt records → strategies 1, 2, 3 all return nothing
     prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
     prisma.fusionStandardReceipt.findFirst.mockResolvedValue(null);
@@ -230,6 +230,9 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
       billToAccNumber: 55012,
     });
     prisma.fusionSalesMetadata.findFirst.mockResolvedValue({ billToAccount: 55012 });
+    // Oracle REST converts account number 55012 to real CUST_ACCOUNT_ID
+    process.env.ORACLE_CUSTOMERS_API_URL = 'http://test.oracle/customers';
+    axios.get.mockResolvedValue({ data: { items: [{ CustomerAccountId: '300000158776674' }] } });
 
     const payloadWithMeta = {
       ...BASE_PAYLOAD,
@@ -237,18 +240,24 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     };
 
     const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    const res = await request(app)
-      .post('/submit-standard')
-      .send({ payloads: [payloadWithMeta] });
-    consoleSpy.mockRestore();
+    let res;
+    try {
+      res = await request(app)
+        .post('/submit-standard')
+        .send({ payloads: [payloadWithMeta] });
+    } finally {
+      consoleSpy.mockRestore();
+      delete process.env.ORACLE_CUSTOMERS_API_URL;
+    }
 
     expect(res.status).toBe(200);
     expect(res.body.successCount).toBe(1);
 
-    // SOAP envelope must contain the billToAccount value resolved from FusionSalesMetadata
+    // SOAP envelope must contain the real Oracle CUST_ACCOUNT_ID (not the account number 55012)
     const { callWithCustomEnvelope } = createOracleSoapClient.mock.results[0].value;
     const soapXml = callWithCustomEnvelope.mock.calls[0][0];
-    expect(soapXml).toContain('55012');
+    expect(soapXml).toContain('300000158776674');
+    expect(soapXml).not.toContain('>55012<');
 
     // Strategy 1b lookup: FusionInvoiceHeader.findFirst called with the correct txnNumber
     const findFirstCalls = prisma.fusionInvoiceHeader.findFirst.mock.calls;
@@ -256,7 +265,7 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     expect(txnLookup).toBeDefined();
   });
 
-  test('strategy 3b: resolves CustomerId via subinventory → FusionSalesMetadata when no invoice records exist', async () => {
+  test('strategy 3b: resolves CustomerId via subinventory → FusionSalesMetadata → Oracle REST', async () => {
     // No invoice headers or prior receipts at all (brand-new store)
     prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
     prisma.fusionInvoiceHeader.findFirst.mockResolvedValue(null); // no invoice for txnNumber
@@ -265,6 +274,9 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     prisma.vendhqRegister.findFirst.mockResolvedValue(null);
     // Strategy 3b: metadata found directly by subinventory
     prisma.fusionSalesMetadata.findFirst.mockResolvedValue({ billToAccount: 55012 });
+    // Oracle REST converts account number 55012 to real CUST_ACCOUNT_ID
+    process.env.ORACLE_CUSTOMERS_API_URL = 'http://test.oracle/customers';
+    axios.get.mockResolvedValue({ data: { items: [{ CustomerAccountId: '300000158776674' }] } });
 
     const payloadWithMeta = {
       ...BASE_PAYLOAD,
@@ -272,17 +284,24 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     };
 
     const consoleSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
-    const res = await request(app)
-      .post('/submit-standard')
-      .send({ payloads: [payloadWithMeta] });
-    consoleSpy.mockRestore();
+    let res;
+    try {
+      res = await request(app)
+        .post('/submit-standard')
+        .send({ payloads: [payloadWithMeta] });
+    } finally {
+      consoleSpy.mockRestore();
+      delete process.env.ORACLE_CUSTOMERS_API_URL;
+    }
 
     expect(res.status).toBe(200);
     expect(res.body.successCount).toBe(1);
 
     const { callWithCustomEnvelope } = createOracleSoapClient.mock.results[0].value;
     const soapXml = callWithCustomEnvelope.mock.calls[0][0];
-    expect(soapXml).toContain('55012');
+    // SOAP envelope must contain the real Oracle CUST_ACCOUNT_ID (not the account number 55012)
+    expect(soapXml).toContain('300000158776674');
+    expect(soapXml).not.toContain('>55012<');
 
     // Strategy 3b lookup: FusionSalesMetadata.findFirst called with normalized subinventory
     const metaCalls = prisma.fusionSalesMetadata.findFirst.mock.calls;
