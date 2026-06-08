@@ -19,6 +19,7 @@ const { parse } = require('csv-parse/sync');
 const pLimit = require('p-limit');
 const prisma = require('../services/prisma');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
+const { buildStandardReceiptEnvelope } = require('../services/soapEnvelopeBuilder');
 
 // CSV fields – RegisterName replaces RemittanceBankAccountId so users provide a register
 // name instead of a raw Oracle ID.  The controller resolves the correct bank account ID
@@ -36,11 +37,6 @@ const REQUIRED_FIELDS = [
 ];
 
 const TEMPLATE_FIELDS = [...REQUIRED_FIELDS];
-
-// SOAP namespaces - StandardReceiptService (same service used by createApplyReceipt)
-const SOAP_ENV_NS   = 'http://schemas.xmlsoap.org/soap/envelope/';
-const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/types/';
-const SOAP_COM_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/';
 
 const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS) || 3;
 
@@ -213,51 +209,6 @@ async function resolveRemittanceBankAccountId(row, rowNumber) {
 }
 
 /**
- * Generates a SOAP envelope for createStandardReceipt matching
- * Java FusionStdReceiptTransform.mapStdReceiptModel().
- *
- * All three date fields (ReceiptDate, GlDate, DepositDate) use the same
- * value from the CSV ReceiptDate column, matching the Java transform.
- *
- * NOTE: row.RemittanceBankAccountId must be populated by
- * resolveRemittanceBankAccountId() before this function is called.
- */
-function generateSoapEnvelope(row) {
-  const requiredFields = [
-    'ReceiptNumber', 'ReceiptDate', 'Amount', 'CurrencyCode',
-    'ReceiptMethodId', 'RemittanceBankAccountId', 'CustomerId', 'OrgId',
-  ];
-  for (const field of requiredFields) {
-    if (row[field] === undefined || row[field] === null || row[field] === '') {
-      throw new Error(`Missing required field: ${field}`);
-    }
-  }
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
-  xmlns:typ="${SOAP_TYPES_NS}"
-  xmlns:com="${SOAP_COM_NS}">
-  <soapenv:Header/>
-  <soapenv:Body>
-    <typ:createStandardReceipt>
-      <typ:standardReceipt>
-        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(row.Amount)}</com:Amount>
-        <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
-        <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
-        <com:GlDate>${escapeXml(row.ReceiptDate)}</com:GlDate>
-        <com:DepositDate>${escapeXml(row.ReceiptDate)}</com:DepositDate>
-        <com:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</com:ReceiptMethodId>
-        <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
-        <com:RemittanceBankAccountId>${escapeXml(row.RemittanceBankAccountId)}</com:RemittanceBankAccountId>
-        <com:CustomerId>${escapeXml(row.CustomerId)}</com:CustomerId>
-        <com:OrgId>${escapeXml(row.OrgId)}</com:OrgId>
-      </typ:standardReceipt>
-    </typ:createStandardReceipt>
-  </soapenv:Body>
-</soapenv:Envelope>`;
-}
-
-/**
  * Sends the SOAP envelope to Oracle's StandardReceiptService.
  */
 async function sendSoapRequest(soapXml, receiptNumber) {
@@ -317,7 +268,7 @@ async function previewXml(req, res, next) {
     const previews = enrichedRecords.map((row, i) => ({
       rowNumber: i + 2,
       receiptNumber: row.ReceiptNumber,
-      xml: generateSoapEnvelope(row),
+      xml: buildStandardReceiptEnvelope(row),
     }));
 
     return res.json({ totalRows: enrichedRecords.length, previews });
@@ -395,7 +346,7 @@ async function upload(req, res, next) {
     const processingPromises = enrichedRecords.map((row, i) => {
       return limit(async () => {
         const rowNumber = i + 2;
-        const soapXml = generateSoapEnvelope(row);
+        const soapXml = buildStandardReceiptEnvelope(row);
 
         let soapResult = null;
         let soapError = null;
