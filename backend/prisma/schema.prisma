@@ -398,9 +398,10 @@ model VendhqRegister {
   version        String?
   deletedAt      String?
   region         String?
-  giftAccount    String?
-  giftAccountId  String?
-  createdAt      DateTime @default(now())
+  giftAccount       String?
+  giftAccountId     String?
+  customerAccountId String?  // Oracle CUST_ACCOUNT_ID – cached after first Oracle REST resolution
+  createdAt         DateTime @default(now())
 
   @@index([registerName])
   @@index([region])

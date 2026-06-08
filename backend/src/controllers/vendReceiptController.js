@@ -263,16 +263,24 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
  *
  * Strategy 3: Subinventory → VendhqRegister → all account IDs.
  *
- * Strategy 3b: Subinventory → FusionSalesMetadata → billToAccount (direct fallback)
+ * Strategy 3a: VendhqRegister.customerAccountId (pre-configured or auto-cached)
+ *   If VendhqRegister has a customerAccountId stored (either set by an admin or
+ *   auto-populated the first time Oracle REST resolved a CUST_ACCOUNT_ID for this
+ *   store), use it directly.  This makes the system Oracle-REST-independent after
+ *   the first successful resolution.
+ *
+ * Strategy 3b: Subinventory → FusionSalesMetadata → Oracle REST → CUST_ACCOUNT_ID
  *   When the subinventory is known but no prior receipt records exist, look up
- *   FusionSalesMetadata directly by subinventory and use billToAccount as the
- *   CustomerId.
+ *   FusionSalesMetadata directly by subinventory, then use Oracle REST to convert
+ *   billToAccount (AR account number) into the real CUST_ACCOUNT_ID.  On success,
+ *   the result is written back to VendhqRegister.customerAccountId for Strategy 3a.
  *
  * Strategy 4: Oracle REST customer lookup (first-run / no seeded data).
  *   Mirrors Java FusionCustomerProfileClient.getCustomerAccountId(accountNumber).
  *   Calls GET /fscmRestApi/.../customers?q=AccountNumber='...' (falls back to
  *   CustomerAccountNumber='...') to resolve the
- *   Oracle-internal CustomerAccountId when all DB strategies fail.
+ *   Oracle-internal CustomerAccountId when all DB strategies fail.  On success,
+ *   the result is written back to VendhqRegister.customerAccountId for Strategy 3a.
  *
  * @param {string|number} customerAccNumber - billToAccNumber from the invoice header
  * @param {string|null}   bankAccountId     - VendhqRegister.bankAccountId (optional)
@@ -379,19 +387,32 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
   // Oracle account IDs (bankAccountId + cashAccountId) from VendhqRegister for
   // this store.  This covers the case where the seeded FusionStandardReceipt has
   // records for a different account type than the current payment method.
+  let cachedReg = null; // reused by Strategy 3a below
   if (subinventory) {
     let reg = await prisma.vendhqRegister.findFirst({
       where: { registerName: { equals: subinventory } },
-      select: { bankAccountId: true, cashAccountId: true },
+      select: { id: true, bankAccountId: true, cashAccountId: true, customerAccountId: true },
     });
     if (!reg && subinventory.length >= 4) {
       reg = await prisma.vendhqRegister.findFirst({
         where: { registerName: { startsWith: subinventory.slice(0, 4) } },
-        select: { bankAccountId: true, cashAccountId: true },
+        select: { id: true, bankAccountId: true, cashAccountId: true, customerAccountId: true },
       });
     }
 
     if (reg) {
+      cachedReg = reg;
+
+      // ── Strategy 3a: VendhqRegister.customerAccountId (pre-configured or cached) ──
+      // Admins can manually set customerAccountId on VendhqRegister.  It is also
+      // auto-populated whenever Oracle REST successfully resolves the CUST_ACCOUNT_ID
+      // for this store (see Strategy 3b / 4 below).  This makes the system work
+      // without Oracle REST after the first successful resolution.
+      if (reg.customerAccountId) {
+        console.log(`[vendReceipt] Strategy 3a: resolved CustomerId=${reg.customerAccountId} from VendhqRegister.customerAccountId for subinventory=${subinventory}`);
+        return String(reg.customerAccountId);
+      }
+
       // Collect all account IDs from the register, excluding the one already
       // tried in strategy 2 to avoid a redundant database round-trip.
       const triedId = bankAccountId ? String(bankAccountId) : null;
@@ -415,6 +436,21 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
     }
   }
 
+  // Helper: persist a resolved CUST_ACCOUNT_ID to VendhqRegister so Strategy 3a
+  // can short-circuit future lookups without hitting Oracle REST again.
+  async function cacheCustomerAccountId(resolvedId) {
+    if (!resolvedId || !cachedReg?.id) return;
+    try {
+      await prisma.vendhqRegister.update({
+        where: { id: cachedReg.id },
+        data:  { customerAccountId: resolvedId },
+      });
+      console.log(`[vendReceipt] Cached CustomerId=${resolvedId} to VendhqRegister id=${cachedReg.id} (subinventory=${subinventory})`);
+    } catch (cacheErr) {
+      console.warn(`[vendReceipt] Could not cache CustomerId for VendhqRegister id=${cachedReg?.id}: ${cacheErr.message}`);
+    }
+  }
+
   // ── Strategy 3b: subinventory → FusionSalesMetadata → Oracle REST ────────
   // Direct fallback when no prior FusionStandardReceipt records exist for this
   // store.  Looks up FusionSalesMetadata by normalized subinventory, then uses
@@ -434,6 +470,7 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
       const realId = await lookupCustomerAccountIdFromOracle(meta.billToAccount);
       if (realId) {
         console.log(`[vendReceipt] Strategy 3b: resolved CustomerId=${realId} from Oracle REST via subinventory=${normalizedSubinventory}`);
+        await cacheCustomerAccountId(realId);
         return realId;
       }
       // Oracle REST unavailable – fall through to Strategy 4
@@ -446,7 +483,10 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
   // and oracle-crm oracleClient.getCustomer(accountNumber).
   if (customerAccNumber) {
     const oracleCustomerId = await lookupCustomerAccountIdFromOracle(customerAccNumber);
-    if (oracleCustomerId) return oracleCustomerId;
+    if (oracleCustomerId) {
+      await cacheCustomerAccountId(oracleCustomerId);
+      return oracleCustomerId;
+    }
   }
 
   return null;
