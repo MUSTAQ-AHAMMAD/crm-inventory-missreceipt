@@ -234,6 +234,13 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
  *   Find FusionInvoiceHeader entries with the matching billToAccNumber, then
  *   look for a FusionStandardReceipt whose receipt number ends with -{txnNumber}.
  *
+ * Strategy 1b: VendSales Metadata lookup via invoice number (first-run safe)
+ *   Given the txnNumber embedded in the receipt number (e.g. "Visa-2672577" → 2672577),
+ *   look up FusionInvoiceHeader by txnNumber, then resolve FusionSalesMetadata
+ *   using the invoice's billToLocation (siteNumber).  Returns billToAccount as
+ *   the CustomerId.  This strategy succeeds even when no prior FusionStandardReceipt
+ *   records exist for the store.
+ *
  * Strategy 2: Bank-account-ID fallback (works with seeded historical data)
  *   If strategy 1 yields nothing, search FusionStandardReceipt directly by
  *   remittanceBankAccId.  Because each store has a unique Oracle bank account ID
@@ -243,6 +250,11 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
  *
  * Strategy 3: Subinventory → VendhqRegister → all account IDs.
  *
+ * Strategy 3b: Subinventory → FusionSalesMetadata → billToAccount (direct fallback)
+ *   When the subinventory is known but no prior receipt records exist, look up
+ *   FusionSalesMetadata directly by subinventory and use billToAccount as the
+ *   CustomerId.
+ *
  * Strategy 4: Oracle REST customer lookup (first-run / no seeded data).
  *   Mirrors Java FusionCustomerProfileClient.getCustomerAccountId(accountNumber).
  *   Calls GET /fscmRestApi/.../customers?q=CustomerNumber='...' to resolve the
@@ -251,10 +263,11 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
  * @param {string|number} customerAccNumber - billToAccNumber from the invoice header
  * @param {string|null}   bankAccountId     - VendhqRegister.bankAccountId (optional)
  * @param {string|null}   subinventory      - store/subinventory code (optional)
+ * @param {string|number} txnNumber         - invoice transaction number (optional)
  * Returns null when no strategy locates a party ID.
  */
-async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, subinventory = null) {
-  if (!customerAccNumber && !bankAccountId && !subinventory) return null;
+async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, subinventory = null, txnNumber = null) {
+  if (!customerAccNumber && !bankAccountId && !subinventory && !txnNumber) return null;
 
   // ── Strategy 1: invoice header → receipt chain ───────────────────────────
   if (customerAccNumber) {
@@ -283,6 +296,42 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
           select: { customerId: true },
         });
         if (receipt?.customerId) return receipt.customerId;
+      }
+    }
+  }
+
+  // ── Strategy 1b: txnNumber → FusionInvoiceHeader → FusionSalesMetadata ───
+  // Looks up the invoice by its transaction number, then resolves the matching
+  // FusionSalesMetadata record via the invoice's billToLocation (siteNumber).
+  // Falls back to matching by billToAccNumber when billToLocation is absent.
+  // Returns billToAccount as the CustomerId – works on first run with no prior
+  // FusionStandardReceipt records.
+  if (txnNumber) {
+    const txnNum = parseInt(String(txnNumber).replace(/\D/g, ''), 10);
+    if (!isNaN(txnNum) && txnNum > 0) {
+      const inv = await prisma.fusionInvoiceHeader.findFirst({
+        where: { txnNumber: txnNum },
+        select: { billToLocation: true, billToAccNumber: true },
+        orderBy: { createdAt: 'desc' },
+      });
+      if (inv) {
+        let meta = null;
+        if (inv.billToLocation) {
+          meta = await prisma.fusionSalesMetadata.findFirst({
+            where: { siteNumber: inv.billToLocation },
+            select: { billToAccount: true },
+          });
+        }
+        if (!meta && inv.billToAccNumber) {
+          meta = await prisma.fusionSalesMetadata.findFirst({
+            where: { billToAccount: inv.billToAccNumber },
+            select: { billToAccount: true },
+          });
+        }
+        if (meta?.billToAccount) {
+          console.log(`[vendReceipt] Strategy 1b: resolved CustomerId=${meta.billToAccount} from FusionSalesMetadata via txnNumber=${txnNum}`);
+          return String(meta.billToAccount);
+        }
       }
     }
   }
@@ -344,6 +393,26 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
         });
         if (receipt?.customerId) return receipt.customerId;
       }
+    }
+  }
+
+  // ── Strategy 3b: subinventory → FusionSalesMetadata → billToAccount ───────
+  // Direct fallback when no prior FusionStandardReceipt records exist for this
+  // store.  Looks up FusionSalesMetadata by normalized subinventory and returns
+  // billToAccount as the CustomerId.
+  if (subinventory) {
+    const normalizedSubinventory = String(subinventory)
+      .replace(/[\u200B-\u200D\uFEFF]/g, '')
+      .trim()
+      .toUpperCase();
+    const meta = await prisma.fusionSalesMetadata.findFirst({
+      where: { subinventory: normalizedSubinventory },
+      select: { billToAccount: true },
+      orderBy: { id: 'asc' },
+    });
+    if (meta?.billToAccount) {
+      console.log(`[vendReceipt] Strategy 3b: resolved CustomerId=${meta.billToAccount} from FusionSalesMetadata via subinventory=${normalizedSubinventory}`);
+      return String(meta.billToAccount);
     }
   }
 
@@ -740,13 +809,16 @@ async function submitStandardReceipts(req, res, next) {
         const { _meta, ...apiPayload } = payload;
 
         // Look up Oracle CustomerAccountId for this customer.
-        // Strategies 1-3 search prior successful FusionStandardReceipt records in the DB.
+        // Strategies 1, 2, 3 search prior successful FusionStandardReceipt records in the DB.
+        // Strategy 1b uses the invoice txnNumber to resolve via FusionSalesMetadata.
+        // Strategy 3b uses subinventory to resolve via FusionSalesMetadata directly.
         // Strategy 4 (fallback) resolves via Oracle REST GET /customers — mirrors Java
         // FusionCustomerProfileClient.getCustomerAccountId(accountNumber).
         const customerId = await lookupCustomerPartyId(
           apiPayload.CustomerAccountNumber,
           apiPayload.RemittanceBankAccountNumber || null,
           _meta?.subinventory || null,
+          _meta?.txnNumber    || null,
         );
 
         // Build SOAP row: map REST-oriented payload fields to SOAP field names.
