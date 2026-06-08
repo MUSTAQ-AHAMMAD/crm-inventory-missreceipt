@@ -203,26 +203,36 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
     `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
   ).toString('base64');
 
-  try {
-    const response = await axios.get(url, {
-      params: {
-        q: `CustomerNumber='${safeAccNumber}'`,
-        fields: 'CustomerAccountId',
-        limit: 1,
-      },
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Basic ${oracleAuth}`,
-      },
-      timeout: 30000,
-    });
-    const items = response.data?.items || [];
-    if (items.length > 0 && items[0].CustomerAccountId) {
-      return String(items[0].CustomerAccountId);
+  // Oracle Fusion REST API uses 'AccountNumber' as the customer account number
+  // field name (maps to HZ_CUST_ACCOUNTS.ACCOUNT_NUMBER).  Some older Oracle
+  // versions also recognise 'CustomerAccountNumber'.  Try both before giving up.
+  const queryFields = [
+    `AccountNumber='${safeAccNumber}'`,
+    `CustomerAccountNumber='${safeAccNumber}'`,
+  ];
+
+  for (const q of queryFields) {
+    try {
+      const response = await axios.get(url, {
+        params: {
+          q,
+          fields: 'CustomerAccountId',
+          limit: 1,
+        },
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Basic ${oracleAuth}`,
+        },
+        timeout: 30000,
+      });
+      const items = response.data?.items || [];
+      if (items.length > 0 && items[0].CustomerAccountId) {
+        return String(items[0].CustomerAccountId);
+      }
+    } catch (err) {
+      console.warn(`[vendReceipt] Oracle customer lookup failed (q=${q}) for account '${accountNumber}': ${err.message}`);
     }
-  } catch (err) {
-    console.warn(`[vendReceipt] Oracle customer lookup failed for account '${accountNumber}': ${err.message}`);
   }
   return null;
 }
@@ -257,7 +267,8 @@ async function lookupCustomerAccountIdFromOracle(accountNumber) {
  *
  * Strategy 4: Oracle REST customer lookup (first-run / no seeded data).
  *   Mirrors Java FusionCustomerProfileClient.getCustomerAccountId(accountNumber).
- *   Calls GET /fscmRestApi/.../customers?q=CustomerNumber='...' to resolve the
+ *   Calls GET /fscmRestApi/.../customers?q=AccountNumber='...' (falls back to
+ *   CustomerAccountNumber='...') to resolve the
  *   Oracle-internal CustomerAccountId when all DB strategies fail.
  *
  * @param {string|number} customerAccNumber - billToAccNumber from the invoice header

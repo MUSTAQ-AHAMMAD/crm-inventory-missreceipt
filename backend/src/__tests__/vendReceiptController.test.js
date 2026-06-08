@@ -195,6 +195,13 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     const soapXml = callWithCustomEnvelope.mock.calls[0][0];
     expect(soapXml).toContain('300000001576078');
     expect(soapXml).not.toContain('>57013<');
+
+    // Oracle REST must be queried with AccountNumber (Oracle Fusion field), not CustomerNumber
+    const axiosCalls = axios.get.mock.calls;
+    const firstOracleCall = axiosCalls.find(([, config]) => config?.params?.q?.includes('57013'));
+    expect(firstOracleCall).toBeDefined();
+    expect(firstOracleCall[1].params.q).toMatch(/AccountNumber='57013'/);
+    expect(firstOracleCall[1].params.q).not.toMatch(/CustomerNumber='57013'/);
   });
 
   test('SOAP success + DB failure: receipt counted as success, error does not propagate', async () => {
