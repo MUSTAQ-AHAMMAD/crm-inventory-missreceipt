@@ -25,6 +25,7 @@
  *   amount      = 0 - miscCharges
  */
 
+const axios = require('axios');
 const XLSX = require('xlsx');
 const pLimit = require('p-limit');
 const prisma = require('../services/prisma');
@@ -178,6 +179,51 @@ function round2(n) {
 }
 
 /**
+/**
+ * Resolve Oracle CustomerAccountId from a customer account number via the
+ * Oracle Fusion REST API.
+ *
+ * Mirrors Java FusionCustomerProfileClient.getCustomerAccountId(accountNumber)
+ * and oracle-crm oracleClient.getCustomer(accountNumber).
+ *
+ * Requires ORACLE_CUSTOMERS_API_URL, ORACLE_USERNAME, ORACLE_PASSWORD in .env.
+ *
+ * @param {string|number} accountNumber - Oracle AR customer account number
+ * @returns {string|null} CustomerAccountId as a string, or null on failure
+ */
+async function lookupCustomerAccountIdFromOracle(accountNumber) {
+  const url = process.env.ORACLE_CUSTOMERS_API_URL;
+  if (!url || !accountNumber) return null;
+
+  const oracleAuth = Buffer.from(
+    `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
+  ).toString('base64');
+
+  try {
+    const response = await axios.get(url, {
+      params: {
+        q: `CustomerNumber='${accountNumber}'`,
+        fields: 'CustomerAccountId',
+        limit: 1,
+      },
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: `Basic ${oracleAuth}`,
+      },
+      timeout: 30000,
+    });
+    const items = response.data?.items || [];
+    if (items.length > 0 && items[0].CustomerAccountId) {
+      return String(items[0].CustomerAccountId);
+    }
+  } catch (err) {
+    console.warn(`[vendReceipt] Oracle customer lookup failed for account '${accountNumber}': ${err.message}`);
+  }
+  return null;
+}
+
+/**
  * Look up the Oracle customer party ID (CustomerId) for a given account number.
  *
  * Strategy 1: Invoice-chain lookup (works after the first successful submission)
@@ -190,6 +236,13 @@ function round2(n) {
  *   (from VendhqRegister.bankAccountId) and seeded historical receipts include
  *   this ID, the correct party ID can be retrieved without a matching invoice
  *   header.  This prevents first-run failures for stores present in seed data.
+ *
+ * Strategy 3: Subinventory → VendhqRegister → all account IDs.
+ *
+ * Strategy 4: Oracle REST customer lookup (first-run / no seeded data).
+ *   Mirrors Java FusionCustomerProfileClient.getCustomerAccountId(accountNumber).
+ *   Calls GET /fscmRestApi/.../customers?q=CustomerNumber='...' to resolve the
+ *   Oracle-internal CustomerAccountId when all DB strategies fail.
  *
  * @param {string|number} customerAccNumber - billToAccNumber from the invoice header
  * @param {string|null}   bankAccountId     - VendhqRegister.bankAccountId (optional)
@@ -288,6 +341,15 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
         if (receipt?.customerId) return receipt.customerId;
       }
     }
+  }
+
+  // ── Strategy 4: Oracle REST customer lookup ───────────────────────────────
+  // Used when DB strategies 1-3 all fail (e.g. first-run, no seeded data).
+  // Mirrors Java FusionCustomerProfileClient.getCustomerAccountId(accountNumber)
+  // and oracle-crm oracleClient.getCustomer(accountNumber).
+  if (customerAccNumber) {
+    const oracleCustomerId = await lookupCustomerAccountIdFromOracle(customerAccNumber);
+    if (oracleCustomerId) return oracleCustomerId;
   }
 
   return null;
@@ -673,22 +735,17 @@ async function submitStandardReceipts(req, res, next) {
         // Strip internal _meta before processing
         const { _meta, ...apiPayload } = payload;
 
-        // Look up Oracle customer party ID from prior successful receipts.
-        // Pass the bank account ID as a fallback so seeded historical receipts
-        // are searched when no invoice-linked receipt exists yet (first-run).
-        // Also pass the subinventory so Strategy 3 can try all account IDs from
-        // VendhqRegister (bankAccountId + cashAccountId) when the specific ID in
-        // the payload is not present in the seed data.
+        // Look up Oracle CustomerAccountId for this customer.
+        // Strategies 1-3 search prior successful FusionStandardReceipt records in the DB.
+        // Strategy 4 (fallback) resolves via Oracle REST GET /customers — mirrors Java
+        // FusionCustomerProfileClient.getCustomerAccountId(accountNumber).
         const customerId = await lookupCustomerPartyId(
           apiPayload.CustomerAccountNumber,
           apiPayload.RemittanceBankAccountNumber || null,
           _meta?.subinventory || null,
         );
 
-        // Build SOAP row: map REST-oriented payload fields to SOAP field names
-        if (!customerId) {
-          console.warn(`⚠️ [StandardReceipt] No Oracle party ID found for account ${apiPayload.CustomerAccountNumber} (${apiPayload.ReceiptNumber}). Falling back to account number — Oracle may reject this.`);
-        }
+        // Build SOAP row: map REST-oriented payload fields to SOAP field names.
         // Region comes from the generated payload (resolved per-register); used to
         // persist the correct region to FusionStandardReceipt (not hardcoded DEFAULT_REGION).
         const payloadRegion = apiPayload.Region || DEFAULT_REGION;
@@ -699,7 +756,7 @@ async function submitStandardReceipts(req, res, next) {
           CurrencyCode:           apiPayload.Currency || DEFAULT_CURRENCY,
           ReceiptMethodId:        apiPayload.ReceiptMethodId || '',
           RemittanceBankAccountId: apiPayload.RemittanceBankAccountNumber || '',
-          CustomerId:             customerId || apiPayload.CustomerAccountNumber || '',
+          CustomerId:             customerId || '',
           OrgId:                  apiPayload.OrgId || STATIC_ORG_ID,
         };
 

@@ -23,11 +23,18 @@ jest.mock('../services/OracleSoapClient', () => ({
   })),
 }));
 
+// Mock axios so Strategy 4 (Oracle REST customer lookup) is controlled in tests
+jest.mock('axios', () => ({
+  get: jest.fn(),
+  post: jest.fn(),
+}));
+
 // p-limit must resolve immediately in tests
 jest.mock('p-limit', () => () => (fn) => fn());
 
 const request = require('supertest');
 const express = require('express');
+const axios = require('axios');
 const prisma = require('../services/prisma');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
@@ -73,6 +80,8 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.fusionStandardReceipt.create.mockResolvedValue({});
+    // Strategy 4: by default Oracle REST returns no customer (simulates unconfigured or not found)
+    axios.get.mockResolvedValue({ data: { items: [] } });
   });
 
   test('strategy 1: resolves party ID via invoice header → receipt chain', async () => {
@@ -126,24 +135,49 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     expect(soapXml).not.toContain('>57013<');
   });
 
-  test('falls back to account number and warns when neither strategy finds a party ID', async () => {
+  test('fails with missing CustomerId when all DB strategies and Oracle REST return nothing', async () => {
     prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
-    // Both findFirst calls return null
     prisma.fusionStandardReceipt.findFirst.mockResolvedValue(null);
-
-    const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    // Strategy 4: Oracle REST returns no customer
+    process.env.ORACLE_CUSTOMERS_API_URL = 'http://test.oracle/customers';
+    axios.get.mockResolvedValue({ data: { items: [] } });
 
     const res = await request(app)
       .post('/submit-standard')
       .send({ payloads: [BASE_PAYLOAD] });
 
-    consoleSpy.mockRestore();
+    delete process.env.ORACLE_CUSTOMERS_API_URL;
 
     expect(res.status).toBe(200);
-    // SOAP call is still made with account number as fallback (Oracle may reject, but we tried)
+    // Receipt must be counted as failed — sending account number as CustomerId
+    // would produce AR_RAPI_CUST_ID_INVALID; failing here is the correct behaviour.
+    expect(res.body.failureCount).toBe(1);
+    expect(res.body.successCount).toBe(0);
+    // SOAP must NOT have been called with the account number as CustomerId
+    expect(createOracleSoapClient).not.toHaveBeenCalled();
+  });
+
+  test('strategy 4: resolves party ID via Oracle REST customer lookup when DB has no records', async () => {
+    prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
+    prisma.fusionStandardReceipt.findFirst.mockResolvedValue(null);
+    process.env.ORACLE_CUSTOMERS_API_URL = 'http://test.oracle/customers';
+    // Strategy 4: Oracle REST returns CustomerAccountId
+    axios.get.mockResolvedValue({ data: { items: [{ CustomerAccountId: 300000001576078 }] } });
+
+    const res = await request(app)
+      .post('/submit-standard')
+      .send({ payloads: [BASE_PAYLOAD] });
+
+    delete process.env.ORACLE_CUSTOMERS_API_URL;
+
+    expect(res.status).toBe(200);
+    expect(res.body.successCount).toBe(1);
+
+    // SOAP envelope must contain the Oracle CustomerAccountId (not the account number "57013")
     const { callWithCustomEnvelope } = createOracleSoapClient.mock.results[0].value;
     const soapXml = callWithCustomEnvelope.mock.calls[0][0];
-    expect(soapXml).toContain('57013');
+    expect(soapXml).toContain('300000001576078');
+    expect(soapXml).not.toContain('>57013<');
   });
 
   test('SOAP success + DB failure: receipt counted as success, error does not propagate', async () => {
