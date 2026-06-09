@@ -335,8 +335,11 @@ async function uploadVendInvoice(req, res, next) {
         let unitSellingPrice;
         if (subtotalRaw) {
           // Column holds the line total (subtotal); divide by quantity to get unit price.
+          // Round to 6 decimal places (Oracle AR standard precision) so that Oracle can
+          // reconstruct Quantity × UnitSellingPrice without sub-penny floating-point error.
           const subtotalValue = parseFloat(subtotalRaw.replace(/,/g, '')) || 0;
-          unitSellingPrice = quantity > 0 ? subtotalValue / quantity : subtotalValue;
+          const rawUnitPrice = quantity > 0 ? subtotalValue / quantity : subtotalValue;
+          unitSellingPrice = Math.round(rawUnitPrice * 1e6) / 1e6;
         } else {
           // Fall back to direct unit-price columns (no division needed).
           unitSellingPrice = parseNumericField(row, [
