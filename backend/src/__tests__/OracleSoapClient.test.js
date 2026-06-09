@@ -352,6 +352,52 @@ Content-Type: text/xml
       expect(axios.post).toHaveBeenCalledTimes(1);
     });
 
+    test('should treat empty response + session-clearing cookies as non-retryable auth failure', async () => {
+      axios.post.mockResolvedValue({
+        status: 200,
+        statusText: 'OK',
+        data: '',
+        headers: {
+          'content-type': 'text/html',
+          'set-cookie': [
+            'JSESSIONID=; expires=Thu, 01-Jan-1970 01:00:00 GMT; path=/; HttpOnly;SameSite=None;Secure',
+            '_WL_AUTHCOOKIE_JSESSIONID=; expires=Thu, 01-Jan-1970 01:00:00 GMT; path=/; secure; HttpOnly',
+          ],
+        },
+      });
+
+      await expect(
+        client.callWithCustomEnvelope(customXml, 'createReceipt')
+      ).rejects.toThrow('Authentication failed: Oracle session was invalidated');
+
+      // Should not retry auth failures
+      expect(axios.post).toHaveBeenCalledTimes(1);
+    });
+
+    test('should retry on empty response without session-clearing cookies', async () => {
+      axios.post
+        .mockResolvedValueOnce({
+          status: 200,
+          statusText: 'OK',
+          data: '',
+          headers: { 'content-type': 'text/xml' },
+        })
+        .mockResolvedValueOnce({
+          status: 200,
+          statusText: 'OK',
+          data: `<?xml version="1.0"?>
+<soapenv:Envelope>
+  <soapenv:Body><createReceiptResponse><result>Success</result></createReceiptResponse></soapenv:Body>
+</soapenv:Envelope>`,
+          headers: { 'content-type': 'text/xml' },
+        });
+
+      const result = await client.callWithCustomEnvelope(customXml, 'createReceipt');
+
+      expect(axios.post).toHaveBeenCalledTimes(2);
+      expect(result.success).toBe(true);
+    });
+
     test('should handle MTOM multipart response', async () => {
       const boundary = 'mtomboundary';
       const mtomResponse = `--${boundary}

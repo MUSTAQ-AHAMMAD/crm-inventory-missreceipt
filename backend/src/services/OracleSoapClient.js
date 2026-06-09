@@ -485,6 +485,25 @@ class OracleSoapClient {
           // Log response XML in debug mode
           this.debugLog(`${requestId} Response XML:`, this.truncateXml(xmlResponse));
 
+          // Check for empty response body (Oracle returns empty body + session-clearing cookies
+          // on authentication failure instead of a SOAP fault)
+          if (!xmlResponse || xmlResponse.trim() === '') {
+            const setCookies = response.headers['set-cookie'] || [];
+            const sessionCleared = setCookies.some(
+              (c) => /JSESSIONID=\s*;/.test(c) || /expires=Thu,\s*01-Jan-1970/.test(c)
+            );
+            if (sessionCleared) {
+              console.error(
+                `[OracleSoapClient] ${requestId} Empty response with session-clearing cookies - authentication failure`
+              );
+              throw new pRetry.AbortError(
+                new Error('Authentication failed: Oracle session was invalidated (empty response)')
+              );
+            }
+            console.error(`[OracleSoapClient] ${requestId} Empty response body received from Oracle`);
+            throw new Error('Oracle returned an empty response body');
+          }
+
           const fault = this.extractSoapFault(xmlResponse);
 
           // Check for HTTP errors (5xx)
