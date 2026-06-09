@@ -139,6 +139,11 @@ async function seedRegisters() {
   console.log(`[Seed] VendhqRegister: ${upserted} upserted, ${skipped} skipped`);
 }
 
-seedRegisters()
-  .catch((err) => { console.error(err); process.exit(1); })
-  .finally(() => prisma.$disconnect());
+module.exports = { seedRegisters };
+
+// Allow running directly: node prisma/seedVendhqRegisters.js
+if (require.main === module) {
+  seedRegisters()
+    .catch((err) => { console.error(err); process.exit(1); })
+    .finally(() => prisma.$disconnect());
+}

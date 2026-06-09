@@ -8,6 +8,7 @@ const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcryptjs');
 const { seedMetadata } = require('./seedFusionMetadata');
 const { seedReceiptMethods } = require('./seedFusionReceiptMethod');
+const { seedRegisters } = require('./seedVendhqRegisters');
 
 const prisma = new PrismaClient();
 
@@ -47,6 +48,15 @@ async function main() {
   // ensure the table exactly reflects FUSION_RECEIPT_METHOD_202606030400.sql)
   console.log('Seeding Fusion Receipt Methods...');
   await seedReceiptMethods();
+
+  // Seed VendhqRegisters (skips if already populated)
+  const registerCount = await prisma.vendhqRegister.count();
+  if (registerCount > 0) {
+    console.log(`VendhqRegisters already seeded (${registerCount} records), skipping.`);
+  } else {
+    console.log('Seeding VendhqRegisters...');
+    await seedRegisters();
+  }
 }
 
 main()
