@@ -585,12 +585,25 @@ async function findInvoiceHeader(subinventory, date, paymentType) {
   if (headers.length === 0) return null;
 
   const h = headers[0];
+
+  // Format the invoice txnDate as YYYY-MM-DD (UTC) so the receipt date matches
+  // the AR invoice date exactly, regardless of the payment file date.
+  let invoiceDate = null;
+  if (h.txnDate) {
+    const d = new Date(h.txnDate);
+    const y  = d.getUTCFullYear();
+    const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const da = String(d.getUTCDate()).padStart(2, '0');
+    invoiceDate = `${y}-${mo}-${da}`;
+  }
+
   return {
     txnNumber: h.txnNumber,
     businessUnit: h.businessUnit || businessUnit,
     customerAccNumber: h.billToAccNumber ? String(h.billToAccNumber) : customerAccNumber,
     customerSite: h.billToLocation || siteNumber || '',
     headerId: h.id,
+    invoiceDate,
   };
 }
 
@@ -750,17 +763,20 @@ async function generateReceipts(req, res, next) {
         ? (cashAccountId || bankAccountId)
         : bankAccountId;
 
+      // Use the AR invoice's txnDate as the receipt date so it matches the invoice exactly.
+      const receiptDate = invoiceInfo.invoiceDate || date;
+
       standardPayloads.push({
         ReceiptNumber:             `${canonicalName}-${txnNumber}`,
         ReceiptMethod:             canonicalName,
-        ReceiptDate:               date,
+        ReceiptDate:               receiptDate,
         BusinessUnit:              invoiceInfo.businessUnit || DEFAULT_BUSINESS_UNIT,
         CustomerAccountNumber:     invoiceInfo.customerAccNumber || '',
         CustomerSite:              invoiceInfo.customerSite || '',
         Amount:                    String(round2(totalAmount)),
         Currency:                  DEFAULT_CURRENCY,
         RemittanceBankAccountNumber: remittanceAccId,
-        AccountingDate:            date,
+        AccountingDate:            receiptDate,
         // SOAP-specific fields (Java FusionStdReceiptMapping)
         ReceiptMethodId:           rm?.receiptMethodId || '',
         OrgId:                     resolvedOrgId,
@@ -791,9 +807,9 @@ async function generateReceipts(req, res, next) {
           ReceiptNumber:         `${canonicalName}-${txnNumber}-MISC`,
           Amount:                String(miscAmount),
           CurrencyCode:          DEFAULT_CURRENCY,
-          ReceiptDate:           date,
-          DepositDate:           date,
-          GlDate:                date,
+          ReceiptDate:           receiptDate,
+          DepositDate:           receiptDate,
+          GlDate:                receiptDate,
           ReceiptMethodName:     canonicalName,
           ReceivableActivityName: 'Bank Charge',
           BankAccountName:       bankAccountText,
