@@ -401,7 +401,7 @@ async function submitApply(req, res, next) {
             txnNumber: { in: txnNumbers.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n)) },
             status: { in: ['Success', 'SUCCESS'] },
           },
-          select: { txnNumber: true, txnSource: true, txnDate: true },
+          select: { txnNumber: true, txnSource: true, txnDate: true, glDate: true },
           orderBy: { createdAt: 'desc' },
         }),
         prisma.fusionStandardReceipt.findMany({
@@ -473,7 +473,7 @@ async function submitApply(req, res, next) {
           }
 
           const txnSource      = inv.txnSource  || '';
-          const accountingDate = toDateString(inv.txnDate);
+          const accountingDate = toDateString(inv.txnDate ?? inv.glDate);
           const amount         = rec.amount != null ? String(rec.amount) : '';
           const currencyCode   = rec.currencyCode || 'SAR';
 
