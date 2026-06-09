@@ -13,6 +13,7 @@
  *   - FusionSOAPClient/src/com/oracle/xmlns/adf/svc/types/AmountType.java
  *   - FusionStdReceiptTransform.java  (Standard)
  *   - FusionMiscReceiptTransform.java (Misc – DepositDate is NOT sent)
+ *   - FusionCustomerProfileClient.java (CustomerProfile – getActiveCustomerProfile)
  */
 
 'use strict';
@@ -28,6 +29,13 @@ const STD_COM_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/receip
 const MISC_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/types/';
 const MISC_COM_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
 const MISC_MIS_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/model/flex/MiscellaneousReceiptDff/';
+
+// ReceivablesCustomerProfileService (used for getActiveCustomerProfile)
+// Source: FusionCustomerProfileClient.java / CustomerProfileService.java
+const CUST_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/customers/customerProfileService/types/';
+const CUST_SVC_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/customers/customerProfileService/';
+/** SOAPAction for getActiveCustomerProfile – used as the second arg to callWithCustomEnvelope */
+const CUST_PROFILE_SOAP_ACTION = `${CUST_SVC_NS}getActiveCustomerProfile`;
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -142,4 +150,38 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
 </soapenv:Envelope>`;
 }
 
-module.exports = { buildStandardReceiptEnvelope, buildMiscReceiptEnvelope };
+// ── Customer Profile (getActiveCustomerProfile) ────────────────────────────────
+
+/**
+ * Builds a getActiveCustomerProfile SOAP envelope for ReceivablesCustomerProfileService.
+ *
+ * Mirrors Java FusionCustomerProfileClient.getCustomerAccountId(accountNumber):
+ *   customerProfile.setAccountNumber(createCustomerProfileAccountNumber(accountNumber));
+ *   customerProfileService.getActiveCustomerProfile(customerProfile);
+ *
+ * The SOAPAction header must be CUST_PROFILE_SOAP_ACTION (exported below).
+ *
+ * @param {string|number} accountNumber - Oracle AR customer account number
+ */
+function buildCustomerProfileEnvelope(accountNumber) {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
+  xmlns:typ="${CUST_TYPES_NS}"
+  xmlns:svc="${CUST_SVC_NS}">
+  <soapenv:Header/>
+  <soapenv:Body>
+    <typ:getActiveCustomerProfile>
+      <typ:customerProfile>
+        <svc:AccountNumber>${escapeXml(String(accountNumber))}</svc:AccountNumber>
+      </typ:customerProfile>
+    </typ:getActiveCustomerProfile>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+}
+
+module.exports = {
+  buildStandardReceiptEnvelope,
+  buildMiscReceiptEnvelope,
+  buildCustomerProfileEnvelope,
+  CUST_PROFILE_SOAP_ACTION,
+};
