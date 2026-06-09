@@ -20,6 +20,7 @@
 const prisma = require('../services/prisma');
 const axios = require('axios');
 const pLimit = require('p-limit');
+const pRetry = require('p-retry');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
 const CONCURRENT_REQUESTS = 5;
