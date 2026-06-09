@@ -430,6 +430,99 @@ async function getUploadProgress(req, res, next) {
 }
 
 /**
+ * POST /api/misc-receipt/uploads/:id/retry
+ * Retries all failed rows for a specific misc receipt upload.
+ */
+async function retryUpload(req, res, next) {
+  try {
+    const uploadId = parseInt(req.params.id);
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
+
+    const upload = await prisma.miscReceiptUpload.findUnique({ where: { id: uploadId } });
+    if (!upload) {
+      return res.status(404).json({ error: 'Upload not found.' });
+    }
+    if (req.user.role === 'USER' && upload.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    const failures = await prisma.miscReceiptFailure.findMany({ where: { uploadId } });
+    if (failures.length === 0) {
+      return res.json({ retrySuccess: 0, retryFail: 0, message: 'No failures to retry.' });
+    }
+
+    let retrySuccess = 0;
+    let retryFail = 0;
+
+    const limit = pLimit(CONCURRENT_REQUESTS);
+
+    const processingPromises = failures.map((failure) =>
+      limit(async () => {
+        let row;
+        try {
+          row = JSON.parse(failure.rawData);
+        } catch {
+          row = failure.rawData;
+        }
+
+        if (!row || typeof row !== 'object') {
+          retryFail++;
+          return;
+        }
+
+        const soapXml = buildMiscReceiptEnvelope(row);
+
+        try {
+          await sendSoapRequest(soapXml, row.ReceiptNumber);
+          retrySuccess++;
+
+          await prisma.miscReceiptFailure.delete({ where: { id: failure.id } });
+
+          console.log(`[MiscReceipt Retry] Upload #${uploadId} Row ${failure.rowNumber} SUCCESS | Receipt: ${row.ReceiptNumber}`);
+        } catch (err) {
+          retryFail++;
+          const errorMessage = (err.message || 'Unknown error').substring(0, 500);
+
+          await prisma.miscReceiptFailure.update({
+            where: { id: failure.id },
+            data: {
+              errorMessage,
+              responseBody: (err.response?.data ?? err.message ?? '').toString().substring(0, 2000),
+              responseStatus: err.response?.status || null,
+            },
+          });
+
+          console.error(`[MiscReceipt Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED: ${errorMessage} | Receipt: ${row.ReceiptNumber}`);
+        }
+      })
+    );
+
+    await Promise.all(processingPromises);
+
+    const newSuccessCount = upload.successCount + retrySuccess;
+    const newFailureCount = upload.failureCount - retrySuccess;
+    const finalStatus = newFailureCount === 0 ? 'SUCCESS' : newSuccessCount > 0 ? 'PARTIAL' : 'FAILED';
+
+    await prisma.miscReceiptUpload.update({
+      where: { id: uploadId },
+      data: {
+        successCount: { increment: retrySuccess },
+        failureCount: { decrement: retrySuccess },
+        responseStatus: finalStatus,
+      },
+    });
+
+    console.log(`[MiscReceipt Retry] Upload #${uploadId} COMPLETE | Retried: ${failures.length} | Success: ${retrySuccess} | Still failing: ${retryFail}`);
+
+    return res.json({ retrySuccess, retryFail });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * GET /api/misc-receipt/template
  */
 function downloadTemplate(_req, res) {
@@ -450,4 +543,5 @@ module.exports = {
   getUpload,
   getUploadProgress,
   downloadTemplate,
+  retryUpload,
 };

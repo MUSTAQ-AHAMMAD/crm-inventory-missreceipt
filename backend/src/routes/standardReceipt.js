@@ -14,6 +14,7 @@ const {
   getUpload,
   getUploadProgress,
   downloadTemplate,
+  retryUpload,
 } = require('../controllers/standardReceiptController');
 
 const router = express.Router();
@@ -40,5 +41,6 @@ router.post('/upload', csvUpload.single('file'), upload);
 router.get('/uploads', listUploads);
 router.get('/uploads/:id', getUpload);
 router.get('/uploads/:id/progress', getUploadProgress);
+router.post('/uploads/:id/retry', retryUpload);
 
 module.exports = router;

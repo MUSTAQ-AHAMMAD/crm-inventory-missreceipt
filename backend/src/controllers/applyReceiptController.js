@@ -607,6 +607,113 @@ async function getUploadProgress(req, res, next) {
 }
 
 /**
+ * POST /api/apply-receipt/uploads/:id/retry
+ * Retries all failed rows for a specific apply receipt upload.
+ * Re-uses the stored requestPayload SOAP XML (all fields are already encoded in it).
+ */
+async function retryUpload(req, res, next) {
+  try {
+    const uploadId = parseInt(req.params.id);
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
+
+    const upload = await prisma.applyReceiptUpload.findUnique({ where: { id: uploadId } });
+    if (!upload) {
+      return res.status(404).json({ error: 'Upload not found.' });
+    }
+    if (req.user.role === 'USER' && upload.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    const url = process.env.ORACLE_APPLY_RECEIPT_SOAP_URL;
+    if (!url) {
+      return res.status(500).json({ error: 'ORACLE_APPLY_RECEIPT_SOAP_URL not configured in .env' });
+    }
+
+    const failures = await prisma.applyReceiptFailure.findMany({ where: { uploadId } });
+    if (failures.length === 0) {
+      return res.json({ retrySuccess: 0, retryFail: 0, message: 'No failures to retry.' });
+    }
+
+    let retrySuccess = 0;
+    let retryFail = 0;
+
+    const limit = pLimit(CONCURRENT_REQUESTS);
+
+    const processingPromises = failures.map((failure) =>
+      limit(async () => {
+        if (!failure.requestPayload) {
+          retryFail++;
+          return;
+        }
+
+        try {
+          const soapClient = createOracleSoapClient(url);
+          const response = await soapClient.callWithCustomEnvelope(failure.requestPayload, SOAP_ACTION);
+          const responseText = asText(response.data);
+
+          if (response.status >= 400 || responseText.includes('soap:Fault') || responseText.includes('faultstring')) {
+            retryFail++;
+            const faultMsg = extractSoapFaultMessage(responseText) || `HTTP ${response.status}`;
+
+            await prisma.applyReceiptFailure.update({
+              where: { id: failure.id },
+              data: {
+                errorMessage: faultMsg.substring(0, 500),
+                responseBody: snippet(responseText, 2000),
+                responseStatus: response.status,
+              },
+            });
+
+            console.error(`[ApplyReceipt Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED | Receipt: ${failure.receiptNumber} | ${faultMsg}`);
+          } else {
+            retrySuccess++;
+            await prisma.applyReceiptFailure.delete({ where: { id: failure.id } });
+            console.log(`[ApplyReceipt Retry] Upload #${uploadId} Row ${failure.rowNumber} SUCCESS | Receipt: ${failure.receiptNumber}`);
+          }
+        } catch (err) {
+          retryFail++;
+          const errorMsg = (err.message || 'Apply receipt failed').substring(0, 500);
+
+          await prisma.applyReceiptFailure.update({
+            where: { id: failure.id },
+            data: {
+              errorMessage: errorMsg,
+              responseBody: snippet(asText(err.response?.data), 2000),
+              responseStatus: err.response?.status || null,
+            },
+          });
+
+          console.error(`[ApplyReceipt Retry] Upload #${uploadId} Row ${failure.rowNumber} FAILED: ${errorMsg} | Receipt: ${failure.receiptNumber}`);
+        }
+      })
+    );
+
+    await Promise.all(processingPromises);
+
+    const newSuccessCount = upload.successCount + retrySuccess;
+    const newFailureCount = upload.failureCount - retrySuccess;
+    const finalStatus = newFailureCount === 0 ? 'SUCCESS' : newSuccessCount > 0 ? 'PARTIAL' : 'FAILED';
+
+    await prisma.applyReceiptUpload.update({
+      where: { id: uploadId },
+      data: {
+        successCount: { increment: retrySuccess },
+        failureCount: { decrement: retrySuccess },
+        status: finalStatus,
+      },
+    });
+
+    console.log(`[ApplyReceipt Retry] Upload #${uploadId} COMPLETE | Retried: ${failures.length} | Success: ${retrySuccess} | Still failing: ${retryFail}`);
+
+    return res.json({ retrySuccess, retryFail });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * Download CSV template — matches Java ApplyReceiptRequest fields:
  *   TransactionNumber, ReceiptNumber, AmountApplied, ReceiptCurrency,
  *   TransactionSource, AccountingDate
@@ -632,4 +739,5 @@ module.exports = {
   getUpload,
   getUploadProgress,
   downloadTemplate,
+  retryUpload,
 };

@@ -19,6 +19,7 @@ const {
   getUpload,
   getUploadProgress,
   downloadTemplate,
+  retryUpload,
 } = require('../controllers/miscReceiptController');
 
 const router = express.Router();
@@ -145,5 +146,6 @@ router.get('/uploads/:id', getUpload);
  *         description: Upload progress with status and counts
  */
 router.get('/uploads/:id/progress', getUploadProgress);
+router.post('/uploads/:id/retry', retryUpload);
 
 module.exports = router;

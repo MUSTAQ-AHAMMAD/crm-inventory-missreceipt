@@ -5,7 +5,7 @@
  */
 
 import { useParams, Link, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import api from '../hooks/useApi'
 import Spinner from '../components/common/Spinner'
@@ -43,7 +43,11 @@ function formatDetail(data) {
 export default function ReceiptUploadDetailPage() {
   const { type, uploadId } = useParams() // type: 'standard', 'misc', or 'apply'
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [expandedRows, setExpandedRows] = useState({})
+  const [retrying, setRetrying] = useState(false)
+  const [retryResult, setRetryResult] = useState(null)
+  const [retryError, setRetryError] = useState('')
 
   const { data, isLoading, isError, error: queryError } = useQuery({
     queryKey: ['receiptUploadDetail', type, uploadId],
@@ -53,6 +57,25 @@ export default function ReceiptUploadDetailPage() {
 
   const toggleRow = (id) => {
     setExpandedRows(prev => ({ ...prev, [id]: !prev[id] }))
+  }
+
+  // Determine the API route prefix for this upload type
+  const routePrefix = type === 'standard' ? 'standard-receipt'
+    : type === 'misc' ? 'misc-receipt'
+    : 'apply-receipt'
+
+  const handleRetry = async () => {
+    setRetryError('')
+    setRetrying(true)
+    try {
+      const res = await api.post(`/${routePrefix}/uploads/${uploadId}/retry`)
+      setRetryResult(res.data)
+      queryClient.invalidateQueries({ queryKey: ['receiptUploadDetail', type, uploadId] })
+    } catch (err) {
+      setRetryError(err.response?.data?.error || 'Retry failed.')
+    } finally {
+      setRetrying(false)
+    }
   }
 
   if (isLoading) return <div className="flex justify-center mt-20"><Spinner size="lg" /></div>
@@ -94,8 +117,28 @@ export default function ReceiptUploadDetailPage() {
           <button onClick={() => navigate(-1)} className="px-4 py-2 text-sm text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
             ← Back
           </button>
+          {upload.failures && upload.failures.length > 0 && (
+            <button
+              onClick={handleRetry}
+              disabled={retrying}
+              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-60 flex items-center gap-2"
+            >
+              {retrying ? <Spinner size="sm" /> : '🔄'}
+              {retrying ? 'Retrying…' : 'Retry All Failures'}
+            </button>
+          )}
         </div>
       </div>
+
+      <ErrorAlert message={retryError} onDismiss={() => setRetryError('')} />
+
+      {/* Retry result */}
+      {retryResult && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm">
+          <p className="font-semibold text-green-700">Retry Complete</p>
+          <p>✅ {retryResult.retrySuccess} succeeded &nbsp; ❌ {retryResult.retryFail} still failing</p>
+        </div>
+      )}
 
       {/* Upload summary card */}
       <div className="bg-white rounded-xl shadow-sm p-6">
