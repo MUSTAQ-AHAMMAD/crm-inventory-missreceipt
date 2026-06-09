@@ -140,7 +140,7 @@ function normalizeDate(raw, fieldName) {
   const isNumeric = /^\d+(\.\d+)?$/.test(value);
   if (isNumeric) {
     const excelSerialNumber = parseFloat(value);
-    const excelEpoch = new Date(Date.UTC(1899, 11, 30)); // Dec 30, 1899
+    const excelEpoch = new Date(Date.UTC(1899, 11, 31)); // Dec 31, 1899
     const adjustedSerial = excelSerialNumber > 60 ? excelSerialNumber - 1 : excelSerialNumber;
     const dateFromSerial = new Date(excelEpoch.getTime() + adjustedSerial * 24 * 60 * 60 * 1000);
 
