@@ -13,12 +13,24 @@ const { buildArInvoiceSoapEnvelope, AR_INVOICE_SOAP_ACTION } = require('../servi
  * Parses key fields from the Oracle createSimpleInvoice SOAP response XML.
  * Returns { TransactionNumber, CustomerTrxId, ServiceStatus } or null values
  * if the XML cannot be parsed or is empty.
+ *
+ * Oracle's RecInvoiceService uses two naming conventions in responses:
+ *   • TransactionNumber – used by some Oracle versions / response wrappers
+ *   • TrxNumber         – used by RecInvoiceService (mirrors the TrxDate request field)
+ * We try TransactionNumber first, then fall back to TrxNumber so both are handled.
  */
 function parseSoapInvoiceResponse(xml) {
   if (!xml) return { TransactionNumber: null, CustomerTrxId: null, ServiceStatus: null };
-  const extract = (pattern) => xml.match(pattern)?.[1]?.trim() ?? null;
+  const extract = (pattern) => {
+    const m = xml.match(pattern)?.[1]?.trim();
+    return m || null;
+  };
+  // Try TransactionNumber first; fall back to TrxNumber (Oracle RecInvoiceService convention)
+  const transactionNumber =
+    extract(/<[^>]*TransactionNumber[^>]*>([\s\S]*?)<\/[^>]*TransactionNumber>/i) ??
+    extract(/<[^>]*TrxNumber[^>]*>([\s\S]*?)<\/[^>]*TrxNumber>/i);
   return {
-    TransactionNumber: extract(/<[^>]*TransactionNumber[^>]*>([\s\S]*?)<\/[^>]*TransactionNumber>/i),
+    TransactionNumber: transactionNumber,
     CustomerTrxId:     extract(/<[^>]*CustomerTrxId[^>]*>([\s\S]*?)<\/[^>]*CustomerTrxId>/i),
     ServiceStatus:     extract(/<[^>]*ServiceStatus[^>]*>([\s\S]*?)<\/[^>]*ServiceStatus>/i),
   };

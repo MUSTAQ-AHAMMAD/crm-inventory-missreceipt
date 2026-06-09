@@ -1031,6 +1031,20 @@ async function getInvoiceBatchProgress(req, res, next) {
         orderBy: { id: 'asc' },
       });
 
+      // Fetch FusionInvoiceHeader records for these uploads so we can return
+      // the headerId — needed by the frontend for the "Set Txn #" endpoint.
+      const uploadIds = uploads.map((u) => u.id);
+      const headers = await prisma.fusionInvoiceHeader.findMany({
+        where: { requestId: { in: uploadIds } },
+        select: { id: true, requestId: true },
+      });
+      const headerByUploadId = {};
+      for (const h of headers) {
+        if (h.requestId && !headerByUploadId[h.requestId]) {
+          headerByUploadId[h.requestId] = h.id;
+        }
+      }
+
       invoiceResults = uploads.map((u, i) => {
         let customerName = null;
         let date = null;
@@ -1042,11 +1056,15 @@ async function getInvoiceBatchProgress(req, res, next) {
         } catch { /* ignore */ }
         try {
           const body = JSON.parse(u.responseBody || '{}');
-          txnNumber = body.TransactionNumber != null ? String(body.TransactionNumber) : null;
+          // Support both TransactionNumber (parsed JSON key) and TrxNumber
+          // (Oracle RecInvoiceService response field stored before the parser fix)
+          const raw = body.TransactionNumber ?? body.TrxNumber ?? null;
+          txnNumber = raw != null ? String(raw) : null;
         } catch { /* ignore */ }
         return {
           index: i,
           uploadId: u.id,
+          headerId: headerByUploadId[u.id] ?? null,
           customerName,
           date,
           txnNumber,
@@ -1071,6 +1089,73 @@ async function getInvoiceBatchProgress(req, res, next) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// PATCH /api/ar-pipeline/invoices/:headerId/txn-number
+// Manually set the txnNumber for a FusionInvoiceHeader record when Oracle did
+// not return it in the SOAP response (e.g. the TrxNumber field was missing).
+// Also back-fills the ArInvoiceUpload.responseBody so getInvoiceBatchProgress
+// returns the correct txnNumber without re-fetching from Oracle.
+// ---------------------------------------------------------------------------
+async function setInvoiceTxnNumber(req, res, next) {
+  try {
+    const headerId = parseInt(req.params.headerId, 10);
+    if (isNaN(headerId)) {
+      return res.status(400).json({ error: 'Invalid headerId.' });
+    }
+
+    const { txnNumber } = req.body;
+    const txnNum = parseInt(String(txnNumber ?? ''), 10);
+    if (isNaN(txnNum) || txnNum <= 0) {
+      return res.status(400).json({ error: 'txnNumber must be a positive integer.' });
+    }
+
+    const header = await prisma.fusionInvoiceHeader.findUnique({
+      where: { id: headerId },
+      select: { id: true, requestId: true, txnNumber: true },
+    });
+
+    if (!header) {
+      return res.status(404).json({ error: 'Invoice header not found.' });
+    }
+
+    // Update FusionInvoiceHeader
+    const updated = await prisma.fusionInvoiceHeader.update({
+      where: { id: headerId },
+      data: { txnNumber: txnNum },
+    });
+
+    // Back-fill ArInvoiceUpload.responseBody so getInvoiceBatchProgress reflects the change.
+    // Preserve existing CustomerTrxId / ServiceStatus if present.
+    if (header.requestId) {
+      const existing = await prisma.arInvoiceUpload.findUnique({
+        where: { id: header.requestId },
+        select: { responseBody: true },
+      });
+      let existingData = {};
+      try { existingData = existing?.responseBody ? JSON.parse(existing.responseBody) : {}; } catch (_) {}
+      await prisma.arInvoiceUpload.update({
+        where: { id: header.requestId },
+        data: {
+          responseBody: JSON.stringify({ ...existingData, TransactionNumber: txnNum }),
+        },
+      }).catch((err) => {
+        // Non-fatal: log but don't fail the request
+        console.warn(`[Pipeline:setTxnNumber] Could not update ArInvoiceUpload ${header.requestId}: ${err.message}`);
+      });
+    }
+
+    console.log(`[Pipeline:setTxnNumber] FusionInvoiceHeader ${headerId} txnNumber set to ${txnNum} by user ${req.user?.id}`);
+
+    return res.json({
+      id: updated.id,
+      txnNumber: updated.txnNumber,
+      message: `Transaction number ${txnNum} saved for invoice header ${headerId}.`,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   getSummary,
   getPendingApply,
@@ -1080,4 +1165,5 @@ module.exports = {
   listMiscReceipts,
   createInvoiceBatch,
   getInvoiceBatchProgress,
+  setInvoiceTxnNumber,
 };
