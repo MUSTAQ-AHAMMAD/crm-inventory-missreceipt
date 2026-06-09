@@ -19,7 +19,6 @@ const REQUIRED_COLUMNS = [
   'ReceiptCurrency',
   'TransactionSource',
   'AccountingDate',
-  'TxnDate',
 ]
 
 export default function ApplyReceiptPage() {
@@ -172,7 +171,7 @@ export default function ApplyReceiptPage() {
             ))}
           </div>
           <p className="text-xs text-indigo-700 mt-2">
-            <strong>TxnDate</strong> is the invoice transaction date (taken from your Excel/CSV file). <strong>AccountingDate</strong> is the receipt application accounting date. Both accept YYYY-MM-DD, DD-MM-YYYY, or Excel serial number formats.
+            <strong>AccountingDate</strong> is the receipt application date (taken from your Excel/CSV file). It also acts as the invoice transaction date sent to Oracle. Accepts YYYY-MM-DD, DD-MM-YYYY, or Excel serial number formats.
           </p>
         </div>
 

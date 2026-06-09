@@ -23,7 +23,6 @@ const REQUIRED_FIELDS = [
   'ReceiptCurrency',
   'TransactionSource',
   'AccountingDate',
-  'TxnDate',
 ];
 
 // Configuration for parallel processing and retries
@@ -142,14 +141,15 @@ function validateCsv(records) {
  * Normalizes a single CSV row — mirrors Java ApplyReceiptRequest fields.
  */
 function normalizeRow(row) {
+  const accountingDate = normalizeDate(row.AccountingDate, 'AccountingDate');
   return {
     TransactionNumber: String(row.TransactionNumber ?? '').trim(),
     ReceiptNumber:     String(row.ReceiptNumber     ?? '').trim(),
     AmountApplied:     String(row.AmountApplied     ?? '').trim(),
     ReceiptCurrency:   String(row.ReceiptCurrency   ?? '').trim().toUpperCase(),
     TransactionSource: String(row.TransactionSource ?? '').trim(),
-    AccountingDate:    normalizeDate(row.AccountingDate, 'AccountingDate'),
-    TxnDate:           normalizeDate(row.TxnDate, 'TxnDate'),
+    AccountingDate:    accountingDate,
+    TxnDate:           accountingDate, // derived from AccountingDate — no separate column needed
   };
 }
 
@@ -613,8 +613,8 @@ async function getUploadProgress(req, res, next) {
  */
 function downloadTemplate(_req, res) {
   const header = REQUIRED_FIELDS.join(',');
-  const sample = 'BLK-ALAR-00000008,mada-12244,5000.00,SAR,Manual,2024-01-20,2024-01-15';
-  const sample2 = 'BLK-ALAR-00000009,visa-12245,3500.50,SAR,Manual,2024-01-21,2024-01-16';
+  const sample = 'BLK-ALAR-00000008,mada-12244,5000.00,SAR,Manual,2024-01-20';
+  const sample2 = 'BLK-ALAR-00000009,visa-12245,3500.50,SAR,Manual,2024-01-21';
 
   const BOM = '\uFEFF';
   const csv = `${BOM}${header}\n${sample}\n${sample2}\n`;
