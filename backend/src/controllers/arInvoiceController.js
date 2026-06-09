@@ -7,122 +7,15 @@
 const prisma = require('../services/prisma');
 const fusionMetadataService = require('../services/fusionSalesMetadataService');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
-
-// SOAP namespaces for RecInvoiceService - createSimpleInvoice
-const SOAP_ENV_NS  = 'http://schemas.xmlsoap.org/soap/envelope/';
-const SOAP_TYP_NS  = 'http://xmlns.oracle.com/apps/financials/receivables/transactions/invoices/invoiceService/types/';
-const SOAP_INV_NS  = 'http://xmlns.oracle.com/apps/financials/receivables/transactions/invoices/invoiceService/';
-const SOAP_ADF_NS  = 'http://xmlns.oracle.com/adf/svc/types/';
-const SOAP_ACTION  = 'createSimpleInvoice';
-
-function escapeXml(value) {
-  if (value == null) return '';
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
-}
-
-/**
- * Wraps an optional string value in an XML tag only when value is non-empty.
- */
-function optionalTag(ns, tag, value) {
-  if (value == null || String(value).trim() === '') return '';
-  return `        <${ns}:${tag}>${escapeXml(String(value).trim())}</${ns}:${tag}>\n`;
-}
-
-/**
- * Builds the SOAP XML for createSimpleInvoice, mapping JSON payload fields
- * to the Oracle RecInvoiceService WSDL (matching FusionInvoiceTransform.java).
- *
- * JSON field -> SOAP element:
- *   BillToCustomerName   -> BillToCustomerName
- *   BillToSite           -> BillToLocation   (Java: billToLocation)
- *   BillToCustomerNumber -> BillToAccountNumber (Java: billToAccountNumber)
- *   BusinessUnit         -> BusinessUnit
- *   TransactionSource    -> TransactionSource
- *   TransactionType      -> TransactionType
- *   InvoiceCurrencyCode  -> InvoiceCurrencyCode
- *   ConversionRateType   -> ConversionRateType
- *   PaymentTerms         -> PaymentTermsName  (Java: paymentTermsName)
- *   TransactionDate      -> TrxDate          (Java: trxDate)
- *   AccountingDate       -> GlDate           (Java: glDate)
- *
- * Line fields:
- *   LineNumber           -> LineNumber
- *   ItemNumber           -> ItemNumber  (omitted for discount lines)
- *   MemoLine            → MemoLineName (Java: memoLineName, discount lines only)
- *   Description         → Description
- *   Quantity            → Quantity (MeasureType with adf:Value / adf:UnitCode)
- *   UnitOfMeasure / UOM → adf:UnitCode inside Quantity
- *   UnitSellingPrice    → UnitSellingPrice (AmountType with adf:Value / adf:CurrencyCode)
- *   SalesOrder          → SalesOrder
- *   SalesOrderLine      → SalesOrderLine
- *   TaxClassificationCode → TaxClassificationCode
- */
-function buildInvoiceSoapXml(payload) {
-  const lines = payload.receivablesInvoiceLines || [];
-  const currency = payload.InvoiceCurrencyCode || '';
-
-  const lineXml = lines.map((line) => {
-    const uom = String(line.UnitOfMeasure ?? line.UOM ?? 'EA').trim();
-    const isDiscount = !line.ItemNumber || String(line.ItemNumber).trim() === '';
-
-    const itemTag    = isDiscount ? '' : `          <inv:ItemNumber>${escapeXml(line.ItemNumber)}</inv:ItemNumber>\n`;
-    const memoTag    = isDiscount ? `          <inv:MemoLineName>${escapeXml(line.MemoLine ?? 'Discount Item')}</inv:MemoLineName>\n` : '';
-    const soTag      = line.SalesOrder     ? `          <inv:SalesOrder>${escapeXml(line.SalesOrder)}</inv:SalesOrder>\n`         : '';
-    const solTag     = line.SalesOrderLine != null ? `          <inv:SalesOrderLine>${escapeXml(line.SalesOrderLine)}</inv:SalesOrderLine>\n` : '';
-
-    return `        <inv:InvoiceLine>
-          <inv:LineNumber>${escapeXml(line.LineNumber)}</inv:LineNumber>
-${itemTag}${memoTag}          <inv:Description>${escapeXml(line.Description)}</inv:Description>
-          <inv:Quantity>
-            <adf:Value>${escapeXml(line.Quantity)}</adf:Value>
-            <adf:UnitCode>${escapeXml(uom)}</adf:UnitCode>
-          </inv:Quantity>
-          <inv:UnitSellingPrice>
-            <adf:Value>${escapeXml(line.UnitSellingPrice)}</adf:Value>
-            <adf:CurrencyCode>${escapeXml(currency)}</adf:CurrencyCode>
-          </inv:UnitSellingPrice>
-${soTag}${solTag}          <inv:TaxClassificationCode>${escapeXml(line.TaxClassificationCode)}</inv:TaxClassificationCode>
-        </inv:InvoiceLine>`;
-  }).join('\n');
-
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
-  xmlns:typ="${SOAP_TYP_NS}"
-  xmlns:inv="${SOAP_INV_NS}"
-  xmlns:adf="${SOAP_ADF_NS}">
-  <soapenv:Header/>
-  <soapenv:Body>
-    <typ:createSimpleInvoice>
-      <typ:invoice>
-        ${optionalTag('inv', 'BillToCustomerName',   payload.BillToCustomerName)}
-        ${optionalTag('inv', 'BillToLocation',      payload.BillToSite)}
-        ${optionalTag('inv', 'BillToAccountNumber', payload.BillToCustomerNumber)}
-        ${optionalTag('inv', 'BusinessUnit',         payload.BusinessUnit)}
-        ${optionalTag('inv', 'TransactionSource',   payload.TransactionSource)}
-        ${optionalTag('inv', 'TransactionType',     payload.TransactionType)}
-        <inv:InvoiceCurrencyCode>${escapeXml(currency)}</inv:InvoiceCurrencyCode>
-        ${optionalTag('inv', 'ConversionRateType',  payload.ConversionRateType)}
-        ${optionalTag('inv', 'PaymentTermsName',    payload.PaymentTerms)}
-        <inv:TrxDate>${escapeXml(payload.TransactionDate)}</inv:TrxDate>
-        ${optionalTag('inv', 'GlDate', payload.AccountingDate)}
-        ${lineXml}
-      </typ:invoice>
-    </typ:createSimpleInvoice>
-  </soapenv:Body>
-</soapenv:Envelope>`;
-}
+const { buildArInvoiceSoapEnvelope, AR_INVOICE_SOAP_ACTION } = require('../services/soapEnvelopeBuilder');
 
 /**
  * Parses key fields from the Oracle createSimpleInvoice SOAP response XML.
  * Returns { TransactionNumber, CustomerTrxId, ServiceStatus } or null values
- * if the XML cannot be parsed.
+ * if the XML cannot be parsed or is empty.
  */
 function parseSoapInvoiceResponse(xml) {
+  if (!xml) return { TransactionNumber: null, CustomerTrxId: null, ServiceStatus: null };
   const extract = (pattern) => xml.match(pattern)?.[1]?.trim() ?? null;
   return {
     TransactionNumber: extract(/<[^>]*TransactionNumber[^>]*>([\s\S]*?)<\/[^>]*TransactionNumber>/i),
@@ -211,7 +104,7 @@ async function previewPayload(req, res, next) {
       valid: true,
       message: 'Payload is valid and ready to send to Oracle via SOAP',
       payload,
-      soapXml: buildInvoiceSoapXml(payload),
+      soapXml: buildArInvoiceSoapEnvelope(payload),
       soapEndpoint: process.env.ORACLE_AR_INVOICE_SOAP_URL || '(ORACLE_AR_INVOICE_SOAP_URL not set)',
     });
 
@@ -420,7 +313,7 @@ async function createInvoice(req, res, next) {
     console.log(`[AR Invoice] SOAP Endpoint: ${soapEndpoint}`);
 
     // Build SOAP XML
-    const soapXml = buildInvoiceSoapXml(payload);
+    const soapXml = buildArInvoiceSoapEnvelope(payload);
 
     // Create upload record
     const uploadRecord = await prisma.arInvoiceUpload.create({
@@ -440,7 +333,7 @@ async function createInvoice(req, res, next) {
     try {
       // Send SOAP request to Oracle RecInvoiceService (createSimpleInvoice)
       const soapClient = createOracleSoapClient(soapEndpoint);
-      const response = await soapClient.callWithCustomEnvelope(soapXml, SOAP_ACTION);
+      const response = await soapClient.callWithCustomEnvelope(soapXml, AR_INVOICE_SOAP_ACTION);
 
       httpStatus = response.status;
       responseBody = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
@@ -738,4 +631,5 @@ module.exports = {
   listResponseHeaders,
   getResponseHeader,
   listResponseLines,
+  parseSoapInvoiceResponse,
 };

@@ -18,16 +18,37 @@
  */
 
 const prisma = require('../services/prisma');
-const axios = require('axios');
 const pLimit = require('p-limit');
 const pRetry = require('p-retry');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
+const { buildArInvoiceSoapEnvelope, AR_INVOICE_SOAP_ACTION } = require('../services/soapEnvelopeBuilder');
+const { parseSoapInvoiceResponse } = require('./arInvoiceController');
 
 const CONCURRENT_REQUESTS = 5;
 const MAX_RETRIES = 2;
 const RETRY_MIN_TIMEOUT = 500;
 const RETRY_MAX_TIMEOUT = 3000;
-const ORACLE_INVOICE_TIMEOUT = 120000; // Oracle AR invoice creation can take up to 2 minutes
+
+// Concurrency for AR Invoice batch creation (Pass 1).
+// Configurable via ORACLE_INVOICE_CONCURRENCY env var (default 3).
+// Higher values reduce wall-clock time; lower values reduce Oracle load.
+const INVOICE_CONCURRENCY = parseInt(process.env.ORACLE_INVOICE_CONCURRENCY, 10) || 3;
+
+/** Classify an error as transient (worth retrying). */
+function isTransientError(err) {
+  if (!err) return false;
+  const msg = String(err.message || '').toLowerCase();
+  const code = String(err.code || '');
+  return (
+    /timeout/i.test(msg) ||
+    code === 'ECONNABORTED' ||
+    code === 'ECONNRESET' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ENOTFOUND' ||
+    code === 'EPIPE' ||
+    code === 'ECONNREFUSED'
+  );
+}
 
 // SOAP namespaces — match applyReceiptController (standardReceiptService/commonService)
 const SOAP_ENV_NS   = 'http://schemas.xmlsoap.org/soap/envelope/';
@@ -155,6 +176,7 @@ async function getSummary(req, res, next) {
     if (Object.keys(dateFilter).length > 0) invoiceWhere.txnDate = dateFilter;
     if (store) invoiceWhere.billToCustName = { contains: store };
 
+    // Fetch ALL invoices matching the filter — no hard cap so large batches are never silently truncated.
     const invoices = await prisma.fusionInvoiceHeader.findMany({
       where: invoiceWhere,
       select: {
@@ -169,10 +191,9 @@ async function getSummary(req, res, next) {
         txnSource: true,
       },
       orderBy: [{ txnDate: 'desc' }, { billToCustName: 'asc' }],
-      take: 2000,
     });
 
-    // Get standard receipts in range
+    // Get ALL standard receipts in range — no hard cap.
     const receiptWhere = {
       status: { in: ['Success', 'SUCCESS'] },
     };
@@ -190,10 +211,9 @@ async function getSummary(req, res, next) {
         receiptMethodId: true,
         status: true,
       },
-      take: 2000,
     });
 
-    // Get misc receipts in range
+    // Get ALL misc receipts in range — no hard cap.
     const miscWhere = {
       status: { in: ['Success', 'SUCCESS'] },
     };
@@ -209,16 +229,14 @@ async function getSummary(req, res, next) {
         receiptMethodName: true,
         status: true,
       },
-      take: 2000,
     });
 
-    // Get already-applied pairs
+    // Get ALL already-applied pairs — no hard cap.
     const appliedWhere = {};
     if (Object.keys(dateFilter).length > 0) appliedWhere.applicationDate = dateFilter;
     const applied = await prisma.fusionApplyReceipt.findMany({
       where: appliedWhere,
       select: { txnNumber: true, receiptNumber: true, status: true },
-      take: 5000,
     });
     const appliedKeys = new Set(applied.map((a) => `${a.txnNumber}||${a.receiptNumber}`));
 
@@ -310,6 +328,7 @@ async function getPendingApply(req, res, next) {
     if (Object.keys(dateFilter).length > 0) invoiceWhere.txnDate = dateFilter;
     if (store) invoiceWhere.billToCustName = { contains: store };
 
+    // Fetch ALL matching invoices and receipts — no hard cap so no pairs are silently dropped.
     const invoices = await prisma.fusionInvoiceHeader.findMany({
       where: invoiceWhere,
       select: {
@@ -320,7 +339,6 @@ async function getPendingApply(req, res, next) {
         businessUnit: true,
         txnDate: true,
       },
-      take: 2000,
     });
 
     const receiptWhere = { status: { in: ['Success', 'SUCCESS'] } };
@@ -329,13 +347,11 @@ async function getPendingApply(req, res, next) {
     const standardReceipts = await prisma.fusionStandardReceipt.findMany({
       where: receiptWhere,
       select: { id: true, receiptNumber: true, receiptDate: true, amount: true },
-      take: 2000,
     });
 
-    // Get already applied
+    // Fetch ALL already-applied pairs — no hard cap.
     const applied = await prisma.fusionApplyReceipt.findMany({
       select: { txnNumber: true, receiptNumber: true },
-      take: 5000,
     });
     const appliedKeys = new Set(applied.map((a) => `${a.txnNumber}||${a.receiptNumber}`));
 
@@ -410,6 +426,7 @@ async function submitApply(req, res, next) {
 
     // Process asynchronously (after response sent)
     setImmediate(async () => {
+      try {
       // Bulk-load invoice data (txnSource, txnDate) and receipt data (amount, currencyCode) from local DB
       const txnNumbers    = [...new Set(pairs.map((p) => p.txnNumber).filter(Boolean))];
       const receiptNumbers = [...new Set(pairs.map((p) => p.receiptNumber).filter(Boolean))];
@@ -588,6 +605,16 @@ async function submitApply(req, res, next) {
           responseLog:     logs.join('\n'),
         },
       });
+      } catch (fatalErr) {
+        console.error('[Pipeline:submitApply] Fatal background error:', fatalErr.message);
+        await prisma.applyReceiptUpload.update({
+          where: { id: uploadRecord.id },
+          data: {
+            status:          'FAILED',
+            responseMessage: `Fatal error: ${fatalErr.message}`,
+          },
+        }).catch(() => {});
+      }
     });
   } catch (err) {
     next(err);
@@ -705,7 +732,14 @@ async function listMiscReceipts(req, res, next) {
 
 // ---------------------------------------------------------------------------
 // POST /api/ar-pipeline/create-invoice-batch
-// Creates multiple AR Invoice payloads in Oracle concurrently.
+// Creates multiple AR Invoice payloads in Oracle via SOAP.
+// Strategy:
+//   Pass 1 – process all invoices concurrently (capped at ORACLE_INVOICE_CONCURRENCY,
+//            default 3) so Oracle is never overloaded while still cutting wall-clock time
+//            vs. purely sequential processing.
+//   Pass 2 – re-submit only invoices that failed with a transient network error in pass 1
+//            (timeout, ECONNRESET, ETIMEDOUT, EPIPE, etc.); done sequentially to be safe.
+//            Oracle business errors (4xx / SOAP Faults) are permanent failures — not retried.
 // Responds immediately with a batchId; processing continues in the background.
 // Poll GET /api/ar-pipeline/invoice-batch/:batchId/progress for status.
 // ---------------------------------------------------------------------------
@@ -717,15 +751,15 @@ async function createInvoiceBatch(req, res, next) {
       return res.status(400).json({ error: 'payloads must be a non-empty array.' });
     }
 
-    const endpoint = process.env.ORACLE_AR_INVOICE_URL;
-    const username  = process.env.ORACLE_USERNAME;
-    const password  = process.env.ORACLE_PASSWORD;
+    const soapEndpoint = process.env.ORACLE_AR_INVOICE_SOAP_URL;
+    const username     = process.env.ORACLE_USERNAME;
+    const password     = process.env.ORACLE_PASSWORD;
 
     if (!username || !password) {
       return res.status(500).json({ error: 'Oracle credentials not configured. Check ORACLE_USERNAME and ORACLE_PASSWORD in .env' });
     }
-    if (!endpoint) {
-      return res.status(500).json({ error: 'ORACLE_AR_INVOICE_URL is not configured in .env' });
+    if (!soapEndpoint) {
+      return res.status(500).json({ error: 'ORACLE_AR_INVOICE_SOAP_URL is not configured in .env' });
     }
 
     // Create a batch tracking record and respond immediately
@@ -745,12 +779,8 @@ async function createInvoiceBatch(req, res, next) {
 
     // Process asynchronously after response is sent
     setImmediate(async () => {
-      const oracleAuth = Buffer.from(`${username}:${password}`).toString('base64');
-      const limit = pLimit(CONCURRENT_REQUESTS);
-
-      // Pre-create all upload records in parallel so the rate-limited workers
-      // don't spend a concurrency slot on DB writes before starting Oracle calls.
-      // allSettled ensures a single DB failure doesn't abort the whole batch.
+      try {
+      // Pre-create all upload records so each invoice is immediately traceable.
       const uploadRecordResults = await Promise.allSettled(
         payloads.map((payload) =>
           prisma.arInvoiceUpload.create({
@@ -764,156 +794,196 @@ async function createInvoiceBatch(req, res, next) {
         )
       );
 
+      const workItems = payloads.map((payload, i) => {
+        const pre = uploadRecordResults[i];
+        return { payload, uploadRecord: pre?.status === 'fulfilled' ? pre.value : null };
+      });
+
       let successCount = 0;
       let failureCount = 0;
+      const transientItems = []; // queued for pass-2 retry
 
-      const tasks = payloads.map((payload, i) =>
-        limit(async () => {
-          // Use the pre-created record if available; otherwise create it now as a fallback.
-          const preCreated = uploadRecordResults[i];
-          let uploadRecord = preCreated?.status === 'fulfilled' ? preCreated.value : null;
+      const soapClient = createOracleSoapClient(soapEndpoint);
 
-          if (!uploadRecord) {
-            try {
-              uploadRecord = await prisma.arInvoiceUpload.create({
-                data: {
-                  userId:         req.user.id,
-                  batchId:        batch.id,
-                  payloadJson:    JSON.stringify(payload),
-                  responseStatus: 'PROCESSING',
-                },
-              });
-            } catch (dbErr) {
-              console.error(`[Pipeline] Could not create upload record for payload ${i + 1}: ${dbErr.message}`);
-              failureCount++;
-              return;
-            }
-          }
-
-          let responseStatus  = 'SUCCESS';
-          let responseMessage = 'Invoice created successfully';
-          let oracleData      = null;
-          let httpStatus      = null;
-
+      /**
+       * Submits one invoice to Oracle via SOAP and persists the result.
+       * @param {object} payload      - Invoice payload
+       * @param {object} uploadRecord - Pre-created ArInvoiceUpload row (may be null)
+       * @param {boolean} isRetry     - true when called from pass 2 (transient-error retry)
+       * @returns {{ success: boolean, isTransient: boolean, uploadRecord: object|null }}
+       */
+      async function processOne(payload, uploadRecord, isRetry) {
+        // Fallback: create upload record if pre-creation failed
+        if (!uploadRecord) {
           try {
-            const response = await pRetry(
-              async () => {
-                const r = await axios.post(endpoint, payload, {
-                  headers: {
-                    'Content-Type': 'application/json',
-                    Accept:         'application/json',
-                    Authorization:  `Basic ${oracleAuth}`,
-                  },
-                  timeout:        ORACLE_INVOICE_TIMEOUT,
-                  validateStatus: () => true,
-                });
-                if (r.status >= 500) throw new Error(`HTTP ${r.status}`);
-                return r;
+            uploadRecord = await prisma.arInvoiceUpload.create({
+              data: {
+                userId:         req.user.id,
+                batchId:        batch.id,
+                payloadJson:    JSON.stringify(payload),
+                responseStatus: 'PROCESSING',
               },
-              { retries: MAX_RETRIES, minTimeout: RETRY_MIN_TIMEOUT, maxTimeout: RETRY_MAX_TIMEOUT }
-            );
-
-            httpStatus = response.status;
-            oracleData = response.data;
-
-            if (response.status >= 400) {
-              responseStatus  = 'FAILED';
-              responseMessage = `Oracle returned HTTP ${httpStatus}`;
-            }
-          } catch (err) {
-            responseStatus  = 'FAILED';
-            responseMessage = err.message;
+            });
+          } catch (dbErr) {
+            console.error(`[Pipeline] Could not create upload record: ${dbErr.message}`);
+            return { success: false, isTransient: false, uploadRecord: null };
           }
+        }
 
-          // Update individual upload record
+        let responseStatus  = 'SUCCESS';
+        let responseMessage = 'Invoice created successfully';
+        let oracleData      = null;
+        let httpStatus      = null;
+        let transient       = false;
+
+        try {
+          const soapXml  = buildArInvoiceSoapEnvelope(payload);
+          const response = await soapClient.callWithCustomEnvelope(soapXml, AR_INVOICE_SOAP_ACTION);
+
+          httpStatus = response.status;
+          oracleData = parseSoapInvoiceResponse(response.data);
+
+          console.log(`✅ [Pipeline] Invoice ${uploadRecord.id} SUCCESS - TxnNumber: ${oracleData?.TransactionNumber}`);
+        } catch (err) {
+          responseStatus  = 'FAILED';
+          responseMessage = err.message;
+          transient       = isTransientError(err);
+          console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} ${transient && !isRetry ? 'TRANSIENT (queued for retry)' : 'FAILED'}: ${err.message}`);
+        }
+
+        // For pass-1 transient failures, mark as queued-for-retry and skip DB storage
+        // so no duplicate FusionInvoiceHeader is created before the retry attempt.
+        if (transient && !isRetry) {
           await prisma.arInvoiceUpload.update({
             where: { id: uploadRecord.id },
             data: {
-              responseStatus,
-              responseMessage,
-              responseBody: oracleData ? JSON.stringify(oracleData) : responseMessage,
-              httpStatus,
+              responseStatus:  'FAILED',
+              responseMessage: `Transient error - queued for retry: ${responseMessage}`,
+              httpStatus:      null,
+            },
+          }).catch(() => {});
+          return { success: false, isTransient: true, uploadRecord };
+        }
+
+        // Persist final result to upload record
+        await prisma.arInvoiceUpload.update({
+          where: { id: uploadRecord.id },
+          data: {
+            responseStatus,
+            responseMessage,
+            responseBody: oracleData ? JSON.stringify(oracleData) : responseMessage,
+            httpStatus,
+          },
+        }).catch(() => {});
+
+        // Persist to FusionInvoiceHeader + FusionInvoiceLine
+        try {
+          const txnNumberRaw = oracleData?.TransactionNumber ?? null;
+          const custTxnIdRaw = oracleData?.CustomerTrxId ?? oracleData?.CustomerTxnId ?? null;
+          const billToAccRaw = payload.BillToCustomerNumber;
+
+          const fusionHeader = await prisma.fusionInvoiceHeader.create({
+            data: {
+              requestId:        uploadRecord.id,
+              status:           responseStatus === 'SUCCESS' ? 'SUCCESS' : 'Failed',
+              message:          responseMessage,
+              requestDate:      new Date(),
+              billToCustName:   payload.BillToCustomerName   ?? null,
+              billToLocation:   payload.BillToSite            ?? null,
+              billToAccNumber:  billToAccRaw ? parseInt(billToAccRaw, 10) : null,
+              businessUnit:     payload.BusinessUnit          ?? null,
+              paymentTermsName: payload.PaymentTerms          ?? null,
+              txnSource:        payload.TransactionSource     ?? null,
+              txnType:          payload.TransactionType       ?? null,
+              txnDate:          parseOracleDateToUTCMidnight(payload.TransactionDate),
+              glDate:           parseOracleDateToUTCMidnight(payload.AccountingDate),
+              currencyCode:     payload.InvoiceCurrencyCode   ?? null,
+              txnNumber:        txnNumberRaw ? parseInt(txnNumberRaw, 10) : null,
+              customerTxnId:    custTxnIdRaw ? parseInt(custTxnIdRaw, 10) : null,
+              region:           'SA',
             },
           });
 
-          // Persist Oracle response into FusionInvoiceHeader + FusionInvoiceLine
-          try {
-            const src          = (responseStatus === 'SUCCESS' && oracleData) ? oracleData : payload;
-            const txnNumberRaw = oracleData?.TransactionNumber   ?? null;
-            const custTxnIdRaw = oracleData?.CustomerTrxId ?? oracleData?.CustomerTxnId ?? null;
-            const billToAccRaw = src.BillToCustomerNumber ?? payload.BillToCustomerNumber;
-
-            const fusionHeader = await prisma.fusionInvoiceHeader.create({
-              data: {
-                requestId:        uploadRecord.id,
-                status:           responseStatus === 'SUCCESS' ? 'SUCCESS' : 'Failed',
-                message:          responseMessage,
-                requestDate:      new Date(),
-                billToCustName:   src.BillToCustomerName  ?? payload.BillToCustomerName  ?? null,
-                billToLocation:   src.BillToSite          ?? payload.BillToSite          ?? null,
-                billToAccNumber:  billToAccRaw ? parseInt(billToAccRaw, 10) : null,
-                businessUnit:     src.BusinessUnit         ?? payload.BusinessUnit         ?? null,
-                paymentTermsName: src.PaymentTerms         ?? payload.PaymentTerms         ?? null,
-                txnSource:        src.TransactionSource    ?? payload.TransactionSource    ?? null,
-                txnType:          src.TransactionType      ?? payload.TransactionType      ?? null,
-                txnDate:          parseOracleDateToUTCMidnight(src.TransactionDate  ?? payload.TransactionDate),
-                glDate:           parseOracleDateToUTCMidnight(src.AccountingDate   ?? payload.AccountingDate),
-                currencyCode:     src.InvoiceCurrencyCode  ?? payload.InvoiceCurrencyCode  ?? null,
-                txnNumber:        txnNumberRaw ? parseInt(txnNumberRaw, 10) : null,
-                customerTxnId:    custTxnIdRaw ? parseInt(custTxnIdRaw, 10) : null,
-                region:           'SA',
-              },
-            });
-
-            // Bulk-insert invoice lines with createMany instead of per-row creates
-            if (responseStatus === 'SUCCESS' && oracleData) {
-              const lines = oracleData.receivablesInvoiceLines ?? payload.receivablesInvoiceLines ?? [];
-              if (lines.length > 0) {
-                await prisma.fusionInvoiceLine.createMany({
-                  data: lines.map((line) => ({
-                    requestId:        uploadRecord.id,
-                    status:           'SUCCESS',
-                    requestDate:      new Date(),
-                    headerId:         fusionHeader.id,
-                    invoiceNumber:    txnNumberRaw != null ? String(txnNumberRaw) : null,
-                    lineNumber:       line.LineNumber       != null ? parseInt(line.LineNumber, 10)      : null,
-                    itemNumber:       line.ItemNumber       ?? null,
-                    description:      line.Description      ?? null,
-                    quantity:         line.Quantity          != null ? parseFloat(line.Quantity)         : null,
-                    unitSellingPrice: line.UnitSellingPrice  != null ? parseFloat(line.UnitSellingPrice) : null,
-                    taxCode:          line.TaxClassificationCode ?? null,
-                    salesOrder:       line.SalesOrder        ?? null,
-                    region:           'SA',
-                  })),
-                });
-              }
-            }
-          } catch (storeErr) {
-            console.error(`[Pipeline] Failed to store invoice ${i + 1}: ${storeErr.message}`);
-          }
-
           if (responseStatus === 'SUCCESS') {
+            const lines = payload.receivablesInvoiceLines ?? [];
+            if (lines.length > 0) {
+              await prisma.fusionInvoiceLine.createMany({
+                data: lines.map((line) => ({
+                  requestId:        uploadRecord.id,
+                  status:           'SUCCESS',
+                  requestDate:      new Date(),
+                  headerId:         fusionHeader.id,
+                  invoiceNumber:    txnNumberRaw != null ? String(txnNumberRaw) : null,
+                  lineNumber:       line.LineNumber       != null ? parseInt(line.LineNumber, 10)      : null,
+                  itemNumber:       line.ItemNumber       ?? null,
+                  description:      line.Description      ?? null,
+                  quantity:         line.Quantity          != null ? parseFloat(line.Quantity)         : null,
+                  unitSellingPrice: line.UnitSellingPrice  != null ? parseFloat(line.UnitSellingPrice) : null,
+                  taxCode:          line.TaxClassificationCode ?? null,
+                  salesOrder:       line.SalesOrder        ?? null,
+                  region:           'SA',
+                })),
+              });
+            }
+          }
+        } catch (storeErr) {
+          console.error(`[Pipeline] Failed to store fusion data for invoice ${uploadRecord.id}: ${storeErr.message}`);
+        }
+
+        return { success: responseStatus === 'SUCCESS', isTransient: false, uploadRecord };
+      }
+
+      // ── Pass 1: process all invoices concurrently (capped at INVOICE_CONCURRENCY) ─
+      // JavaScript's event loop is single-threaded so counter mutations are safe across
+      // concurrent async tasks — each task only advances at await boundaries.
+      console.log(`[Pipeline] Pass 1: Processing ${workItems.length} invoice(s) with concurrency=${INVOICE_CONCURRENCY}`);
+      const limitPass1 = pLimit(INVOICE_CONCURRENCY);
+      await Promise.all(
+        workItems.map((item) =>
+          limitPass1(async () => {
+            const result = await processOne(item.payload, item.uploadRecord, false);
+            if (result.success) {
+              successCount++;
+            } else if (result.isTransient) {
+              transientItems.push({ payload: item.payload, uploadRecord: result.uploadRecord });
+            } else {
+              failureCount++;
+            }
+          })
+        )
+      );
+
+      // ── Pass 2: retry transient failures sequentially (conservative for Oracle) ─
+      if (transientItems.length > 0) {
+        console.log(`[Pipeline] Pass 2: Retrying ${transientItems.length} transient failure(s) sequentially`);
+        for (const item of transientItems) {
+          const result = await processOne(item.payload, item.uploadRecord, true);
+          if (result.success) {
             successCount++;
           } else {
             failureCount++;
           }
-        })
-      );
+        }
+      }
 
-      await Promise.all(tasks);
-
-      const finalStatus =
-        failureCount === 0 ? 'SUCCESS' : successCount === 0 ? 'FAILED' : 'PARTIAL';
-
+      const finalStatus = failureCount === 0 ? 'SUCCESS' : successCount === 0 ? 'FAILED' : 'PARTIAL';
+      const retryNote   = transientItems.length > 0 ? ` (${transientItems.length} retried after transient error)` : '';
       await prisma.arInvoiceBatch.update({
         where: { id: batch.id },
         data: {
           successCount,
           failureCount,
           status:  finalStatus,
-          message: `${successCount} succeeded, ${failureCount} failed out of ${payloads.length}.`,
+          message: `${successCount} succeeded, ${failureCount} failed out of ${payloads.length}${retryNote}.`,
         },
       });
+      } catch (fatalErr) {
+        console.error('[Pipeline:createInvoiceBatch] Fatal background error:', fatalErr.message);
+        await prisma.arInvoiceBatch.update({
+          where: { id: batch.id },
+          data: { status: 'FAILED', message: `Fatal error: ${fatalErr.message}` },
+        }).catch(() => {});
+      }
     });
   } catch (err) {
     next(err);
