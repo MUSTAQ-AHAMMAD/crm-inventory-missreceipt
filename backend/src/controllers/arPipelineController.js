@@ -18,11 +18,9 @@
  */
 
 const prisma = require('../services/prisma');
+const axios = require('axios');
 const pLimit = require('p-limit');
-const pRetry = require('p-retry');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
-const { buildArInvoiceSoapEnvelope, AR_INVOICE_SOAP_ACTION } = require('../services/soapEnvelopeBuilder');
-const { parseSoapInvoiceResponse } = require('./arInvoiceController');
 
 const CONCURRENT_REQUESTS = 5;
 const MAX_RETRIES = 2;
@@ -732,14 +730,14 @@ async function listMiscReceipts(req, res, next) {
 
 // ---------------------------------------------------------------------------
 // POST /api/ar-pipeline/create-invoice-batch
-// Creates multiple AR Invoice payloads in Oracle via SOAP.
+// Creates multiple AR Invoice payloads in Oracle via REST API.
 // Strategy:
 //   Pass 1 – process all invoices concurrently (capped at ORACLE_INVOICE_CONCURRENCY,
 //            default 3) so Oracle is never overloaded while still cutting wall-clock time
 //            vs. purely sequential processing.
 //   Pass 2 – re-submit only invoices that failed with a transient network error in pass 1
 //            (timeout, ECONNRESET, ETIMEDOUT, EPIPE, etc.); done sequentially to be safe.
-//            Oracle business errors (4xx / SOAP Faults) are permanent failures — not retried.
+//            Oracle business errors (4xx / ServiceStatus=E) are permanent failures — not retried.
 // Responds immediately with a batchId; processing continues in the background.
 // Poll GET /api/ar-pipeline/invoice-batch/:batchId/progress for status.
 // ---------------------------------------------------------------------------
@@ -751,15 +749,15 @@ async function createInvoiceBatch(req, res, next) {
       return res.status(400).json({ error: 'payloads must be a non-empty array.' });
     }
 
-    const soapEndpoint = process.env.ORACLE_AR_INVOICE_SOAP_URL;
+    const endpoint     = process.env.ORACLE_AR_INVOICE_URL;
     const username     = process.env.ORACLE_USERNAME;
     const password     = process.env.ORACLE_PASSWORD;
 
     if (!username || !password) {
       return res.status(500).json({ error: 'Oracle credentials not configured. Check ORACLE_USERNAME and ORACLE_PASSWORD in .env' });
     }
-    if (!soapEndpoint) {
-      return res.status(500).json({ error: 'ORACLE_AR_INVOICE_SOAP_URL is not configured in .env' });
+    if (!endpoint) {
+      return res.status(500).json({ error: 'ORACLE_AR_INVOICE_URL is not configured in .env' });
     }
 
     // Create a batch tracking record and respond immediately
@@ -803,11 +801,12 @@ async function createInvoiceBatch(req, res, next) {
       let failureCount = 0;
       const transientItems = []; // queued for pass-2 retry
 
-      const soapClient = createOracleSoapClient(soapEndpoint);
+      const oracleAuth = Buffer.from(`${username}:${password}`).toString('base64');
+      const invoiceTimeout = parseInt(process.env.ORACLE_SOAP_TIMEOUT) || 120000;
 
       /**
-       * Submits one invoice to Oracle via SOAP and persists the result.
-       * @param {object} payload      - Invoice payload
+       * Submits one invoice to Oracle via REST and persists the result.
+       * @param {object} payload      - Invoice payload (JSON)
        * @param {object} uploadRecord - Pre-created ArInvoiceUpload row (may be null)
        * @param {boolean} isRetry     - true when called from pass 2 (transient-error retry)
        * @returns {{ success: boolean, isTransient: boolean, uploadRecord: object|null }}
@@ -837,13 +836,28 @@ async function createInvoiceBatch(req, res, next) {
         let transient       = false;
 
         try {
-          const soapXml  = buildArInvoiceSoapEnvelope(payload);
-          const response = await soapClient.callWithCustomEnvelope(soapXml, AR_INVOICE_SOAP_ACTION);
+          const response = await axios.post(endpoint, payload, {
+            headers: {
+              'Content-Type': 'application/json',
+              Accept:         'application/json',
+              Authorization:  `Basic ${oracleAuth}`,
+            },
+            timeout:        invoiceTimeout,
+            validateStatus: () => true,
+          });
 
           httpStatus = response.status;
-          oracleData = parseSoapInvoiceResponse(response.data);
+          oracleData = response.data;
 
-          console.log(`✅ [Pipeline] Invoice ${uploadRecord.id} SUCCESS - TxnNumber: ${oracleData?.TransactionNumber}`);
+          if (response.status >= 400) {
+            responseStatus  = 'FAILED';
+            responseMessage = `Oracle returned HTTP ${httpStatus}`;
+          } else if (oracleData?.ServiceStatus === 'E') {
+            responseStatus  = 'FAILED';
+            responseMessage = 'Oracle returned ServiceStatus=E (business validation error)';
+          }
+
+          console.log(`✅ [Pipeline] Invoice ${uploadRecord.id} ${responseStatus} - TxnNumber: ${oracleData?.TransactionNumber}`);
         } catch (err) {
           responseStatus  = 'FAILED';
           responseMessage = err.message;
