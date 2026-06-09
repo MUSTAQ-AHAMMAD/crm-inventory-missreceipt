@@ -591,10 +591,12 @@ async function findInvoiceHeader(subinventory, date, paymentType) {
   let invoiceDate = null;
   if (h.txnDate) {
     const d = new Date(h.txnDate);
-    const y  = d.getUTCFullYear();
-    const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
-    const da = String(d.getUTCDate()).padStart(2, '0');
-    invoiceDate = `${y}-${mo}-${da}`;
+    if (!isNaN(d.getTime())) {
+      const y  = d.getUTCFullYear();
+      const mo = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const da = String(d.getUTCDate()).padStart(2, '0');
+      invoiceDate = `${y}-${mo}-${da}`;
+    }
   }
 
   return {
