@@ -584,10 +584,11 @@ describe('AR Pipeline Controller', () => {
       expect(updateCall.data.successCount).toBe(1);
       expect(updateCall.data.failureCount).toBe(0);
 
-      // The SOAP call should have been made with AccountingDate from the receipt
+      // The SOAP call should have been made with AccountingDate and TxnDate from the receipt
       const soapInstance = createOracleSoapClient.mock.results[0].value;
       const soapArg = soapInstance.callWithCustomEnvelope.mock.calls[0][0];
       expect(soapArg).toContain('<com:AccountingDate>2026-06-01</com:AccountingDate>');
+      expect(soapArg).toContain('<com:TxnDate>2026-06-01</com:TxnDate>');
     });
 
     test('fails with missing txnDate error when both invoice and receipt have no date', async () => {

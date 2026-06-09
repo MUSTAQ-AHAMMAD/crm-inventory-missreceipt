@@ -98,6 +98,7 @@ function buildSoapXml(row) {
         <com:AmountApplied>${esc(row.AmountApplied)}</com:AmountApplied>
         <com:ReceiptCurrency>${esc(row.ReceiptCurrency)}</com:ReceiptCurrency>
         <com:TransactionSource>${esc(row.TransactionSource)}</com:TransactionSource>
+        <com:TxnDate>${esc(row.TxnDate)}</com:TxnDate>
         <com:AccountingDate>${esc(row.AccountingDate)}</com:AccountingDate>
         <com:ApplicationDate>${esc(row.AccountingDate)}</com:ApplicationDate>
       </typ:applyReceipt>
@@ -112,8 +113,24 @@ async function applyReceiptSoap(row) {
   const url = process.env.ORACLE_APPLY_RECEIPT_SOAP_URL;
   if (!url) throw new Error('ORACLE_APPLY_RECEIPT_SOAP_URL not configured in .env');
 
+  // Log the full row and SOAP payload so field-level mismatches are visible in the server log
+  console.log(`[Pipeline:ApplyReceipt] >>> Row fields:
+    TransactionNumber : ${row.TransactionNumber}
+    ReceiptNumber     : ${row.ReceiptNumber}
+    AmountApplied     : ${row.AmountApplied}
+    ReceiptCurrency   : ${row.ReceiptCurrency}
+    TransactionSource : ${row.TransactionSource}
+    TxnDate           : ${row.TxnDate}
+    AccountingDate    : ${row.AccountingDate}`);
+  console.log(`[Pipeline:ApplyReceipt] >>> Full SOAP payload:\n${soapXml}`);
+
   const soapClient = createOracleSoapClient(url);
-  return soapClient.callWithCustomEnvelope(soapXml, 'createApplyReceipt');
+  const response = await soapClient.callWithCustomEnvelope(soapXml, 'createApplyReceipt');
+
+  console.log(`[Pipeline:ApplyReceipt] <<< Response HTTP ${response.status} for ${row.TransactionNumber} ← ${row.ReceiptNumber}`);
+  console.log(`[Pipeline:ApplyReceipt] <<< Response body:\n${response.data}`);
+
+  return response;
 }
 
 // ---------------------------------------------------------------------------
@@ -507,6 +524,7 @@ async function submitApply(req, res, next) {
             AmountApplied:     amount,
             ReceiptCurrency:   currencyCode,
             TransactionSource: txnSource,
+            TxnDate:           accountingDate,
             AccountingDate:    accountingDate,
           };
 
