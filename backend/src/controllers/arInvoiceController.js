@@ -319,7 +319,7 @@ async function createInvoice(req, res, next) {
     let oracleData = null;
 
     const oracleAuth = Buffer.from(`${username}:${password}`).toString('base64');
-    const invoiceTimeout = parseInt(process.env.ORACLE_SOAP_TIMEOUT) || 120000;
+    const invoiceTimeout = parseInt(process.env.ORACLE_AR_INVOICE_TIMEOUT) || parseInt(process.env.ORACLE_SOAP_TIMEOUT) || 300000;
 
     try {
       const response = await axios.post(restEndpoint, payload, {
