@@ -714,12 +714,16 @@ async function retryUpload(req, res, next) {
 
     await Promise.all(processingPromises);
 
+    const newSuccessCount = upload.successCount + retrySuccess;
+    const newFailureCount = upload.failureCount - retrySuccess;
+    const finalStatus = newFailureCount === 0 ? 'SUCCESS' : newSuccessCount > 0 ? 'PARTIAL' : 'FAILED';
+
     await prisma.standardReceiptUpload.update({
       where: { id: uploadId },
       data: {
         successCount: { increment: retrySuccess },
         failureCount: { decrement: retrySuccess },
-        status: retryFail === 0 ? 'SUCCESS' : upload.successCount + retrySuccess > 0 ? 'PARTIAL' : 'FAILED',
+        status: finalStatus,
       },
     });
 
