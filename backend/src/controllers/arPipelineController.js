@@ -38,9 +38,11 @@ const SOAP_COM_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/recei
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Normalise an ISO timestamp or plain date to YYYY-MM-DD */
+/** Normalise an ISO timestamp, plain date string, or JavaScript Date object to YYYY-MM-DD */
 function toDateString(val) {
   if (!val) return null;
+  // Date objects must use toISOString() — String() gives locale format which doesn't match
+  if (val instanceof Date) return val.toISOString().slice(0, 10);
   const s = String(val).trim();
   const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
   return m ? m[1] : null;
@@ -409,7 +411,7 @@ async function submitApply(req, res, next) {
             receiptNumber: { in: receiptNumbers },
             status: { in: ['Success', 'SUCCESS'] },
           },
-          select: { receiptNumber: true, amount: true, currencyCode: true },
+          select: { receiptNumber: true, amount: true, currencyCode: true, receiptDate: true, glDate: true },
           orderBy: { createdAt: 'desc' },
         }),
       ]);
@@ -473,7 +475,8 @@ async function submitApply(req, res, next) {
           }
 
           const txnSource      = inv.txnSource  || '';
-          const accountingDate = toDateString(inv.txnDate ?? inv.glDate);
+          // Fall back to receipt date when the invoice header has no txnDate/glDate
+          const accountingDate = toDateString(inv.txnDate ?? inv.glDate ?? rec.receiptDate ?? rec.glDate);
           const amount         = rec.amount != null ? String(rec.amount) : '';
           const currencyCode   = rec.currencyCode || 'SAR';
 
