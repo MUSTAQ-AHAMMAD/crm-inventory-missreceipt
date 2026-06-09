@@ -141,13 +141,15 @@ function validateCsv(records) {
  * Normalizes a single CSV row — mirrors Java ApplyReceiptRequest fields.
  */
 function normalizeRow(row) {
+  const accountingDate = normalizeDate(row.AccountingDate, 'AccountingDate');
   return {
     TransactionNumber: String(row.TransactionNumber ?? '').trim(),
     ReceiptNumber:     String(row.ReceiptNumber     ?? '').trim(),
     AmountApplied:     String(row.AmountApplied     ?? '').trim(),
     ReceiptCurrency:   String(row.ReceiptCurrency   ?? '').trim().toUpperCase(),
     TransactionSource: String(row.TransactionSource ?? '').trim(),
-    AccountingDate:    normalizeDate(row.AccountingDate, 'AccountingDate'),
+    AccountingDate:    accountingDate,
+    TxnDate:           accountingDate, // derived from AccountingDate — no separate column needed
   };
 }
 
@@ -159,12 +161,13 @@ function normalizeRow(row) {
  *   - AmountApplied      → amount to apply
  *   - ReceiptCurrency    → ISO currency code
  *   - TransactionSource  → transaction source used on the invoice
+ *   - TxnDate            → invoice transaction date (taken from uploaded file)
  *   - AccountingDate     → accounting date (also used as ApplicationDate)
  *   - ApplicationDate    → application date (same value as AccountingDate)
  */
 function buildApplyReceiptXml(row) {
   if (!row.TransactionNumber || !row.ReceiptNumber || !row.AmountApplied ||
-      !row.ReceiptCurrency   || !row.TransactionSource || !row.AccountingDate) {
+      !row.ReceiptCurrency   || !row.TransactionSource || !row.AccountingDate || !row.TxnDate) {
     throw new Error('Missing required fields for createApplyReceipt SOAP call');
   }
 
@@ -182,6 +185,7 @@ function buildApplyReceiptXml(row) {
         <com:AmountApplied>${escapeXml(row.AmountApplied)}</com:AmountApplied>
         <com:ReceiptCurrency>${escapeXml(row.ReceiptCurrency)}</com:ReceiptCurrency>
         <com:TransactionSource>${escapeXml(row.TransactionSource)}</com:TransactionSource>
+        <com:TxnDate>${escapeXml(row.TxnDate)}</com:TxnDate>
         <com:AccountingDate>${escapeXml(row.AccountingDate)}</com:AccountingDate>
         <com:ApplicationDate>${escapeXml(row.AccountingDate)}</com:ApplicationDate>
       </typ:applyReceipt>
@@ -308,6 +312,7 @@ async function verifyPayload(req, res, next) {
       amountApplied: row.AmountApplied,
       receiptCurrency: row.ReceiptCurrency,
       transactionSource: row.TransactionSource,
+      txnDate: row.TxnDate,
       accountingDate: row.AccountingDate,
       soapPayload: buildApplyReceiptXml(row),
     }));

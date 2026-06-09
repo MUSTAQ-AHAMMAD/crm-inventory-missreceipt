@@ -396,6 +396,80 @@ function ProgressBar({ done, total, label }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Apply failures table — shown inline after submit
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ERROR_STEP_LABELS = {
+  INVOICE_LOOKUP:  { label: 'Invoice lookup',  color: 'blue'   },
+  RECEIPT_LOOKUP:  { label: 'Receipt lookup',  color: 'purple' },
+  APPLY_RECEIPT:   { label: 'Oracle SOAP',     color: 'red'    },
+}
+
+/** Returns only the failure lines from a raw response log array */
+function filterFailureLines(logs) {
+  return (logs || []).filter(
+    (l) => l.startsWith('[FAIL') || l.startsWith('FAIL') || l.toLowerCase().includes('fail')
+  )
+}
+
+function ApplyFailuresTable({ failures }) {
+  const [showAll, setShowAll] = useState(false)
+  if (!failures || failures.length === 0) return null
+  const visible = showAll ? failures : failures.slice(0, 10)
+  return (
+    <div className="mt-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-red-600 mb-2">
+        ✗ Failed Pairs ({failures.length})
+      </p>
+      <div className="overflow-x-auto rounded-lg border border-red-200">
+        <table className="w-full text-xs">
+          <thead className="bg-red-50 text-gray-500 uppercase">
+            <tr>
+              <th className="px-3 py-2 text-left">Invoice Txn #</th>
+              <th className="px-3 py-2 text-left">Receipt Number</th>
+              <th className="px-3 py-2 text-left">Failure Stage</th>
+              <th className="px-3 py-2 text-left">Error Message</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-red-100">
+            {visible.map((f) => {
+              const step = ERROR_STEP_LABELS[f.errorStep] || { label: f.errorStep || 'Unknown', color: 'gray' }
+              const rowKey = `${f.invoiceNumber || ''}||${f.receiptNumber || ''}||${f.rowNumber || ''}`
+              return (
+                <tr key={rowKey} className="bg-white hover:bg-red-50">
+                  <td className="px-3 py-2 font-mono font-semibold text-blue-700">{f.invoiceNumber || '—'}</td>
+                  <td className="px-3 py-2 font-mono text-green-700">{f.receiptNumber || '—'}</td>
+                  <td className="px-3 py-2">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                      step.color === 'blue'   ? 'bg-blue-100 text-blue-700' :
+                      step.color === 'purple' ? 'bg-purple-100 text-purple-700' :
+                      step.color === 'red'    ? 'bg-red-100 text-red-700' :
+                      'bg-gray-100 text-gray-600'
+                    }`}>
+                      {step.label}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-red-700 max-w-xs">
+                    <span title={f.errorMessage || ''}>{f.errorMessage || 'Unknown error'}</span>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+        {failures.length > 10 && (
+          <div className="p-2 text-center border-t border-red-100 bg-red-50">
+            <button onClick={() => setShowAll(v => !v)} className="text-xs text-red-600 hover:underline">
+              {showAll ? 'Show fewer' : `Show all ${failures.length} failures`}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // STEP 3: Apply Receipt component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -404,8 +478,10 @@ function ApplyReceiptPanel({ onDone }) {
   const [selected, setSelected] = useState(new Set())
   const [submitting, setSubmitting] = useState(false)
   const [submitResult, setSubmitResult] = useState(null)
+  const [failureDetails, setFailureDetails] = useState(null)
   const [applyError, setApplyError] = useState('')
   const [activeUploadId, setActiveUploadId] = useState(null)
+  const [showLog, setShowLog] = useState(false)
 
   const { data: pendingData, isLoading: pendingLoading, refetch: refetchPending } = useQuery({
     queryKey: ['arPipelinePendingApply'],
@@ -424,12 +500,24 @@ function ApplyReceiptPanel({ onDone }) {
     if (!progressData || !activeUploadId) return
     const { status } = progressData
     if (['SUCCESS', 'FAILED', 'PARTIAL'].includes(status)) {
+      const finishedUploadId = activeUploadId
       setSubmitResult(progressData)
       setSubmitting(false)
       setActiveUploadId(null)
+      setFailureDetails(null)
+      setShowLog(false)
       queryClient.invalidateQueries({ queryKey: ['arPipelinePendingApply'] })
       refetchPending()
       onDone?.()
+      // Fetch per-pair failure details when there are failures
+      if (progressData.failureCount > 0) {
+        api.get(`/apply-receipt/uploads/${finishedUploadId}`)
+          .then((r) => setFailureDetails(r.data?.failures ?? []))
+          .catch((err) => {
+            console.error('[ApplyReceiptPanel] Failed to fetch failure details:', err)
+            setFailureDetails([])
+          })
+      }
     }
   }, [progressData, activeUploadId, queryClient, refetchPending, onDone])
 
@@ -508,25 +596,51 @@ function ApplyReceiptPanel({ onDone }) {
 
       {/* Result */}
       {submitResult && !submitting && (
-        <div className={`rounded-lg border p-4 text-sm ${
-          submitResult.status === 'SUCCESS' ? 'bg-green-50 border-green-200' :
-          submitResult.status === 'PARTIAL'  ? 'bg-yellow-50 border-yellow-200' :
-          'bg-red-50 border-red-200'
-        }`}>
-          <p className={`font-semibold ${
-            submitResult.status === 'SUCCESS' ? 'text-green-700' :
-            submitResult.status === 'PARTIAL'  ? 'text-yellow-700' : 'text-red-700'
+        <div className="space-y-3">
+          {/* Summary banner */}
+          <div className={`rounded-lg border p-4 text-sm ${
+            submitResult.status === 'SUCCESS' ? 'bg-green-50 border-green-200' :
+            submitResult.status === 'PARTIAL'  ? 'bg-yellow-50 border-yellow-200' :
+            'bg-red-50 border-red-200'
           }`}>
-            {submitResult.status === 'SUCCESS' ? '✅ All applied successfully' :
-             submitResult.status === 'PARTIAL'  ? '⚠️ Partially applied' : '❌ Apply failed'}
-          </p>
-          <p className="text-xs text-gray-600 mt-1">
-            {submitResult.successCount} succeeded · {submitResult.failureCount} failed
-          </p>
-          {submitResult.uploadId && (
-            <Link to={`/receipt-upload/apply/${submitResult.uploadId}`} className="text-blue-600 hover:underline text-xs mt-1 inline-block">
-              View detailed results →
-            </Link>
+            <p className={`font-semibold ${
+              submitResult.status === 'SUCCESS' ? 'text-green-700' :
+              submitResult.status === 'PARTIAL'  ? 'text-yellow-700' : 'text-red-700'
+            }`}>
+              {submitResult.status === 'SUCCESS' ? '✅ All applied successfully' :
+               submitResult.status === 'PARTIAL'  ? '⚠️ Partially applied' : '❌ Apply failed'}
+            </p>
+            <p className="text-xs text-gray-600 mt-1">
+              {submitResult.successCount} succeeded · {submitResult.failureCount} failed
+            </p>
+            {submitResult.uploadId && (
+              <Link to={`/receipt-upload/apply/${submitResult.uploadId}`} className="text-blue-600 hover:underline text-xs mt-2 inline-block">
+                View full upload record →
+              </Link>
+            )}
+          </div>
+
+          {/* Per-pair failure details */}
+          {failureDetails && failureDetails.length > 0 && (
+            <ApplyFailuresTable failures={failureDetails} />
+          )}
+
+          {/* Collapsible response log */}
+          {submitResult.responseLog && (
+            <div className="rounded-lg border border-gray-200 overflow-hidden">
+              <button
+                onClick={() => setShowLog(v => !v)}
+                className="w-full flex items-center justify-between px-4 py-2 bg-gray-50 hover:bg-gray-100 text-xs text-gray-600 font-medium"
+              >
+                <span>📋 Response Log ({submitResult.responseLog.split('\n').filter(Boolean).length} lines)</span>
+                <span>{showLog ? '▲ Hide' : '▼ Show'}</span>
+              </button>
+              {showLog && (
+                <pre className="p-4 text-xs font-mono text-gray-700 bg-white overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap">
+                  {submitResult.responseLog}
+                </pre>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -1060,9 +1174,9 @@ export default function ArPipelinePage() {
                                 {r.status === 'SUCCESS' ? '✓ Created' : '✗ Failed'}
                               </span>
                             </td>
-                            <td className="px-3 py-2 text-gray-500 max-w-[200px] truncate" title={r.message || ''}>
+                            <td className="px-3 py-2 text-gray-500 max-w-xs">
                               {r.status === 'FAILED' ? (
-                                <span className="text-red-600">{r.message || 'Unknown error'}</span>
+                                <span className="text-red-600 break-words" title={r.message || ''}>{r.message || 'Unknown error'}</span>
                               ) : r.uploadId ? (
                                 <Link to={`/ar-invoice/uploads/${r.uploadId}`} className="text-blue-600 hover:underline">
                                   View details →
@@ -1207,22 +1321,45 @@ export default function ArPipelinePage() {
               <div className="text-xs font-semibold text-gray-700 uppercase tracking-wide">Creation Results</div>
 
               {s2.stdResults && (
-                <div className={`rounded-lg border p-3 text-xs ${
+                <div className={`rounded-lg border p-3 text-xs space-y-1 ${
                   s2.stdResults.failureCount === 0 ? 'bg-green-50 border-green-200 text-green-700' :
                   s2.stdResults.successCount === 0 ? 'bg-red-50 border-red-200 text-red-700' :
                   'bg-yellow-50 border-yellow-200 text-yellow-700'
                 }`}>
                   <p className="font-semibold">Standard Receipts: {s2.stdResults.successCount} ✓ · {s2.stdResults.failureCount} ✗ of {s2.stdResults.total}</p>
+                  {s2.stdResults.skipCount > 0 && (
+                    <p className="text-xs opacity-80">⏭ {s2.stdResults.skipCount} skipped (zero-amount, credit, or duplicate)</p>
+                  )}
+                  {s2.stdResults.failureCount > 0 && s2.stdResults.logs?.length > 0 && (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-xs font-medium opacity-80">Show failure details ▾</summary>
+                      <ul className="mt-1 space-y-0.5 max-h-40 overflow-y-auto">
+                        {filterFailureLines(s2.stdResults.logs).map((l, i) => (
+                          <li key={`std-fail-${i}-${l.slice(0, 20)}`} className="font-mono text-xs break-words">{l}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
                 </div>
               )}
 
               {s2.miscResults && (
-                <div className={`rounded-lg border p-3 text-xs ${
+                <div className={`rounded-lg border p-3 text-xs space-y-1 ${
                   s2.miscResults.failureCount === 0 ? 'bg-green-50 border-green-200 text-green-700' :
                   s2.miscResults.successCount === 0 ? 'bg-red-50 border-red-200 text-red-700' :
                   'bg-yellow-50 border-yellow-200 text-yellow-700'
                 }`}>
                   <p className="font-semibold">Misc Receipts: {s2.miscResults.successCount} ✓ · {s2.miscResults.failureCount} ✗ of {s2.miscResults.total}</p>
+                  {s2.miscResults.failureCount > 0 && s2.miscResults.logs?.length > 0 && (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-xs font-medium opacity-80">Show failure details ▾</summary>
+                      <ul className="mt-1 space-y-0.5 max-h-40 overflow-y-auto">
+                        {filterFailureLines(s2.miscResults.logs).map((l, i) => (
+                          <li key={`misc-fail-${i}-${l.slice(0, 20)}`} className="font-mono text-xs break-words">{l}</li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
                 </div>
               )}
 

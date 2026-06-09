@@ -12,8 +12,14 @@ import FileDropzone from '../components/common/FileDropzone'
 import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 
-const REQUIRED_COLUMNS = ['InvoiceNumber']
-// Receipt columns are dynamically detected - users can have unlimited ReceiptNumber1, ReceiptNumber2, etc.
+const REQUIRED_COLUMNS = [
+  'TransactionNumber',
+  'ReceiptNumber',
+  'AmountApplied',
+  'ReceiptCurrency',
+  'TransactionSource',
+  'AccountingDate',
+]
 
 export default function ApplyReceiptPage() {
   const queryClient = useQueryClient()
@@ -159,21 +165,13 @@ export default function ApplyReceiptPage() {
         {/* Column reference */}
         <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-4">
           <p className="text-sm font-medium text-indigo-700 mb-2">Required CSV Columns:</p>
-          <div className="flex flex-wrap gap-2 mb-3">
+          <div className="flex flex-wrap gap-2 mb-2">
             {REQUIRED_COLUMNS.map((col) => (
               <span key={col} className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded text-xs font-mono">{col}</span>
             ))}
           </div>
-          <p className="text-sm font-medium text-indigo-700 mb-2">Receipt Number Columns (at least one required):</p>
-          <div className="flex flex-wrap gap-2">
-            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded text-xs font-mono">ReceiptNumber1</span>
-            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded text-xs font-mono">ReceiptNumber2</span>
-            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded text-xs font-mono">ReceiptNumber3</span>
-            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded text-xs font-mono">...</span>
-            <span className="px-2 py-0.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded text-xs font-mono">ReceiptNumberN</span>
-          </div>
           <p className="text-xs text-indigo-700 mt-2">
-            Each row must have an InvoiceNumber and at least one ReceiptNumber. You can have unlimited receipt columns (ReceiptNumber1, ReceiptNumber2, ... ReceiptNumberN).
+            <strong>AccountingDate</strong> is the receipt application date (taken from your Excel/CSV file). It also acts as the invoice transaction date sent to Oracle. Accepts YYYY-MM-DD, DD-MM-YYYY, or Excel serial number formats.
           </p>
         </div>
 
