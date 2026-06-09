@@ -113,8 +113,24 @@ async function applyReceiptSoap(row) {
   const url = process.env.ORACLE_APPLY_RECEIPT_SOAP_URL;
   if (!url) throw new Error('ORACLE_APPLY_RECEIPT_SOAP_URL not configured in .env');
 
+  // Log the full row and SOAP payload so field-level mismatches are visible in the server log
+  console.log(`[Pipeline:ApplyReceipt] >>> Row fields:
+    TransactionNumber : ${row.TransactionNumber}
+    ReceiptNumber     : ${row.ReceiptNumber}
+    AmountApplied     : ${row.AmountApplied}
+    ReceiptCurrency   : ${row.ReceiptCurrency}
+    TransactionSource : ${row.TransactionSource}
+    TxnDate           : ${row.TxnDate}
+    AccountingDate    : ${row.AccountingDate}`);
+  console.log(`[Pipeline:ApplyReceipt] >>> Full SOAP payload:\n${soapXml}`);
+
   const soapClient = createOracleSoapClient(url);
-  return soapClient.callWithCustomEnvelope(soapXml, 'createApplyReceipt');
+  const response = await soapClient.callWithCustomEnvelope(soapXml, 'createApplyReceipt');
+
+  console.log(`[Pipeline:ApplyReceipt] <<< Response HTTP ${response.status} for ${row.TransactionNumber} ← ${row.ReceiptNumber}`);
+  console.log(`[Pipeline:ApplyReceipt] <<< Response body:\n${response.data}`);
+
+  return response;
 }
 
 // ---------------------------------------------------------------------------
