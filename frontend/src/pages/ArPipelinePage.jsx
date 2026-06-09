@@ -405,6 +405,13 @@ const ERROR_STEP_LABELS = {
   APPLY_RECEIPT:   { label: 'Oracle SOAP',     color: 'red'    },
 }
 
+/** Returns only the failure lines from a raw response log array */
+function filterFailureLines(logs) {
+  return (logs || []).filter(
+    (l) => l.startsWith('[FAIL') || l.startsWith('FAIL') || l.toLowerCase().includes('fail')
+  )
+}
+
 function ApplyFailuresTable({ failures }) {
   const [showAll, setShowAll] = useState(false)
   if (!failures || failures.length === 0) return null
@@ -425,10 +432,11 @@ function ApplyFailuresTable({ failures }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-red-100">
-            {visible.map((f, i) => {
+            {visible.map((f) => {
               const step = ERROR_STEP_LABELS[f.errorStep] || { label: f.errorStep || 'Unknown', color: 'gray' }
+              const rowKey = `${f.invoiceNumber || ''}||${f.receiptNumber || ''}||${f.rowNumber || ''}`
               return (
-                <tr key={i} className="bg-white hover:bg-red-50">
+                <tr key={rowKey} className="bg-white hover:bg-red-50">
                   <td className="px-3 py-2 font-mono font-semibold text-blue-700">{f.invoiceNumber || '—'}</td>
                   <td className="px-3 py-2 font-mono text-green-700">{f.receiptNumber || '—'}</td>
                   <td className="px-3 py-2">
@@ -505,7 +513,10 @@ function ApplyReceiptPanel({ onDone }) {
       if (progressData.failureCount > 0) {
         api.get(`/apply-receipt/uploads/${finishedUploadId}`)
           .then((r) => setFailureDetails(r.data?.failures ?? []))
-          .catch(() => {/* silently ignore */})
+          .catch((err) => {
+            console.error('[ApplyReceiptPanel] Failed to fetch failure details:', err)
+            setFailureDetails([])
+          })
       }
     }
   }, [progressData, activeUploadId, queryClient, refetchPending, onDone])
@@ -1323,8 +1334,8 @@ export default function ArPipelinePage() {
                     <details className="mt-1">
                       <summary className="cursor-pointer text-xs font-medium opacity-80">Show failure details ▾</summary>
                       <ul className="mt-1 space-y-0.5 max-h-40 overflow-y-auto">
-                        {s2.stdResults.logs.filter(l => l.startsWith('[FAIL') || l.startsWith('FAIL') || l.toLowerCase().includes('fail')).map((l, i) => (
-                          <li key={i} className="font-mono text-xs break-words">{l}</li>
+                        {filterFailureLines(s2.stdResults.logs).map((l, i) => (
+                          <li key={`std-fail-${i}-${l.slice(0, 20)}`} className="font-mono text-xs break-words">{l}</li>
                         ))}
                       </ul>
                     </details>
@@ -1343,8 +1354,8 @@ export default function ArPipelinePage() {
                     <details className="mt-1">
                       <summary className="cursor-pointer text-xs font-medium opacity-80">Show failure details ▾</summary>
                       <ul className="mt-1 space-y-0.5 max-h-40 overflow-y-auto">
-                        {s2.miscResults.logs.filter(l => l.startsWith('[FAIL') || l.startsWith('FAIL') || l.toLowerCase().includes('fail')).map((l, i) => (
-                          <li key={i} className="font-mono text-xs break-words">{l}</li>
+                        {filterFailureLines(s2.miscResults.logs).map((l, i) => (
+                          <li key={`misc-fail-${i}-${l.slice(0, 20)}`} className="font-mono text-xs break-words">{l}</li>
                         ))}
                       </ul>
                     </details>
