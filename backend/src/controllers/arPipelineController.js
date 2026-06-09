@@ -98,6 +98,7 @@ function buildSoapXml(row) {
         <com:AmountApplied>${esc(row.AmountApplied)}</com:AmountApplied>
         <com:ReceiptCurrency>${esc(row.ReceiptCurrency)}</com:ReceiptCurrency>
         <com:TransactionSource>${esc(row.TransactionSource)}</com:TransactionSource>
+        <com:TxnDate>${esc(row.TxnDate)}</com:TxnDate>
         <com:AccountingDate>${esc(row.AccountingDate)}</com:AccountingDate>
         <com:ApplicationDate>${esc(row.AccountingDate)}</com:ApplicationDate>
       </typ:applyReceipt>
@@ -507,6 +508,7 @@ async function submitApply(req, res, next) {
             AmountApplied:     amount,
             ReceiptCurrency:   currencyCode,
             TransactionSource: txnSource,
+            TxnDate:           accountingDate,
             AccountingDate:    accountingDate,
           };
 
