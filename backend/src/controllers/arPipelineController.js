@@ -733,12 +733,13 @@ async function listMiscReceipts(req, res, next) {
 // ---------------------------------------------------------------------------
 // POST /api/ar-pipeline/create-invoice-batch
 // Creates multiple AR Invoice payloads in Oracle via SOAP.
-// Strategy (mirrors Java FusionInvoiceClient):
-//   Pass 1 – process each invoice SEQUENTIALLY (one at a time) so Oracle is
-//            never overloaded and each invoice completes before the next starts.
-//   Pass 2 – re-submit only the invoices that failed due to a timeout in pass 1.
-//            Network timeouts are the only transient error worth auto-retrying;
-//            Oracle business errors (4xx / SOAP Faults) are permanent failures.
+// Strategy:
+//   Pass 1 – process all invoices concurrently (capped at ORACLE_INVOICE_CONCURRENCY,
+//            default 3) so Oracle is never overloaded while still cutting wall-clock time
+//            vs. purely sequential processing.
+//   Pass 2 – re-submit only invoices that failed with a transient network error in pass 1
+//            (timeout, ECONNRESET, ETIMEDOUT, EPIPE, etc.); done sequentially to be safe.
+//            Oracle business errors (4xx / SOAP Faults) are permanent failures — not retried.
 // Responds immediately with a batchId; processing continues in the background.
 // Poll GET /api/ar-pipeline/invoice-batch/:batchId/progress for status.
 // ---------------------------------------------------------------------------
@@ -773,7 +774,7 @@ async function createInvoiceBatch(req, res, next) {
     res.json({
       batchId: batch.id,
       total:   payloads.length,
-      message: `Processing ${payloads.length} invoice(s) with concurrency=${INVOICE_CONCURRENCY}. Poll /api/ar-pipeline/invoice-batch/${batch.id}/progress for status.`,
+      message: `Processing ${payloads.length} invoice(s). Poll /api/ar-pipeline/invoice-batch/${batch.id}/progress for status.`,
     });
 
     // Process asynchronously after response is sent
@@ -800,12 +801,7 @@ async function createInvoiceBatch(req, res, next) {
 
       let successCount = 0;
       let failureCount = 0;
-      const timeoutItems = []; // queued for pass-2 retry
-      // Mutex to safely update shared counters from concurrent tasks
-      const mu = { lock: Promise.resolve() };
-      function safeIncSuccess() { mu.lock = mu.lock.then(() => { successCount++; }); }
-      function safeIncFailure() { mu.lock = mu.lock.then(() => { failureCount++; }); }
-      function safePushTimeout(item) { mu.lock = mu.lock.then(() => { timeoutItems.push(item); }); }
+      const transientItems = []; // queued for pass-2 retry
 
       const soapClient = createOracleSoapClient(soapEndpoint);
 
@@ -938,7 +934,8 @@ async function createInvoiceBatch(req, res, next) {
       }
 
       // ── Pass 1: process all invoices concurrently (capped at INVOICE_CONCURRENCY) ─
-      // Using pLimit keeps Oracle load bounded while cutting wall-clock time vs. pure sequential.
+      // JavaScript's event loop is single-threaded so counter mutations are safe across
+      // concurrent async tasks — each task only advances at await boundaries.
       console.log(`[Pipeline] Pass 1: Processing ${workItems.length} invoice(s) with concurrency=${INVOICE_CONCURRENCY}`);
       const limitPass1 = pLimit(INVOICE_CONCURRENCY);
       await Promise.all(
@@ -946,21 +943,20 @@ async function createInvoiceBatch(req, res, next) {
           limitPass1(async () => {
             const result = await processOne(item.payload, item.uploadRecord, false);
             if (result.success) {
-              safeIncSuccess();
+              successCount++;
             } else if (result.isTransient) {
-              safePushTimeout({ payload: item.payload, uploadRecord: result.uploadRecord });
+              transientItems.push({ payload: item.payload, uploadRecord: result.uploadRecord });
             } else {
-              safeIncFailure();
+              failureCount++;
             }
           })
         )
       );
-      await mu.lock; // drain the mutex queue before reading counters
 
       // ── Pass 2: retry transient failures sequentially (conservative for Oracle) ─
-      if (timeoutItems.length > 0) {
-        console.log(`[Pipeline] Pass 2: Retrying ${timeoutItems.length} transient failure(s) sequentially`);
-        for (const item of timeoutItems) {
+      if (transientItems.length > 0) {
+        console.log(`[Pipeline] Pass 2: Retrying ${transientItems.length} transient failure(s) sequentially`);
+        for (const item of transientItems) {
           const result = await processOne(item.payload, item.uploadRecord, true);
           if (result.success) {
             successCount++;
@@ -971,7 +967,7 @@ async function createInvoiceBatch(req, res, next) {
       }
 
       const finalStatus = failureCount === 0 ? 'SUCCESS' : successCount === 0 ? 'FAILED' : 'PARTIAL';
-      const retryNote   = timeoutItems.length > 0 ? ` (${timeoutItems.length} retried after transient error)` : '';
+      const retryNote   = transientItems.length > 0 ? ` (${transientItems.length} retried after transient error)` : '';
       await prisma.arInvoiceBatch.update({
         where: { id: batch.id },
         data: {
