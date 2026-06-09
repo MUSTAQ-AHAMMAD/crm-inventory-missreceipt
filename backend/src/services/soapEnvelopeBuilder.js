@@ -37,6 +37,13 @@ const CUST_SVC_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/custo
 /** SOAPAction for getActiveCustomerProfile – used as the second arg to callWithCustomEnvelope */
 const CUST_PROFILE_SOAP_ACTION = `${CUST_SVC_NS}getActiveCustomerProfile`;
 
+// RecInvoiceService (AR Invoice createSimpleInvoice)
+const AR_INV_TYP_NS = 'http://xmlns.oracle.com/apps/financials/receivables/transactions/invoices/invoiceService/types/';
+const AR_INV_SVC_NS = 'http://xmlns.oracle.com/apps/financials/receivables/transactions/invoices/invoiceService/';
+const AR_INV_ADF_NS = 'http://xmlns.oracle.com/adf/svc/types/';
+/** SOAPAction for createSimpleInvoice – used as the second arg to callWithCustomEnvelope */
+const AR_INVOICE_SOAP_ACTION = 'createSimpleInvoice';
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function escapeXml(value) {
@@ -179,9 +186,99 @@ function buildCustomerProfileEnvelope(accountNumber) {
 </soapenv:Envelope>`;
 }
 
+// ── AR Invoice (RecInvoiceService / createSimpleInvoice) ───────────────────────
+
+/**
+ * Wraps an optional string value in an XML tag only when value is non-empty.
+ * Used by buildArInvoiceSoapEnvelope.
+ */
+function optionalTag(ns, tag, value) {
+  if (value == null || String(value).trim() === '') return '';
+  return `        <${ns}:${tag}>${escapeXml(String(value).trim())}</${ns}:${tag}>\n`;
+}
+
+/**
+ * Builds a createSimpleInvoice SOAP envelope for Oracle RecInvoiceService.
+ *
+ * Maps the same JSON fields as FusionInvoiceTransform.java (integration-Oracle):
+ *   BillToCustomerName   → BillToCustomerName
+ *   BillToSite           → BillToLocation
+ *   BillToCustomerNumber → BillToAccountNumber
+ *   BusinessUnit         → BusinessUnit
+ *   TransactionSource    → TransactionSource
+ *   TransactionType      → TransactionType
+ *   InvoiceCurrencyCode  → InvoiceCurrencyCode
+ *   ConversionRateType   → ConversionRateType
+ *   PaymentTerms         → PaymentTermsName
+ *   TransactionDate      → TrxDate
+ *   AccountingDate       → GlDate
+ *
+ * Line fields:
+ *   LineNumber, ItemNumber (omit for discount), MemoLine (discount only),
+ *   Description, Quantity (MeasureType), UnitSellingPrice (AmountType),
+ *   SalesOrder, SalesOrderLine, TaxClassificationCode
+ *
+ * @param {object} payload - AR Invoice payload with header + receivablesInvoiceLines
+ */
+function buildArInvoiceSoapEnvelope(payload) {
+  const lines    = payload.receivablesInvoiceLines || [];
+  const currency = payload.InvoiceCurrencyCode || '';
+
+  const lineXml = lines.map((line) => {
+    const uom        = String(line.UnitOfMeasure ?? line.UOM ?? 'EA').trim();
+    const isDiscount = !line.ItemNumber || String(line.ItemNumber).trim() === '';
+    const itemTag    = isDiscount ? '' : `          <inv:ItemNumber>${escapeXml(line.ItemNumber)}</inv:ItemNumber>\n`;
+    const memoTag    = isDiscount ? `          <inv:MemoLineName>${escapeXml(line.MemoLine ?? 'Discount Item')}</inv:MemoLineName>\n` : '';
+    const soTag      = line.SalesOrder     ? `          <inv:SalesOrder>${escapeXml(line.SalesOrder)}</inv:SalesOrder>\n`                 : '';
+    const solTag     = line.SalesOrderLine != null ? `          <inv:SalesOrderLine>${escapeXml(line.SalesOrderLine)}</inv:SalesOrderLine>\n` : '';
+
+    return `        <inv:InvoiceLine>
+          <inv:LineNumber>${escapeXml(line.LineNumber)}</inv:LineNumber>
+${itemTag}${memoTag}          <inv:Description>${escapeXml(line.Description)}</inv:Description>
+          <inv:Quantity>
+            <adf:Value>${escapeXml(line.Quantity)}</adf:Value>
+            <adf:UnitCode>${escapeXml(uom)}</adf:UnitCode>
+          </inv:Quantity>
+          <inv:UnitSellingPrice>
+            <adf:Value>${escapeXml(line.UnitSellingPrice)}</adf:Value>
+            <adf:CurrencyCode>${escapeXml(currency)}</adf:CurrencyCode>
+          </inv:UnitSellingPrice>
+${soTag}${solTag}          <inv:TaxClassificationCode>${escapeXml(line.TaxClassificationCode)}</inv:TaxClassificationCode>
+        </inv:InvoiceLine>`;
+  }).join('\n');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
+  xmlns:typ="${AR_INV_TYP_NS}"
+  xmlns:inv="${AR_INV_SVC_NS}"
+  xmlns:adf="${AR_INV_ADF_NS}">
+  <soapenv:Header/>
+  <soapenv:Body>
+    <typ:createSimpleInvoice>
+      <typ:invoice>
+        ${optionalTag('inv', 'BillToCustomerName',   payload.BillToCustomerName)}
+        ${optionalTag('inv', 'BillToLocation',       payload.BillToSite)}
+        ${optionalTag('inv', 'BillToAccountNumber',  payload.BillToCustomerNumber)}
+        ${optionalTag('inv', 'BusinessUnit',          payload.BusinessUnit)}
+        ${optionalTag('inv', 'TransactionSource',    payload.TransactionSource)}
+        ${optionalTag('inv', 'TransactionType',      payload.TransactionType)}
+        <inv:InvoiceCurrencyCode>${escapeXml(currency)}</inv:InvoiceCurrencyCode>
+        ${optionalTag('inv', 'ConversionRateType',   payload.ConversionRateType)}
+        ${optionalTag('inv', 'PaymentTermsName',     payload.PaymentTerms)}
+        <inv:TrxDate>${escapeXml(payload.TransactionDate)}</inv:TrxDate>
+        ${optionalTag('inv', 'GlDate', payload.AccountingDate)}
+        ${lineXml}
+      </typ:invoice>
+    </typ:createSimpleInvoice>
+  </soapenv:Body>
+</soapenv:Envelope>`;
+}
+
 module.exports = {
   buildStandardReceiptEnvelope,
   buildMiscReceiptEnvelope,
   buildCustomerProfileEnvelope,
+  buildArInvoiceSoapEnvelope,
   CUST_PROFILE_SOAP_ACTION,
+  AR_INVOICE_SOAP_ACTION,
 };

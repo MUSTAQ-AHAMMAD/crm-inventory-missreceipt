@@ -612,7 +612,7 @@ function createOracleSoapClient(serviceUrl, wsdlUrl) {
     username,
     password,
     maxRetries,
-    requestTimeout: 30000,
+    requestTimeout: parseInt(process.env.ORACLE_SOAP_TIMEOUT) || 120000,
   });
 }
 
