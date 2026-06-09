@@ -21,6 +21,7 @@ const prisma = require('../services/prisma');
 const axios = require('axios');
 const pLimit = require('p-limit');
 const pRetry = require('p-retry');
+const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
 const CONCURRENT_REQUESTS = 5;
 const MAX_RETRIES = 2;
@@ -28,11 +29,10 @@ const RETRY_MIN_TIMEOUT = 500;
 const RETRY_MAX_TIMEOUT = 3000;
 const ORACLE_INVOICE_TIMEOUT = 120000; // Oracle AR invoice creation can take up to 2 minutes
 
-// SOAP namespaces (same as applyReceiptController)
-const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
-const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/applyReceiptsService/types/';
-const SOAP_COM_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/applyReceiptsService/';
-const SOAP_APP_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/applyReceiptsService/applicationDetails/';
+// SOAP namespaces — match applyReceiptController (standardReceiptService/commonService)
+const SOAP_ENV_NS   = 'http://schemas.xmlsoap.org/soap/envelope/';
+const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/types/';
+const SOAP_COM_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -72,10 +72,10 @@ function extractInvoiceNumberFromReceipt(receiptNumber) {
   return m2 ? parseInt(m2[1], 10) : null;
 }
 
-/** Build SOAP XML for createApplyReceipt */
-function buildSoapXml(customerTrxId, receiptId, amount, transactionDate) {
+/** Build SOAP XML for createApplyReceipt using business keys (mirrors applyReceiptController) */
+function buildSoapXml(row) {
   const esc = (s) =>
-    String(s)
+    String(s ?? '')
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
@@ -86,75 +86,32 @@ function buildSoapXml(customerTrxId, receiptId, amount, transactionDate) {
 <soapenv:Envelope
   xmlns:soapenv="${SOAP_ENV_NS}"
   xmlns:typ="${SOAP_TYPES_NS}"
-  xmlns:com="${SOAP_COM_NS}"
-  xmlns:app="${SOAP_APP_NS}">
+  xmlns:com="${SOAP_COM_NS}">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:createApplyReceipt>
       <typ:applyReceipt>
-        <com:AmountApplied>${esc(amount)}</com:AmountApplied>
-        <com:ReceiptId>${esc(receiptId)}</com:ReceiptId>
-        <com:CustomerTrxId>${esc(customerTrxId)}</com:CustomerTrxId>
-        <com:ApplicationDate>${esc(transactionDate)}</com:ApplicationDate>
-        <com:AccountingDate>${esc(transactionDate)}</com:AccountingDate>
+        <com:TransactionNumber>${esc(row.TransactionNumber)}</com:TransactionNumber>
+        <com:ReceiptNumber>${esc(row.ReceiptNumber)}</com:ReceiptNumber>
+        <com:AmountApplied>${esc(row.AmountApplied)}</com:AmountApplied>
+        <com:ReceiptCurrency>${esc(row.ReceiptCurrency)}</com:ReceiptCurrency>
+        <com:TransactionSource>${esc(row.TransactionSource)}</com:TransactionSource>
+        <com:AccountingDate>${esc(row.AccountingDate)}</com:AccountingDate>
+        <com:ApplicationDate>${esc(row.AccountingDate)}</com:ApplicationDate>
       </typ:applyReceipt>
     </typ:createApplyReceipt>
   </soapenv:Body>
 </soapenv:Envelope>`;
 }
 
-/** Look up invoice in Oracle to get CustomerTransactionId */
-async function lookupInvoice(invoiceNumber, oracleAuth) {
-  const url = process.env.ORACLE_RECEIVABLES_INVOICES_API_URL;
-  const query = `TransactionNumber=${invoiceNumber}`;
-  const response = await axios.get(`${url}?q=${encodeURIComponent(query)}`, {
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Basic ${oracleAuth}` },
-    timeout: 30000,
-  });
-  const items = response.data?.items || [];
-  if (items.length === 0) throw new Error(`Invoice '${invoiceNumber}' not found in Oracle`);
-  const raw = items[0].TransactionDate;
-  const m = raw ? String(raw).match(/^(\d{4}-\d{2}-\d{2})/) : null;
-  return {
-    customerTrxId: String(items[0].CustomerTransactionId),
-    transactionDate: m ? m[1] : null,
-  };
-}
-
-/** Look up standard receipt in Oracle to get StandardReceiptId and Amount */
-async function lookupReceipt(receiptNumber, oracleAuth) {
-  const url = process.env.ORACLE_STANDARD_RECEIPTS_LOOKUP_API_URL;
-  const query = `ReceiptNumber="${receiptNumber}"`;
-  const response = await axios.get(`${url}?q=${encodeURIComponent(query)}`, {
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Basic ${oracleAuth}` },
-    timeout: 30000,
-  });
-  const items = response.data?.items || [];
-  if (items.length === 0) throw new Error(`Receipt '${receiptNumber}' not found in Oracle`);
-  const receipt = items[0];
-  return {
-    receiptId: String(receipt.StandardReceiptId),
-    amount: String(receipt.Amount),
-    receiptDate: String(receipt.ReceiptDate),
-  };
-}
-
-/** Send apply receipt via SOAP */
-async function applyReceiptSoap(customerTrxId, receiptId, amount, transactionDate) {
-  const soapXml = buildSoapXml(customerTrxId, receiptId, amount, transactionDate);
+/** Send apply receipt via SOAP using business keys */
+async function applyReceiptSoap(row) {
+  const soapXml = buildSoapXml(row);
   const url = process.env.ORACLE_APPLY_RECEIPT_SOAP_URL;
   if (!url) throw new Error('ORACLE_APPLY_RECEIPT_SOAP_URL not configured in .env');
 
-  const oracleAuth = Buffer.from(`${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`).toString('base64');
-  const response = await axios.post(url, soapXml, {
-    headers: {
-      'Content-Type': 'text/xml; charset=utf-8',
-      SOAPAction: 'createApplyReceipt',
-      Authorization: `Basic ${oracleAuth}`,
-    },
-    timeout: 60000,
-  });
-  return response;
+  const soapClient = createOracleSoapClient(url);
+  return soapClient.callWithCustomEnvelope(soapXml, 'createApplyReceipt');
 }
 
 // ---------------------------------------------------------------------------
@@ -400,7 +357,8 @@ async function getPendingApply(req, res, next) {
 
 // ---------------------------------------------------------------------------
 // POST /api/ar-pipeline/submit-apply
-// Accepts array of { txnNumber, receiptNumber } and applies them via Oracle SOAP
+// Accepts array of { txnNumber, receiptNumber } and applies them via Oracle SOAP.
+// Uses local DB for txnSource / accountingDate / amount (no Oracle REST lookups needed).
 // ---------------------------------------------------------------------------
 async function submitApply(req, res, next) {
   try {
@@ -410,18 +368,9 @@ async function submitApply(req, res, next) {
       return res.status(400).json({ error: 'pairs must be a non-empty array.' });
     }
 
-    const missing = [
-      'ORACLE_RECEIVABLES_INVOICES_API_URL',
-      'ORACLE_STANDARD_RECEIPTS_LOOKUP_API_URL',
-      'ORACLE_APPLY_RECEIPT_SOAP_URL',
-    ].filter((v) => !process.env[v]);
-    if (missing.length > 0) {
-      return res.status(500).json({ error: `Missing env vars: ${missing.join(', ')}` });
+    if (!process.env.ORACLE_APPLY_RECEIPT_SOAP_URL) {
+      return res.status(500).json({ error: 'Missing env var: ORACLE_APPLY_RECEIPT_SOAP_URL' });
     }
-
-    const oracleAuth = Buffer.from(
-      `${process.env.ORACLE_USERNAME}:${process.env.ORACLE_PASSWORD}`
-    ).toString('base64');
 
     // Create an upload record for tracking
     const uploadRecord = await prisma.applyReceiptUpload.create({
@@ -442,6 +391,43 @@ async function submitApply(req, res, next) {
 
     // Process asynchronously (after response sent)
     setImmediate(async () => {
+      // Bulk-load invoice data (txnSource, txnDate) and receipt data (amount, currencyCode) from local DB
+      const txnNumbers    = [...new Set(pairs.map((p) => p.txnNumber).filter(Boolean))];
+      const receiptNumbers = [...new Set(pairs.map((p) => p.receiptNumber).filter(Boolean))];
+
+      const [invoiceHeaders, standardReceipts] = await Promise.all([
+        prisma.fusionInvoiceHeader.findMany({
+          where: {
+            txnNumber: { in: txnNumbers.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n)) },
+            status: { in: ['Success', 'SUCCESS'] },
+          },
+          select: { txnNumber: true, txnSource: true, txnDate: true },
+          orderBy: { createdAt: 'desc' },
+        }),
+        prisma.fusionStandardReceipt.findMany({
+          where: {
+            receiptNumber: { in: receiptNumbers },
+            status: { in: ['Success', 'SUCCESS'] },
+          },
+          select: { receiptNumber: true, amount: true, currencyCode: true },
+          orderBy: { createdAt: 'desc' },
+        }),
+      ]);
+
+      // Index by txnNumber and receiptNumber (first match wins — latest-first ordering keeps newest)
+      const invoiceByTxn = {};
+      for (const h of invoiceHeaders) {
+        if (h.txnNumber != null && !invoiceByTxn[h.txnNumber]) {
+          invoiceByTxn[h.txnNumber] = h;
+        }
+      }
+      const receiptByNum = {};
+      for (const r of standardReceipts) {
+        if (r.receiptNumber && !receiptByNum[r.receiptNumber]) {
+          receiptByNum[r.receiptNumber] = r;
+        }
+      }
+
       const limit = pLimit(CONCURRENT_REQUESTS);
       let successCount = 0;
       let failureCount = 0;
@@ -451,76 +437,114 @@ async function submitApply(req, res, next) {
         limit(async () => {
           const { txnNumber, receiptNumber } = pair;
 
-          let customerTrxId, transactionDate, receiptId, amount;
+          const inv = invoiceByTxn[parseInt(txnNumber, 10)];
+          const rec = receiptByNum[receiptNumber];
 
-          try {
-            const inv = await pRetry(() => lookupInvoice(txnNumber, oracleAuth), {
-              retries: MAX_RETRIES,
-              minTimeout: RETRY_MIN_TIMEOUT,
-              maxTimeout: RETRY_MAX_TIMEOUT,
-            });
-            customerTrxId = inv.customerTrxId;
-            transactionDate = inv.transactionDate;
-          } catch (err) {
+          if (!inv) {
             failureCount++;
             await prisma.applyReceiptFailure.create({
               data: {
-                uploadId: uploadRecord.id,
-                rowNumber: idx + 1,
+                uploadId:      uploadRecord.id,
+                rowNumber:     idx + 1,
                 invoiceNumber: String(txnNumber),
                 receiptNumber: String(receiptNumber),
-                errorMessage: err.message,
-                errorStep: 'INVOICE_LOOKUP',
+                errorMessage:  `Invoice ${txnNumber} not found in local DB`,
+                errorStep:     'INVOICE_LOOKUP',
               },
             });
-            logs.push(`FAILED Invoice lookup ${txnNumber}: ${err.message}`);
+            logs.push(`FAILED Invoice lookup ${txnNumber}: not found in DB`);
             return;
           }
 
-          try {
-            const rec = await pRetry(() => lookupReceipt(receiptNumber, oracleAuth), {
-              retries: MAX_RETRIES,
-              minTimeout: RETRY_MIN_TIMEOUT,
-              maxTimeout: RETRY_MAX_TIMEOUT,
-            });
-            receiptId = rec.receiptId;
-            amount = rec.amount;
-          } catch (err) {
+          if (!rec) {
             failureCount++;
             await prisma.applyReceiptFailure.create({
               data: {
-                uploadId: uploadRecord.id,
-                rowNumber: idx + 1,
+                uploadId:      uploadRecord.id,
+                rowNumber:     idx + 1,
                 invoiceNumber: String(txnNumber),
                 receiptNumber: String(receiptNumber),
-                errorMessage: err.message,
-                errorStep: 'RECEIPT_LOOKUP',
-                customerTrxId: customerTrxId ? String(customerTrxId) : null,
+                errorMessage:  `Receipt ${receiptNumber} not found in local DB`,
+                errorStep:     'RECEIPT_LOOKUP',
               },
             });
-            logs.push(`FAILED Receipt lookup ${receiptNumber}: ${err.message}`);
+            logs.push(`FAILED Receipt lookup ${receiptNumber}: not found in DB`);
             return;
           }
+
+          const txnSource      = inv.txnSource  || '';
+          const accountingDate = toDateString(inv.txnDate);
+          const amount         = rec.amount != null ? String(rec.amount) : '';
+          const currencyCode   = rec.currencyCode || 'SAR';
+
+          if (!txnSource || !accountingDate || !amount) {
+            failureCount++;
+            const missing = [
+              !txnSource      && 'txnSource',
+              !accountingDate && 'txnDate',
+              !amount         && 'amount',
+            ].filter(Boolean).join(', ');
+            await prisma.applyReceiptFailure.create({
+              data: {
+                uploadId:      uploadRecord.id,
+                rowNumber:     idx + 1,
+                invoiceNumber: String(txnNumber),
+                receiptNumber: String(receiptNumber),
+                errorMessage:  `Missing required fields: ${missing}`,
+                errorStep:     'INVOICE_LOOKUP',
+              },
+            });
+            logs.push(`FAILED Invoice ${txnNumber}: missing ${missing}`);
+            return;
+          }
+
+          const row = {
+            TransactionNumber: String(txnNumber),
+            ReceiptNumber:     receiptNumber,
+            AmountApplied:     amount,
+            ReceiptCurrency:   currencyCode,
+            TransactionSource: txnSource,
+            AccountingDate:    accountingDate,
+          };
 
           try {
             await pRetry(
-              () => applyReceiptSoap(customerTrxId, receiptId, amount, transactionDate),
+              () => applyReceiptSoap(row),
               { retries: MAX_RETRIES, minTimeout: RETRY_MIN_TIMEOUT, maxTimeout: RETRY_MAX_TIMEOUT }
             );
             successCount++;
+
+            // Store in FusionApplyReceipt so this pair is excluded from future pending-apply queries
+            await prisma.fusionApplyReceipt.create({
+              data: {
+                requestId:       uploadRecord.id,
+                status:          'SUCCESS',
+                message:         'Applied via pipeline',
+                requestDate:     new Date(),
+                accountingDate:  new Date(`${accountingDate}T00:00:00.000Z`),
+                applicationDate: new Date(`${accountingDate}T00:00:00.000Z`),
+                txnNumber:       String(txnNumber),
+                receiptNumber:   receiptNumber,
+                amountApplied:   rec.amount ?? null,
+                currencyCode:    currencyCode,
+                txnSource:       txnSource,
+                region:          'SA',
+              },
+            }).catch((storeErr) => {
+              console.error(`[Pipeline] Failed to store FusionApplyReceipt for ${txnNumber}←${receiptNumber}: ${storeErr.message}`);
+            });
+
             logs.push(`SUCCESS Apply ${txnNumber} ← ${receiptNumber}`);
           } catch (err) {
             failureCount++;
             await prisma.applyReceiptFailure.create({
               data: {
-                uploadId: uploadRecord.id,
-                rowNumber: idx + 1,
+                uploadId:      uploadRecord.id,
+                rowNumber:     idx + 1,
                 invoiceNumber: String(txnNumber),
                 receiptNumber: String(receiptNumber),
-                errorMessage: err.message,
-                errorStep: 'APPLY_RECEIPT',
-                customerTrxId: customerTrxId ? String(customerTrxId) : null,
-                receiptId: receiptId ? String(receiptId) : null,
+                errorMessage:  err.message,
+                errorStep:     'APPLY_RECEIPT',
               },
             });
             logs.push(`FAILED Apply ${txnNumber} ← ${receiptNumber}: ${err.message}`);
@@ -538,9 +562,9 @@ async function submitApply(req, res, next) {
         data: {
           successCount,
           failureCount,
-          status: finalStatus,
+          status:          finalStatus,
           responseMessage: `${successCount} succeeded, ${failureCount} failed out of ${pairs.length}.`,
-          responseLog: logs.join('\n'),
+          responseLog:     logs.join('\n'),
         },
       });
     });
