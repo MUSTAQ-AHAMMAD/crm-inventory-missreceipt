@@ -129,11 +129,11 @@ function parseNum(row, aliases, def = 0) {
 function normalizeDate(raw) {
   if (!raw) return null;
   if (raw instanceof Date) {
-    // xlsx creates Date objects using local time, so read them back with local methods
-    // to preserve the exact date shown in the Excel sheet without any timezone shift.
-    const y = raw.getFullYear();
-    const m = String(raw.getMonth() + 1).padStart(2, '0');
-    const d = String(raw.getDate()).padStart(2, '0');
+    // Use UTC methods to match how vendInvoiceController reads dates, avoiding
+    // any local-timezone shift that would cause a 1-day offset.
+    const y = raw.getUTCFullYear();
+    const m = String(raw.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(raw.getUTCDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
   }
   const s = String(raw).trim();
@@ -146,7 +146,9 @@ function normalizeDate(raw) {
   if (dmySlash) return `${dmySlash[3]}-${dmySlash[2]}-${dmySlash[1]}`;
   if (/^\d+(\.\d+)?$/.test(s)) {
     const serial = parseFloat(s);
-    const epoch = new Date(Date.UTC(1899, 11, 30));
+    // Use epoch = Dec 31, 1899 (matching vendInvoiceController) so that Excel serial
+    // numbers resolve to the same date in both controllers. Dec 30 epoch was 1 day off.
+    const epoch = new Date(Date.UTC(1899, 11, 31));
     const adj = serial > 60 ? serial - 1 : serial;
     const d = new Date(epoch.getTime() + adj * 86400000);
     const y = d.getUTCFullYear();
