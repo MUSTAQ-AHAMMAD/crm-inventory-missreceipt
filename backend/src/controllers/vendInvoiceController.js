@@ -104,9 +104,9 @@ function normalizeDate(raw, fieldName) {
 
   // If it's a Date object from Excel
   if (raw instanceof Date) {
-    const year = raw.getFullYear();
-    const month = String(raw.getMonth() + 1).padStart(2, '0');
-    const day = String(raw.getDate()).padStart(2, '0');
+    const year = raw.getUTCFullYear();
+    const month = String(raw.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(raw.getUTCDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
   }
 
