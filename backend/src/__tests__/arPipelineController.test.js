@@ -6,6 +6,7 @@
  *  - getInvoiceBatchProgress: valid, not-found, invalid id, access control
  *  - getSummary: result limits applied to prevent memory exhaustion on large datasets
  *  - getPendingApply: result limits, pair matching, already-applied exclusion
+ *  - submitApply: date fallback from receipt when invoice txnDate/glDate are null
  *  - listInvoices: pagination
  */
 
@@ -19,6 +20,13 @@ jest.mock('../services/prisma', () => ({
     create: jest.fn(),
     update: jest.fn(),
     findMany: jest.fn().mockResolvedValue([]),
+  },
+  applyReceiptUpload: {
+    create: jest.fn(),
+    update: jest.fn(),
+  },
+  applyReceiptFailure: {
+    create: jest.fn(),
   },
   fusionInvoiceHeader: {
     findMany: jest.fn(),
@@ -38,7 +46,14 @@ jest.mock('../services/prisma', () => ({
   },
   fusionApplyReceipt: {
     findMany: jest.fn(),
+    create: jest.fn(),
   },
+}));
+
+jest.mock('../services/OracleSoapClient', () => ({
+  createOracleSoapClient: jest.fn(() => ({
+    callWithCustomEnvelope: jest.fn().mockResolvedValue({ status: 'SUCCESS' }),
+  })),
 }));
 
 jest.mock('axios');
@@ -53,6 +68,7 @@ const {
   getInvoiceBatchProgress,
   getSummary,
   getPendingApply,
+  submitApply,
   listInvoices,
   listStandardReceipts,
   listMiscReceipts,
@@ -496,6 +512,109 @@ describe('AR Pipeline Controller', () => {
       expect(res.status).toBe(200);
       expect(res.body.pendingPairs).toHaveLength(1);
       expect(res.body.pendingPairs[0].receiptNumber).toBe('Visa-12345');
+    });
+  });
+
+  // ── submitApply ────────────────────────────────────────────────────────────
+
+  describe('POST /submit-apply (submitApply)', () => {
+    let app;
+    const { createOracleSoapClient } = require('../services/OracleSoapClient');
+
+    beforeAll(() => {
+      app = express();
+      app.use(express.json());
+      app.use((req, _res, next) => { req.user = { id: 1, role: 'ADMIN' }; next(); });
+      app.post('/', submitApply);
+      app.use((err, _req, res, _next) => res.status(500).json({ error: err.message }));
+    });
+
+    beforeEach(() => {
+      process.env.ORACLE_APPLY_RECEIPT_SOAP_URL = 'http://oracle-test/soap';
+      prisma.applyReceiptUpload.create.mockResolvedValue({ id: 77 });
+      prisma.applyReceiptUpload.update.mockResolvedValue({});
+      prisma.fusionApplyReceipt.create.mockResolvedValue({});
+      prisma.applyReceiptFailure.create.mockResolvedValue({});
+      createOracleSoapClient.mockReturnValue({
+        callWithCustomEnvelope: jest.fn().mockResolvedValue({ status: 'SUCCESS' }),
+      });
+    });
+
+    afterEach(() => {
+      delete process.env.ORACLE_APPLY_RECEIPT_SOAP_URL;
+    });
+
+    test('succeeds using receipt receiptDate when invoice txnDate and glDate are null', async () => {
+      // Invoice exists but has no txnDate or glDate
+      prisma.fusionInvoiceHeader.findMany.mockResolvedValueOnce([
+        {
+          txnNumber: 2671614,
+          txnSource: 'VEND',
+          txnDate: null,
+          glDate: null,
+        },
+      ]);
+      // Receipt has a receiptDate that should be used as AccountingDate
+      prisma.fusionStandardReceipt.findMany.mockResolvedValueOnce([
+        {
+          receiptNumber: 'Mada-2671614',
+          amount: 422,
+          currencyCode: 'SAR',
+          receiptDate: new Date('2026-06-01'),
+          glDate: null,
+        },
+      ]);
+
+      const res = await request(app)
+        .post('/')
+        .send({ pairs: [{ txnNumber: 2671614, receiptNumber: 'Mada-2671614' }] });
+
+      expect(res.status).toBe(200);
+      expect(res.body.uploadId).toBe(77);
+
+      // Let the setImmediate background processing run and all async chains settle
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Should NOT have logged a failure for missing txnDate
+      const failCalls = prisma.applyReceiptFailure.create.mock.calls;
+      expect(failCalls).toHaveLength(0);
+
+      // Upload should be updated with 1 success
+      const updateCall = prisma.applyReceiptUpload.update.mock.calls[0][0];
+      expect(updateCall.data.successCount).toBe(1);
+      expect(updateCall.data.failureCount).toBe(0);
+
+      // The SOAP call should have been made with AccountingDate from the receipt
+      const soapInstance = createOracleSoapClient.mock.results[0].value;
+      const soapArg = soapInstance.callWithCustomEnvelope.mock.calls[0][0];
+      expect(soapArg).toContain('<com:AccountingDate>2026-06-01</com:AccountingDate>');
+    });
+
+    test('fails with missing txnDate error when both invoice and receipt have no date', async () => {
+      prisma.fusionInvoiceHeader.findMany.mockResolvedValueOnce([
+        { txnNumber: 2671614, txnSource: 'VEND', txnDate: null, glDate: null },
+      ]);
+      prisma.fusionStandardReceipt.findMany.mockResolvedValueOnce([
+        {
+          receiptNumber: 'Mada-2671614',
+          amount: 422,
+          currencyCode: 'SAR',
+          receiptDate: null,
+          glDate: null,
+        },
+      ]);
+
+      const res = await request(app)
+        .post('/')
+        .send({ pairs: [{ txnNumber: 2671614, receiptNumber: 'Mada-2671614' }] });
+
+      expect(res.status).toBe(200);
+
+      await new Promise((r) => setTimeout(r, 50));
+
+      const failCalls = prisma.applyReceiptFailure.create.mock.calls;
+      expect(failCalls).toHaveLength(1);
+      expect(failCalls[0][0].data.errorMessage).toMatch(/txnDate/);
     });
   });
 
