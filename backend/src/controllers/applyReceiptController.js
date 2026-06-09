@@ -23,6 +23,7 @@ const REQUIRED_FIELDS = [
   'ReceiptCurrency',
   'TransactionSource',
   'AccountingDate',
+  'TxnDate',
 ];
 
 // Configuration for parallel processing and retries
@@ -148,6 +149,7 @@ function normalizeRow(row) {
     ReceiptCurrency:   String(row.ReceiptCurrency   ?? '').trim().toUpperCase(),
     TransactionSource: String(row.TransactionSource ?? '').trim(),
     AccountingDate:    normalizeDate(row.AccountingDate, 'AccountingDate'),
+    TxnDate:           normalizeDate(row.TxnDate, 'TxnDate'),
   };
 }
 
@@ -159,12 +161,13 @@ function normalizeRow(row) {
  *   - AmountApplied      → amount to apply
  *   - ReceiptCurrency    → ISO currency code
  *   - TransactionSource  → transaction source used on the invoice
+ *   - TxnDate            → invoice transaction date (taken from uploaded file)
  *   - AccountingDate     → accounting date (also used as ApplicationDate)
  *   - ApplicationDate    → application date (same value as AccountingDate)
  */
 function buildApplyReceiptXml(row) {
   if (!row.TransactionNumber || !row.ReceiptNumber || !row.AmountApplied ||
-      !row.ReceiptCurrency   || !row.TransactionSource || !row.AccountingDate) {
+      !row.ReceiptCurrency   || !row.TransactionSource || !row.AccountingDate || !row.TxnDate) {
     throw new Error('Missing required fields for createApplyReceipt SOAP call');
   }
 
@@ -182,6 +185,7 @@ function buildApplyReceiptXml(row) {
         <com:AmountApplied>${escapeXml(row.AmountApplied)}</com:AmountApplied>
         <com:ReceiptCurrency>${escapeXml(row.ReceiptCurrency)}</com:ReceiptCurrency>
         <com:TransactionSource>${escapeXml(row.TransactionSource)}</com:TransactionSource>
+        <com:TxnDate>${escapeXml(row.TxnDate)}</com:TxnDate>
         <com:AccountingDate>${escapeXml(row.AccountingDate)}</com:AccountingDate>
         <com:ApplicationDate>${escapeXml(row.AccountingDate)}</com:ApplicationDate>
       </typ:applyReceipt>
@@ -308,6 +312,7 @@ async function verifyPayload(req, res, next) {
       amountApplied: row.AmountApplied,
       receiptCurrency: row.ReceiptCurrency,
       transactionSource: row.TransactionSource,
+      txnDate: row.TxnDate,
       accountingDate: row.AccountingDate,
       soapPayload: buildApplyReceiptXml(row),
     }));
@@ -608,8 +613,8 @@ async function getUploadProgress(req, res, next) {
  */
 function downloadTemplate(_req, res) {
   const header = REQUIRED_FIELDS.join(',');
-  const sample = 'BLK-ALAR-00000008,mada-12244,5000.00,SAR,Manual,2024-01-20';
-  const sample2 = 'BLK-ALAR-00000009,visa-12245,3500.50,SAR,Manual,2024-01-21';
+  const sample = 'BLK-ALAR-00000008,mada-12244,5000.00,SAR,Manual,2024-01-20,2024-01-15';
+  const sample2 = 'BLK-ALAR-00000009,visa-12245,3500.50,SAR,Manual,2024-01-21,2024-01-16';
 
   const BOM = '\uFEFF';
   const csv = `${BOM}${header}\n${sample}\n${sample2}\n`;
