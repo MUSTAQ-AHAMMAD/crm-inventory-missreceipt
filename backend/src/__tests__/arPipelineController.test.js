@@ -54,8 +54,11 @@ jest.mock('../services/OracleSoapClient', () => ({
   createOracleSoapClient: jest.fn(),
 }));
 
+jest.mock('axios');
+
 const request = require('supertest');
 const express = require('express');
+const axios = require('axios');
 const prisma = require('../services/prisma');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
@@ -111,9 +114,9 @@ describe('AR Pipeline Controller', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    process.env.ORACLE_AR_INVOICE_SOAP_URL = 'http://oracle.example.com/ar-invoice-soap';
-    process.env.ORACLE_USERNAME            = 'testuser';
-    process.env.ORACLE_PASSWORD            = 'testpass';
+    process.env.ORACLE_AR_INVOICE_URL = 'http://oracle.example.com/ar-invoice-rest';
+    process.env.ORACLE_USERNAME       = 'testuser';
+    process.env.ORACLE_PASSWORD       = 'testpass';
 
     // Default empty responses for summary/pending endpoints
     prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
@@ -128,12 +131,16 @@ describe('AR Pipeline Controller', () => {
     prisma.fusionInvoiceHeader.create.mockResolvedValue({ id: 1 });
     prisma.fusionInvoiceLine.createMany.mockResolvedValue({ count: 1 });
 
-    // Default SOAP client mock — tests can override per-call behaviour
-    const mockCall = jest.fn().mockResolvedValue({
+    // Default REST (axios) mock for AR Invoice batch creation — tests can override per-call behaviour
+    axios.post.mockResolvedValue({
       status: 200,
-      data: '<result><TransactionNumber>100001</TransactionNumber><CustomerTrxId>9999</CustomerTrxId></result>',
+      data: { TransactionNumber: '100001', CustomerTrxId: '9999' },
     });
-    createOracleSoapClient.mockReturnValue({ callWithCustomEnvelope: mockCall });
+
+    // Default SOAP client mock — used by submitApply; tests can override per-call behaviour
+    createOracleSoapClient.mockReturnValue({
+      callWithCustomEnvelope: jest.fn().mockResolvedValue({ status: 200, data: '' }),
+    });
   });
 
   afterAll(() => {
@@ -163,11 +170,11 @@ describe('AR Pipeline Controller', () => {
       expect(res.status).toBe(400);
     });
 
-    test('returns 500 when ORACLE_AR_INVOICE_SOAP_URL is not configured', async () => {
-      delete process.env.ORACLE_AR_INVOICE_SOAP_URL;
+    test('returns 500 when ORACLE_AR_INVOICE_URL is not configured', async () => {
+      delete process.env.ORACLE_AR_INVOICE_URL;
       const res = await request(app).post('/').send({ payloads: [samplePayload] });
       expect(res.status).toBe(500);
-      expect(res.body.error).toMatch(/ORACLE_AR_INVOICE_SOAP_URL/);
+      expect(res.body.error).toMatch(/ORACLE_AR_INVOICE_URL/);
     });
 
     test('returns 500 when Oracle credentials are missing', async () => {
@@ -180,8 +187,7 @@ describe('AR Pipeline Controller', () => {
     test('responds immediately with batchId without blocking on Oracle calls', async () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42, totalRecords: 1 });
       // Oracle never resolves → confirms we don't wait for it
-      const neverResolves = jest.fn().mockImplementation(() => new Promise(() => {}));
-      createOracleSoapClient.mockReturnValue({ callWithCustomEnvelope: neverResolves });
+      axios.post.mockImplementation(() => new Promise(() => {}));
 
       const start = Date.now();
       const res = await request(app).post('/').send({ payloads: [samplePayload] });
@@ -197,8 +203,7 @@ describe('AR Pipeline Controller', () => {
 
     test('creates ArInvoiceBatch record with correct totalRecords', async () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42, totalRecords: 2 });
-      const neverResolves = jest.fn().mockImplementation(() => new Promise(() => {}));
-      createOracleSoapClient.mockReturnValue({ callWithCustomEnvelope: neverResolves });
+      axios.post.mockImplementation(() => new Promise(() => {}));
 
       const payloads = [samplePayload, { ...samplePayload, BillToCustomerName: 'JEDDAH STORE' }];
       await request(app).post('/').send({ payloads });
@@ -218,12 +223,6 @@ describe('AR Pipeline Controller', () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42 });
       prisma.arInvoiceBatch.update.mockResolvedValue({});
 
-      const mockCall = jest.fn().mockResolvedValue({
-        status: 200,
-        data: '<result><TransactionNumber>100001</TransactionNumber><CustomerTrxId>9999</CustomerTrxId></result>',
-      });
-      createOracleSoapClient.mockReturnValue({ callWithCustomEnvelope: mockCall });
-
       await request(app).post('/').send({ payloads: [samplePayload] });
       await new Promise((r) => setImmediate(r));
       await new Promise((r) => setTimeout(r, 150));
@@ -240,12 +239,6 @@ describe('AR Pipeline Controller', () => {
     test('stores Oracle offset timestamps as UTC-midnight dates', async () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42 });
       prisma.arInvoiceBatch.update.mockResolvedValue({});
-
-      const mockCall = jest.fn().mockResolvedValue({
-        status: 200,
-        data: '<result><TransactionNumber>100001</TransactionNumber><CustomerTrxId>9999</CustomerTrxId></result>',
-      });
-      createOracleSoapClient.mockReturnValue({ callWithCustomEnvelope: mockCall });
 
       const payload = {
         ...samplePayload,
@@ -267,12 +260,6 @@ describe('AR Pipeline Controller', () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42 });
       prisma.arInvoiceBatch.update.mockResolvedValue({});
 
-      const mockCall = jest.fn().mockResolvedValue({
-        status: 200,
-        data: '<result><TransactionNumber>100001</TransactionNumber><CustomerTrxId>9999</CustomerTrxId></result>',
-      });
-      createOracleSoapClient.mockReturnValue({ callWithCustomEnvelope: mockCall });
-
       await request(app).post('/').send({ payloads: [samplePayload] });
       await new Promise((r) => setImmediate(r));
       await new Promise((r) => setTimeout(r, 150));
@@ -284,12 +271,11 @@ describe('AR Pipeline Controller', () => {
       );
     });
 
-    test('background: marks batch FAILED when Oracle SOAP throws', async () => {
+    test('background: marks batch FAILED when Oracle REST throws', async () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42 });
       prisma.arInvoiceBatch.update.mockResolvedValue({});
 
-      const mockCall = jest.fn().mockRejectedValue(new Error('SOAP Fault: invalid invoice'));
-      createOracleSoapClient.mockReturnValue({ callWithCustomEnvelope: mockCall });
+      axios.post.mockRejectedValue(new Error('Connection refused'));
 
       await request(app).post('/').send({ payloads: [samplePayload] });
       await new Promise((r) => setImmediate(r));
@@ -306,13 +292,9 @@ describe('AR Pipeline Controller', () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42, totalRecords: 2 });
       prisma.arInvoiceBatch.update.mockResolvedValue({});
 
-      const mockCall = jest.fn()
-        .mockResolvedValueOnce({
-          status: 200,
-          data: '<result><TransactionNumber>100001</TransactionNumber><CustomerTrxId>9999</CustomerTrxId></result>',
-        })
-        .mockRejectedValueOnce(new Error('SOAP Fault: bad invoice'));
-      createOracleSoapClient.mockReturnValue({ callWithCustomEnvelope: mockCall });
+      axios.post
+        .mockResolvedValueOnce({ status: 200, data: { TransactionNumber: '100001', CustomerTrxId: '9999' } })
+        .mockRejectedValueOnce(new Error('bad invoice'));
 
       const payloads = [samplePayload, { ...samplePayload, BillToCustomerName: 'OTHER' }];
       await request(app).post('/').send({ payloads });
@@ -330,22 +312,18 @@ describe('AR Pipeline Controller', () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42 });
       prisma.arInvoiceBatch.update.mockResolvedValue({});
 
-      const mockCall = jest.fn()
+      axios.post
         // Pass 1: timeout
-        .mockRejectedValueOnce(new Error('Request timeout after 120000ms'))
+        .mockRejectedValueOnce(Object.assign(new Error('Request timeout after 120000ms'), { code: 'ETIMEDOUT' }))
         // Pass 2: success
-        .mockResolvedValueOnce({
-          status: 200,
-          data: '<result><TransactionNumber>100001</TransactionNumber><CustomerTrxId>9999</CustomerTrxId></result>',
-        });
-      createOracleSoapClient.mockReturnValue({ callWithCustomEnvelope: mockCall });
+        .mockResolvedValueOnce({ status: 200, data: { TransactionNumber: '100001', CustomerTrxId: '9999' } });
 
       await request(app).post('/').send({ payloads: [samplePayload] });
       await new Promise((r) => setImmediate(r));
       await new Promise((r) => setTimeout(r, 300));
 
       // Should have been called twice (pass 1 + retry)
-      expect(mockCall).toHaveBeenCalledTimes(2);
+      expect(axios.post).toHaveBeenCalledTimes(2);
       expect(prisma.arInvoiceBatch.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ status: 'SUCCESS', successCount: 1, failureCount: 0 }),
@@ -357,16 +335,14 @@ describe('AR Pipeline Controller', () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42 });
       prisma.arInvoiceBatch.update.mockResolvedValue({});
 
-      const mockCall = jest.fn()
-        .mockRejectedValue(new Error('SOAP Fault: ORA-00001 duplicate key'));
-      createOracleSoapClient.mockReturnValue({ callWithCustomEnvelope: mockCall });
+      axios.post.mockRejectedValue(new Error('ORA-00001 duplicate key'));
 
       await request(app).post('/').send({ payloads: [samplePayload] });
       await new Promise((r) => setImmediate(r));
       await new Promise((r) => setTimeout(r, 200));
 
       // Called exactly once — no retry for business errors
-      expect(mockCall).toHaveBeenCalledTimes(1);
+      expect(axios.post).toHaveBeenCalledTimes(1);
       expect(prisma.arInvoiceBatch.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ status: 'FAILED', successCount: 0, failureCount: 1 }),

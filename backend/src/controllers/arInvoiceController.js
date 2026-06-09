@@ -1,45 +1,17 @@
 /**
- * AR Invoice controller - Handles Oracle Fusion AR Invoice creation via SOAP
- * Sends SOAP envelope to Oracle's RecInvoiceService (createSimpleInvoice operation),
- * matching Java FusionInvoiceClient / FusionInvoiceTransform.
+ * AR Invoice controller - Handles Oracle Fusion AR Invoice creation via REST API
+ * Sends JSON payload to Oracle's receivablesInvoices REST resource,
+ * matching the Oracle Fusion Receivables Invoice REST API.
  */
 
+const axios = require('axios');
 const prisma = require('../services/prisma');
 const fusionMetadataService = require('../services/fusionSalesMetadataService');
-const { createOracleSoapClient } = require('../services/OracleSoapClient');
-const { buildArInvoiceSoapEnvelope, AR_INVOICE_SOAP_ACTION } = require('../services/soapEnvelopeBuilder');
-
-/**
- * Parses key fields from the Oracle createSimpleInvoice SOAP response XML.
- * Returns { TransactionNumber, CustomerTrxId, ServiceStatus } or null values
- * if the XML cannot be parsed or is empty.
- *
- * Oracle's RecInvoiceService uses two naming conventions in responses:
- *   • TransactionNumber – used by some Oracle versions / response wrappers
- *   • TrxNumber         – used by RecInvoiceService (mirrors the TrxDate request field)
- * We try TransactionNumber first, then fall back to TrxNumber so both are handled.
- */
-function parseSoapInvoiceResponse(xml) {
-  if (!xml) return { TransactionNumber: null, CustomerTrxId: null, ServiceStatus: null };
-  const extract = (pattern) => {
-    const m = xml.match(pattern)?.[1]?.trim();
-    return m || null;
-  };
-  // Try TransactionNumber first; fall back to TrxNumber (Oracle RecInvoiceService convention)
-  const transactionNumber =
-    extract(/<[^>]*TransactionNumber[^>]*>([\s\S]*?)<\/[^>]*TransactionNumber>/i) ??
-    extract(/<[^>]*TrxNumber[^>]*>([\s\S]*?)<\/[^>]*TrxNumber>/i);
-  return {
-    TransactionNumber: transactionNumber,
-    CustomerTrxId:     extract(/<[^>]*CustomerTrxId[^>]*>([\s\S]*?)<\/[^>]*CustomerTrxId>/i),
-    ServiceStatus:     extract(/<[^>]*ServiceStatus[^>]*>([\s\S]*?)<\/[^>]*ServiceStatus>/i),
-  };
-}
 
 /**
  * POST /api/ar-invoice/preview
  * Validates and previews an AR Invoice payload without sending to Oracle.
- * Returns the complete payload plus the SOAP XML that would be sent.
+ * Returns the complete validated payload and the REST endpoint that would be used.
  */
 async function previewPayload(req, res, next) {
   try {
@@ -114,10 +86,9 @@ async function previewPayload(req, res, next) {
     // Return validated payload
     return res.json({
       valid: true,
-      message: 'Payload is valid and ready to send to Oracle via SOAP',
+      message: 'Payload is valid and ready to send to Oracle via REST',
       payload,
-      soapXml: buildArInvoiceSoapEnvelope(payload),
-      soapEndpoint: process.env.ORACLE_AR_INVOICE_SOAP_URL || '(ORACLE_AR_INVOICE_SOAP_URL not set)',
+      restEndpoint: process.env.ORACLE_AR_INVOICE_URL || '(ORACLE_AR_INVOICE_URL not set)',
     });
 
   } catch (err) {
@@ -313,19 +284,24 @@ async function createInvoice(req, res, next) {
       }
     }
 
-    // Get Oracle SOAP endpoint
-    const soapEndpoint = process.env.ORACLE_AR_INVOICE_SOAP_URL;
-    if (!soapEndpoint) {
+    // Get Oracle REST endpoint
+    const restEndpoint = process.env.ORACLE_AR_INVOICE_URL;
+    if (!restEndpoint) {
       return res.status(500).json({
-        error: 'Oracle AR Invoice SOAP URL not configured. Check ORACLE_AR_INVOICE_SOAP_URL in .env'
+        error: 'Oracle AR Invoice REST URL not configured. Check ORACLE_AR_INVOICE_URL in .env'
+      });
+    }
+
+    const username = process.env.ORACLE_USERNAME;
+    const password = process.env.ORACLE_PASSWORD;
+    if (!username || !password) {
+      return res.status(500).json({
+        error: 'Oracle credentials not configured. Check ORACLE_USERNAME and ORACLE_PASSWORD in .env'
       });
     }
 
     console.log(`\n[AR Invoice] Creating invoice for customer ${payload.BillToCustomerName}`);
-    console.log(`[AR Invoice] SOAP Endpoint: ${soapEndpoint}`);
-
-    // Build SOAP XML
-    const soapXml = buildArInvoiceSoapEnvelope(payload);
+    console.log(`[AR Invoice] REST Endpoint: ${restEndpoint}`);
 
     // Create upload record
     const uploadRecord = await prisma.arInvoiceUpload.create({
@@ -342,30 +318,44 @@ async function createInvoice(req, res, next) {
     let httpStatus = null;
     let oracleData = null;
 
+    const oracleAuth = Buffer.from(`${username}:${password}`).toString('base64');
+    const invoiceTimeout = parseInt(process.env.ORACLE_SOAP_TIMEOUT) || 120000;
+
     try {
-      // Send SOAP request to Oracle RecInvoiceService (createSimpleInvoice)
-      const soapClient = createOracleSoapClient(soapEndpoint);
-      const response = await soapClient.callWithCustomEnvelope(soapXml, AR_INVOICE_SOAP_ACTION);
+      const response = await axios.post(restEndpoint, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          Authorization: `Basic ${oracleAuth}`,
+        },
+        timeout: invoiceTimeout,
+        validateStatus: () => true,
+      });
 
       httpStatus = response.status;
-      responseBody = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
+      oracleData = response.data;
+      responseBody = JSON.stringify(oracleData);
 
-      // Parse key fields from the SOAP XML response
-      oracleData = parseSoapInvoiceResponse(responseBody);
+      if (response.status >= 400) {
+        responseStatus = 'FAILED';
+        responseMessage = `Oracle returned HTTP ${httpStatus}`;
+      } else if (oracleData?.ServiceStatus === 'E') {
+        responseStatus = 'FAILED';
+        responseMessage = 'Oracle returned ServiceStatus=E (business validation error)';
+      }
 
       console.log(`✅ [AR Invoice] Success - HTTP ${httpStatus}`);
-      console.log(`TransactionNumber: ${oracleData.TransactionNumber}, CustomerTrxId: ${oracleData.CustomerTrxId}`);
+      console.log(`TransactionNumber: ${oracleData?.TransactionNumber}, CustomerTrxId: ${oracleData?.CustomerTrxId}`);
 
     } catch (error) {
       responseStatus = 'FAILED';
       httpStatus = error.response?.status || null;
-      responseBody = error.response?.data ?? error.message;
+      responseBody = error.response?.data ? JSON.stringify(error.response.data) : error.message;
       oracleData = null;
       responseMessage = `Failed to create invoice: ${error.message}`;
 
       console.error(`❌ [AR Invoice] Failed - HTTP ${httpStatus}`);
       console.error(`Error: ${error.message}`);
-      console.error(`Response: ${String(responseBody).substring(0, 500)}`);
     }
 
     // Update upload record with response
@@ -643,5 +633,4 @@ module.exports = {
   listResponseHeaders,
   getResponseHeader,
   listResponseLines,
-  parseSoapInvoiceResponse,
 };
