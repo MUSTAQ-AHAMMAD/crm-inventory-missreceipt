@@ -748,6 +748,10 @@ export default function ArPipelinePage() {
     error: '',
   })
 
+  // ── Inline txnNumber editing state (for invoices where Oracle did not return it) ──
+  // { [index]: { editing: bool, value: string, saving: bool, error: string } }
+  const [txnEdits, setTxnEdits] = useState({})
+
   // ─── Summary from DB (counts only) ────────────────────────────────────────
   const { data: summaryData, refetch: refetchSummary } = useQuery({
     queryKey: ['arPipelineSummaryFull'],
@@ -1161,12 +1165,81 @@ export default function ArPipelinePage() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-100">
-                        {s1.createResults.invoiceResults.map((r) => (
+                        {s1.createResults.invoiceResults.map((r) => {
+                          const edit = txnEdits[r.index] || {}
+                          const isMissingTxn = r.status === 'SUCCESS' && !r.txnNumber && r.headerId
+                          return (
                           <tr key={r.index} className={`hover:bg-gray-50 ${r.status === 'FAILED' ? 'bg-red-50' : ''}`}>
                             <td className="px-3 py-2 text-gray-400">{r.index + 1}</td>
                             <td className="px-3 py-2 font-medium text-gray-800 max-w-[180px] truncate">{r.customerName || '—'}</td>
                             <td className="px-3 py-2 text-gray-500">{r.date || '—'}</td>
-                            <td className="px-3 py-2 font-mono font-semibold text-blue-700">{r.txnNumber || '—'}</td>
+                            <td className="px-3 py-2 font-mono font-semibold text-blue-700">
+                              {r.txnNumber ? r.txnNumber : isMissingTxn ? (
+                                edit.editing ? (
+                                  <span className="flex items-center gap-1">
+                                    <input
+                                      type="text"
+                                      inputMode="numeric"
+                                      pattern="[0-9]+"
+                                      className="w-24 border border-gray-300 rounded px-1 py-0.5 text-xs font-mono"
+                                      value={edit.value ?? ''}
+                                      onChange={(e) => {
+                                        const val = e.target.value.replace(/[^0-9]/g, '');
+                                        setTxnEdits(prev => ({ ...prev, [r.index]: { ...prev[r.index], value: val, error: '' } }));
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Escape') setTxnEdits(prev => ({ ...prev, [r.index]: { editing: false } }))
+                                      }}
+                                      disabled={edit.saving}
+                                      autoFocus
+                                    />
+                                    <button
+                                      className="px-1.5 py-0.5 bg-blue-600 text-white rounded text-xs disabled:opacity-50"
+                                      disabled={edit.saving || !edit.value}
+                                      onClick={async () => {
+                                        const val = parseInt(edit.value, 10)
+                                        if (!val || val <= 0) {
+                                          setTxnEdits(prev => ({ ...prev, [r.index]: { ...prev[r.index], error: 'Enter a positive integer' } }))
+                                          return
+                                        }
+                                        setTxnEdits(prev => ({ ...prev, [r.index]: { ...prev[r.index], saving: true, error: '' } }))
+                                        try {
+                                          await api.patch(`/ar-pipeline/invoices/${r.headerId}/txn-number`, { txnNumber: val })
+                                          // Update the invoice result in s1 state
+                                          setS1(prev => ({
+                                            ...prev,
+                                            createResults: {
+                                              ...prev.createResults,
+                                              invoiceResults: prev.createResults.invoiceResults.map(inv =>
+                                                inv.index === r.index ? { ...inv, txnNumber: String(val) } : inv
+                                              ),
+                                            },
+                                          }))
+                                          setTxnEdits(prev => ({ ...prev, [r.index]: { editing: false } }))
+                                        } catch (err) {
+                                          const msg = err?.response?.data?.error || err.message || 'Save failed'
+                                          setTxnEdits(prev => ({ ...prev, [r.index]: { ...prev[r.index], saving: false, error: msg } }))
+                                        }
+                                      }}
+                                    >{edit.saving ? '…' : '✓'}</button>
+                                    <button
+                                      className="px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded text-xs"
+                                      onClick={() => setTxnEdits(prev => ({ ...prev, [r.index]: { editing: false } }))}
+                                      disabled={edit.saving}
+                                    >✕</button>
+                                    {edit.error && <span className="text-red-600 ml-1">{edit.error}</span>}
+                                  </span>
+                                ) : (
+                                  <button
+                                    className="text-orange-600 hover:underline text-xs font-normal"
+                                    title="Oracle did not return a transaction number. Click to enter it manually."
+                                    onClick={() => setTxnEdits(prev => ({ ...prev, [r.index]: { editing: true, value: '', error: '' } }))}
+                                  >
+                                    ⚠ Set Txn #
+                                  </button>
+                                )
+                              ) : '—'}
+                            </td>
                             <td className="px-3 py-2">
                               <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
                                 r.status === 'SUCCESS' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
@@ -1184,7 +1257,8 @@ export default function ArPipelinePage() {
                               ) : '—'}
                             </td>
                           </tr>
-                        ))}
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>

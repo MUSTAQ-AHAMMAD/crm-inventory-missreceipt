@@ -16,6 +16,7 @@ const {
   listMiscReceipts,
   createInvoiceBatch,
   getInvoiceBatchProgress,
+  setInvoiceTxnNumber,
 } = require('../controllers/arPipelineController');
 
 const router = express.Router();
@@ -36,6 +37,9 @@ router.post('/create-invoice-batch', createInvoiceBatch);
 
 // Poll for batch progress
 router.get('/invoice-batch/:batchId/progress', getInvoiceBatchProgress);
+
+// Manually set txnNumber for an invoice where Oracle did not return it
+router.patch('/invoices/:headerId/txn-number', setInvoiceTxnNumber);
 
 // Individual step data lists
 router.get('/invoices', listInvoices);
