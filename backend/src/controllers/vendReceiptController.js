@@ -672,6 +672,9 @@ async function generateReceipts(req, res, next) {
     const miscPayloads     = [];
     const warnings         = [];
     const invoiceCache     = {};  // cache: `${subinventory}|${date}|${paymentType}` → invoice info
+    const receiptMethodCache = {}; // cache: `${rawMethod.upper}|${region}` → receiptMethod row
+    const registerCache      = {}; // cache: `${subinventory}` → register row
+    const orgIdCache         = {}; // cache: `${region}` → orgId string
 
     for (const [, grp] of groups) {
       const { date, subinventory, paymentType, rawMethod, totalAmount } = grp;
@@ -705,30 +708,39 @@ async function generateReceipts(req, res, next) {
 
       const txnNumber = invoiceInfo.txnNumber;
 
-      // ── Resolve receipt method details ────────────────────────────────────
-      const rm = await getReceiptMethod(rawMethod, region);
+      // ── Resolve receipt method details (cached per method+region) ─────────
+      const rmCacheKey = `${methodUpper}|${region}`;
+      if (!(rmCacheKey in receiptMethodCache)) {
+        receiptMethodCache[rmCacheKey] = await getReceiptMethod(rawMethod, region);
+      }
+      const rm = receiptMethodCache[rmCacheKey];
       const canonicalName = rm ? rm.receiptMethodName : normCell(rawMethod);
       const bankCharge    = rm ? rm.receiptBankCharge : 0;
       const taxRate       = rm ? rm.receiptMethodTax  : 0;
 
-      // ── Resolve register (bank account) ──────────────────────────────────
-      const reg = await prisma.vendhqRegister.findFirst({
-        where: { registerName: { equals: subinventory } },
-      });
-      const register = reg || (subinventory.length >= 4
-        ? await prisma.vendhqRegister.findFirst({
-            where: { registerName: { startsWith: subinventory.slice(0, 4) } },
-          })
-        : null);
+      // ── Resolve register (bank account) — cached per subinventory ─────────
+      if (!(subinventory in registerCache)) {
+        const reg = await prisma.vendhqRegister.findFirst({
+          where: { registerName: { equals: subinventory } },
+        });
+        registerCache[subinventory] = reg || (subinventory.length >= 4
+          ? await prisma.vendhqRegister.findFirst({
+              where: { registerName: { startsWith: subinventory.slice(0, 4) } },
+            })
+          : null);
+      }
+      const register = registerCache[subinventory];
 
       const bankAccountId  = register?.bankAccountId  || '';  // for standard receipt
       const bankAccountText = register?.bankAccount    || '';  // for misc receipt
       const cashAccountId  = register?.cashAccountId  || '';  // for cash standard receipt
 
-      // Resolve the Oracle Org ID from the register's region – mirrors Java
-      // FusionStdReceiptMapping: setOrgId(session.getFusionBusinessUnitIdMapfindByRegion(...))
+      // Resolve the Oracle Org ID from the register's region — cached per region.
       const registerRegion = register?.region || region;
-      const resolvedOrgId  = await resolveOrgIdByRegion(registerRegion);
+      if (!(registerRegion in orgIdCache)) {
+        orgIdCache[registerRegion] = await resolveOrgIdByRegion(registerRegion);
+      }
+      const resolvedOrgId = orgIdCache[registerRegion];
 
       // ── Standard Receipt ──────────────────────────────────────────────────
       // All NORMAL methods (Cash, Mada, Visa, Master, Debit Card, etc.) get a standard receipt

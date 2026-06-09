@@ -29,6 +29,27 @@ const MAX_RETRIES = 2;
 const RETRY_MIN_TIMEOUT = 500;
 const RETRY_MAX_TIMEOUT = 3000;
 
+// Concurrency for AR Invoice batch creation (Pass 1).
+// Configurable via ORACLE_INVOICE_CONCURRENCY env var (default 3).
+// Higher values reduce wall-clock time; lower values reduce Oracle load.
+const INVOICE_CONCURRENCY = parseInt(process.env.ORACLE_INVOICE_CONCURRENCY, 10) || 3;
+
+/** Classify an error as transient (worth retrying). */
+function isTransientError(err) {
+  if (!err) return false;
+  const msg = String(err.message || '').toLowerCase();
+  const code = String(err.code || '');
+  return (
+    /timeout/i.test(msg) ||
+    code === 'ECONNABORTED' ||
+    code === 'ECONNRESET' ||
+    code === 'ETIMEDOUT' ||
+    code === 'ENOTFOUND' ||
+    code === 'EPIPE' ||
+    code === 'ECONNREFUSED'
+  );
+}
+
 // SOAP namespaces — match applyReceiptController (standardReceiptService/commonService)
 const SOAP_ENV_NS   = 'http://schemas.xmlsoap.org/soap/envelope/';
 const SOAP_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/standardReceiptService/commonService/types/';
@@ -155,6 +176,7 @@ async function getSummary(req, res, next) {
     if (Object.keys(dateFilter).length > 0) invoiceWhere.txnDate = dateFilter;
     if (store) invoiceWhere.billToCustName = { contains: store };
 
+    // Fetch ALL invoices matching the filter — no hard cap so large batches are never silently truncated.
     const invoices = await prisma.fusionInvoiceHeader.findMany({
       where: invoiceWhere,
       select: {
@@ -169,10 +191,9 @@ async function getSummary(req, res, next) {
         txnSource: true,
       },
       orderBy: [{ txnDate: 'desc' }, { billToCustName: 'asc' }],
-      take: 2000,
     });
 
-    // Get standard receipts in range
+    // Get ALL standard receipts in range — no hard cap.
     const receiptWhere = {
       status: { in: ['Success', 'SUCCESS'] },
     };
@@ -190,10 +211,9 @@ async function getSummary(req, res, next) {
         receiptMethodId: true,
         status: true,
       },
-      take: 2000,
     });
 
-    // Get misc receipts in range
+    // Get ALL misc receipts in range — no hard cap.
     const miscWhere = {
       status: { in: ['Success', 'SUCCESS'] },
     };
@@ -209,16 +229,14 @@ async function getSummary(req, res, next) {
         receiptMethodName: true,
         status: true,
       },
-      take: 2000,
     });
 
-    // Get already-applied pairs
+    // Get ALL already-applied pairs — no hard cap.
     const appliedWhere = {};
     if (Object.keys(dateFilter).length > 0) appliedWhere.applicationDate = dateFilter;
     const applied = await prisma.fusionApplyReceipt.findMany({
       where: appliedWhere,
       select: { txnNumber: true, receiptNumber: true, status: true },
-      take: 5000,
     });
     const appliedKeys = new Set(applied.map((a) => `${a.txnNumber}||${a.receiptNumber}`));
 
@@ -310,6 +328,7 @@ async function getPendingApply(req, res, next) {
     if (Object.keys(dateFilter).length > 0) invoiceWhere.txnDate = dateFilter;
     if (store) invoiceWhere.billToCustName = { contains: store };
 
+    // Fetch ALL matching invoices and receipts — no hard cap so no pairs are silently dropped.
     const invoices = await prisma.fusionInvoiceHeader.findMany({
       where: invoiceWhere,
       select: {
@@ -320,7 +339,6 @@ async function getPendingApply(req, res, next) {
         businessUnit: true,
         txnDate: true,
       },
-      take: 2000,
     });
 
     const receiptWhere = { status: { in: ['Success', 'SUCCESS'] } };
@@ -329,13 +347,11 @@ async function getPendingApply(req, res, next) {
     const standardReceipts = await prisma.fusionStandardReceipt.findMany({
       where: receiptWhere,
       select: { id: true, receiptNumber: true, receiptDate: true, amount: true },
-      take: 2000,
     });
 
-    // Get already applied
+    // Fetch ALL already-applied pairs — no hard cap.
     const applied = await prisma.fusionApplyReceipt.findMany({
       select: { txnNumber: true, receiptNumber: true },
-      take: 5000,
     });
     const appliedKeys = new Set(applied.map((a) => `${a.txnNumber}||${a.receiptNumber}`));
 
@@ -410,6 +426,7 @@ async function submitApply(req, res, next) {
 
     // Process asynchronously (after response sent)
     setImmediate(async () => {
+      try {
       // Bulk-load invoice data (txnSource, txnDate) and receipt data (amount, currencyCode) from local DB
       const txnNumbers    = [...new Set(pairs.map((p) => p.txnNumber).filter(Boolean))];
       const receiptNumbers = [...new Set(pairs.map((p) => p.receiptNumber).filter(Boolean))];
@@ -588,6 +605,16 @@ async function submitApply(req, res, next) {
           responseLog:     logs.join('\n'),
         },
       });
+      } catch (fatalErr) {
+        console.error('[Pipeline:submitApply] Fatal background error:', fatalErr.message);
+        await prisma.applyReceiptUpload.update({
+          where: { id: uploadRecord.id },
+          data: {
+            status:          'FAILED',
+            responseMessage: `Fatal error: ${fatalErr.message}`,
+          },
+        }).catch(() => {});
+      }
     });
   } catch (err) {
     next(err);
@@ -746,11 +773,12 @@ async function createInvoiceBatch(req, res, next) {
     res.json({
       batchId: batch.id,
       total:   payloads.length,
-      message: `Processing ${payloads.length} invoice(s) sequentially. Poll /api/ar-pipeline/invoice-batch/${batch.id}/progress for status.`,
+      message: `Processing ${payloads.length} invoice(s) with concurrency=${INVOICE_CONCURRENCY}. Poll /api/ar-pipeline/invoice-batch/${batch.id}/progress for status.`,
     });
 
     // Process asynchronously after response is sent
     setImmediate(async () => {
+      try {
       // Pre-create all upload records so each invoice is immediately traceable.
       const uploadRecordResults = await Promise.allSettled(
         payloads.map((payload) =>
@@ -773,6 +801,11 @@ async function createInvoiceBatch(req, res, next) {
       let successCount = 0;
       let failureCount = 0;
       const timeoutItems = []; // queued for pass-2 retry
+      // Mutex to safely update shared counters from concurrent tasks
+      const mu = { lock: Promise.resolve() };
+      function safeIncSuccess() { mu.lock = mu.lock.then(() => { successCount++; }); }
+      function safeIncFailure() { mu.lock = mu.lock.then(() => { failureCount++; }); }
+      function safePushTimeout(item) { mu.lock = mu.lock.then(() => { timeoutItems.push(item); }); }
 
       const soapClient = createOracleSoapClient(soapEndpoint);
 
@@ -780,8 +813,8 @@ async function createInvoiceBatch(req, res, next) {
        * Submits one invoice to Oracle via SOAP and persists the result.
        * @param {object} payload      - Invoice payload
        * @param {object} uploadRecord - Pre-created ArInvoiceUpload row (may be null)
-       * @param {boolean} isRetry     - true when called from pass 2 (timeout retry)
-       * @returns {{ success: boolean, isTimeout: boolean, uploadRecord: object|null }}
+       * @param {boolean} isRetry     - true when called from pass 2 (transient-error retry)
+       * @returns {{ success: boolean, isTransient: boolean, uploadRecord: object|null }}
        */
       async function processOne(payload, uploadRecord, isRetry) {
         // Fallback: create upload record if pre-creation failed
@@ -797,7 +830,7 @@ async function createInvoiceBatch(req, res, next) {
             });
           } catch (dbErr) {
             console.error(`[Pipeline] Could not create upload record: ${dbErr.message}`);
-            return { success: false, isTimeout: false, uploadRecord: null };
+            return { success: false, isTransient: false, uploadRecord: null };
           }
         }
 
@@ -805,7 +838,7 @@ async function createInvoiceBatch(req, res, next) {
         let responseMessage = 'Invoice created successfully';
         let oracleData      = null;
         let httpStatus      = null;
-        let isTimeout       = false;
+        let transient       = false;
 
         try {
           const soapXml  = buildArInvoiceSoapEnvelope(payload);
@@ -818,22 +851,22 @@ async function createInvoiceBatch(req, res, next) {
         } catch (err) {
           responseStatus  = 'FAILED';
           responseMessage = err.message;
-          isTimeout       = /timeout/i.test(err.message) || err.code === 'ECONNABORTED';
-          console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} ${isTimeout && !isRetry ? 'TIMEOUT (queued for retry)' : 'FAILED'}: ${err.message}`);
+          transient       = isTransientError(err);
+          console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} ${transient && !isRetry ? 'TRANSIENT (queued for retry)' : 'FAILED'}: ${err.message}`);
         }
 
-        // For pass-1 timeouts, mark as FAILED with a retry note and skip DB storage
+        // For pass-1 transient failures, mark as queued-for-retry and skip DB storage
         // so no duplicate FusionInvoiceHeader is created before the retry attempt.
-        if (isTimeout && !isRetry) {
+        if (transient && !isRetry) {
           await prisma.arInvoiceUpload.update({
             where: { id: uploadRecord.id },
             data: {
               responseStatus:  'FAILED',
-              responseMessage: `Timeout - queued for retry: ${responseMessage}`,
+              responseMessage: `Transient error - queued for retry: ${responseMessage}`,
               httpStatus:      null,
             },
           }).catch(() => {});
-          return { success: false, isTimeout: true, uploadRecord };
+          return { success: false, isTransient: true, uploadRecord };
         }
 
         // Persist final result to upload record
@@ -901,25 +934,32 @@ async function createInvoiceBatch(req, res, next) {
           console.error(`[Pipeline] Failed to store fusion data for invoice ${uploadRecord.id}: ${storeErr.message}`);
         }
 
-        return { success: responseStatus === 'SUCCESS', isTimeout: false, uploadRecord };
+        return { success: responseStatus === 'SUCCESS', isTransient: false, uploadRecord };
       }
 
-      // ── Pass 1: process all invoices sequentially (Java-style: one at a time) ─
-      console.log(`[Pipeline] Pass 1: Processing ${workItems.length} invoice(s) sequentially`);
-      for (const item of workItems) {
-        const result = await processOne(item.payload, item.uploadRecord, false);
-        if (result.success) {
-          successCount++;
-        } else if (result.isTimeout) {
-          timeoutItems.push({ payload: item.payload, uploadRecord: result.uploadRecord });
-        } else {
-          failureCount++;
-        }
-      }
+      // ── Pass 1: process all invoices concurrently (capped at INVOICE_CONCURRENCY) ─
+      // Using pLimit keeps Oracle load bounded while cutting wall-clock time vs. pure sequential.
+      console.log(`[Pipeline] Pass 1: Processing ${workItems.length} invoice(s) with concurrency=${INVOICE_CONCURRENCY}`);
+      const limitPass1 = pLimit(INVOICE_CONCURRENCY);
+      await Promise.all(
+        workItems.map((item) =>
+          limitPass1(async () => {
+            const result = await processOne(item.payload, item.uploadRecord, false);
+            if (result.success) {
+              safeIncSuccess();
+            } else if (result.isTransient) {
+              safePushTimeout({ payload: item.payload, uploadRecord: result.uploadRecord });
+            } else {
+              safeIncFailure();
+            }
+          })
+        )
+      );
+      await mu.lock; // drain the mutex queue before reading counters
 
-      // ── Pass 2: retry timeout-only failures (one at a time) ──────────────────
+      // ── Pass 2: retry transient failures sequentially (conservative for Oracle) ─
       if (timeoutItems.length > 0) {
-        console.log(`[Pipeline] Pass 2: Retrying ${timeoutItems.length} timeout failure(s)`);
+        console.log(`[Pipeline] Pass 2: Retrying ${timeoutItems.length} transient failure(s) sequentially`);
         for (const item of timeoutItems) {
           const result = await processOne(item.payload, item.uploadRecord, true);
           if (result.success) {
@@ -931,7 +971,7 @@ async function createInvoiceBatch(req, res, next) {
       }
 
       const finalStatus = failureCount === 0 ? 'SUCCESS' : successCount === 0 ? 'FAILED' : 'PARTIAL';
-      const retryNote   = timeoutItems.length > 0 ? ` (${timeoutItems.length} retried after timeout)` : '';
+      const retryNote   = timeoutItems.length > 0 ? ` (${timeoutItems.length} retried after transient error)` : '';
       await prisma.arInvoiceBatch.update({
         where: { id: batch.id },
         data: {
@@ -941,6 +981,13 @@ async function createInvoiceBatch(req, res, next) {
           message: `${successCount} succeeded, ${failureCount} failed out of ${payloads.length}${retryNote}.`,
         },
       });
+      } catch (fatalErr) {
+        console.error('[Pipeline:createInvoiceBatch] Fatal background error:', fatalErr.message);
+        await prisma.arInvoiceBatch.update({
+          where: { id: batch.id },
+          data: { status: 'FAILED', message: `Fatal error: ${fatalErr.message}` },
+        }).catch(() => {});
+      }
     });
   } catch (err) {
     next(err);
