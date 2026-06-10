@@ -159,42 +159,80 @@ function normalizeDate(raw, fieldName) {
 }
 
 /**
- * Get next auto-incremented CrossReference number
+ * Get or create a stable CrossReference number for a given invoice group key.
+ *
+ * The CrossReference is stored in VendInvoiceCrossRef keyed by
+ * (subinventory, date, paymentType).  Re-uploading the same day's data will
+ * always return the same CrossReference instead of incrementing it.
+ *
+ * @param {string} subinventory  - Store subinventory code (e.g. "AZIZMALL")
+ * @param {string} date          - Invoice date in YYYY-MM-DD format
+ * @param {string} paymentType   - "NORMAL" | "TABBY" | "TAMARA"
+ * @returns {Promise<number>}    Stable CrossReference number
  */
-async function getNextCrossReference() {
-  // Get the maximum crossReference from FusionInvoiceHeader table
-  const maxHeader = await prisma.fusionInvoiceHeader.findFirst({
-    orderBy: { requestId: 'desc' },
-    select: { requestId: true },
-  });
-
-  // Also check ArInvoiceUpload for recent cross references
-  const recentUploads = await prisma.arInvoiceUpload.findMany({
+async function getOrCreateCrossReference(subinventory, date, paymentType) {
+  // 1. Return existing CrossReference for this combination if already assigned.
+  const existing = await prisma.vendInvoiceCrossRef.findUnique({
     where: {
-      payloadJson: {
-        contains: 'CrossReference',
-      },
+      subinventory_date_paymentType: { subinventory, date, paymentType },
     },
-    orderBy: { createdAt: 'desc' },
-    take: 10,
+    select: { crossReference: true },
   });
+  if (existing) {
+    return existing.crossReference;
+  }
 
-  let maxCrossRef = maxHeader?.requestId || 32886; // Default starting point
+  // 2. Determine the next available CrossReference by scanning the highest
+  //    value across VendInvoiceCrossRef, FusionInvoiceHeader and recent
+  //    ArInvoiceUpload payloads (same sources as the old implementation).
+  const [maxCrossRefRow, maxHeaderRow, recentUploads] = await Promise.all([
+    prisma.vendInvoiceCrossRef.findFirst({
+      orderBy: { crossReference: 'desc' },
+      select: { crossReference: true },
+    }),
+    prisma.fusionInvoiceHeader.findFirst({
+      orderBy: { requestId: 'desc' },
+      select: { requestId: true },
+    }),
+    prisma.arInvoiceUpload.findMany({
+      where: { payloadJson: { contains: 'CrossReference' } },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+    }),
+  ]);
 
-  // Parse CrossReference from recent uploads to find the max
+  let maxCrossRef = Math.max(
+    maxCrossRefRow?.crossReference ?? 0,
+    maxHeaderRow?.requestId ?? 0,
+    32886, // legacy minimum starting point
+  );
+
   for (const upload of recentUploads) {
     try {
       const payload = JSON.parse(upload.payloadJson);
-      const crossRef = parseInt(payload.CrossReference);
+      const crossRef = parseInt(payload.CrossReference, 10);
       if (!isNaN(crossRef) && crossRef > maxCrossRef) {
         maxCrossRef = crossRef;
       }
-    } catch (err) {
+    } catch (_) {
       // Ignore parsing errors
     }
   }
 
-  return maxCrossRef + 1;
+  const next = maxCrossRef + 1;
+
+  // 3. Persist the new assignment.  If a concurrent request raced us to the
+  //    same slot, upsert ensures we keep the winner's value and return it.
+  const saved = await prisma.vendInvoiceCrossRef.upsert({
+    where: {
+      subinventory_date_paymentType: { subinventory, date, paymentType },
+    },
+    update: {}, // do not overwrite an existing crossReference
+    create: { subinventory, date, paymentType, crossReference: next },
+    select: { crossReference: true },
+  });
+
+  return saved.crossReference;
 }
 
 /**
@@ -473,7 +511,11 @@ async function uploadVendInvoice(req, res, next) {
     const payloadStats = [];
 
     for (const group of Object.values(invoiceGroups)) {
-      const crossReference = await getNextCrossReference();
+      const crossReference = await getOrCreateCrossReference(
+        group.subinventoryCode,
+        group.date,
+        group.paymentType,
+      );
 
       // Determine payment type label for comments
       let paymentTypeLabel = 'Cash/Bank';

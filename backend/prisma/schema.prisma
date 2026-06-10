@@ -500,6 +500,21 @@ model FusionApplyReceipt {
   @@index([batchId])
 }
 
+// VendInvoiceCrossRef - persists the stable CrossReference number for each
+// unique (subinventory, date, paymentType) combination so that re-uploading
+// the same day's data always produces the same CrossReference.
+model VendInvoiceCrossRef {
+  id             Int      @id @default(autoincrement())
+  subinventory   String
+  date           String   // YYYY-MM-DD
+  paymentType    String   // NORMAL | TABBY | TAMARA
+  crossReference Int      @unique
+  createdAt      DateTime @default(now())
+
+  @@unique([subinventory, date, paymentType])
+  @@index([subinventory, date])
+}
+
 // VendReceiptBatch - tracks each Vend Receipt payload generation and submission
 model VendReceiptBatch {
   id                 Int      @id @default(autoincrement())
