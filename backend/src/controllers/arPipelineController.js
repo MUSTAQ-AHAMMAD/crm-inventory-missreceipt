@@ -803,7 +803,12 @@ async function createInvoiceBatch(req, res, next) {
       const transientItems = []; // queued for pass-2 retry
 
       const oracleAuth = Buffer.from(`${username}:${password}`).toString('base64');
-      const invoiceTimeout = parseInt(process.env.ORACLE_SOAP_TIMEOUT) || 120000;
+      // AR invoice REST calls can take longer than SOAP calls (large response body, Oracle processing).
+      // Use a dedicated ORACLE_AR_INVOICE_TIMEOUT (default 5 min) so chunked invoices never time out.
+      const invoiceTimeout =
+        parseInt(process.env.ORACLE_AR_INVOICE_TIMEOUT, 10) ||
+        parseInt(process.env.ORACLE_SOAP_TIMEOUT, 10) ||
+        300000;
 
       /**
        * Submits one invoice to Oracle via REST and persists the result.
@@ -858,7 +863,26 @@ async function createInvoiceBatch(req, res, next) {
             responseMessage = 'Oracle returned ServiceStatus=E (business validation error)';
           }
 
-          console.log(`✅ [Pipeline] Invoice ${uploadRecord.id} ${responseStatus} - TxnNumber: ${oracleData?.TransactionNumber}`);
+          if (responseStatus === 'SUCCESS') {
+            // Guard: Oracle sometimes returns HTTP 200 without a TransactionNumber when it
+            // silently rejects the invoice (e.g. duplicate CrossReference, over-large payload).
+            // Treat this as a business failure so it is clearly visible in the pipeline UI.
+            if (!oracleData?.TransactionNumber) {
+              responseStatus  = 'FAILED';
+              responseMessage = 'Oracle returned HTTP 200 but no TransactionNumber — possible duplicate CrossReference or oversized payload';
+              console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} FAILED - HTTP ${httpStatus} - ${responseMessage}`);
+              if (oracleData) {
+                console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} Oracle response:`, JSON.stringify(oracleData));
+              }
+            } else {
+              console.log(`✅ [Pipeline] Invoice ${uploadRecord.id} SUCCESS - TxnNumber: ${oracleData.TransactionNumber}`);
+            }
+          } else {
+            console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} FAILED - HTTP ${httpStatus} - ${responseMessage}`);
+            if (oracleData) {
+              console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} Oracle response:`, JSON.stringify(oracleData));
+            }
+          }
         } catch (err) {
           responseStatus  = 'FAILED';
           responseMessage = err.message;

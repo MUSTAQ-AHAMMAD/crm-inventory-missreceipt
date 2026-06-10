@@ -159,38 +159,37 @@ function normalizeDate(raw, fieldName) {
 }
 
 /**
- * Get next auto-incremented CrossReference number
+ * Compute the next safe CrossReference base for a single upload request.
+ * Returns the starting number; the caller is responsible for incrementing
+ * in-memory for each additional chunk so that all chunks in one request
+ * get distinct CrossReference values without re-querying the DB.
  */
-async function getNextCrossReference() {
-  // Get the maximum crossReference from FusionInvoiceHeader table
+async function getNextCrossReferenceBase() {
+  // Get the maximum CrossReference already stored in FusionInvoiceHeader
   const maxHeader = await prisma.fusionInvoiceHeader.findFirst({
     orderBy: { requestId: 'desc' },
     select: { requestId: true },
   });
 
-  // Also check ArInvoiceUpload for recent cross references
+  // Also scan the most recent ArInvoiceUpload payloads in case headers have
+  // not yet been written (in-flight uploads from the same session).
   const recentUploads = await prisma.arInvoiceUpload.findMany({
-    where: {
-      payloadJson: {
-        contains: 'CrossReference',
-      },
-    },
+    where: { payloadJson: { contains: 'CrossReference' } },
     orderBy: { createdAt: 'desc' },
-    take: 10,
+    take: 20,
   });
 
-  let maxCrossRef = maxHeader?.requestId || 32886; // Default starting point
+  let maxCrossRef = maxHeader?.requestId || 32886; // default starting point
 
-  // Parse CrossReference from recent uploads to find the max
   for (const upload of recentUploads) {
     try {
       const payload = JSON.parse(upload.payloadJson);
-      const crossRef = parseInt(payload.CrossReference);
+      const crossRef = parseInt(payload.CrossReference, 10);
       if (!isNaN(crossRef) && crossRef > maxCrossRef) {
         maxCrossRef = crossRef;
       }
-    } catch (err) {
-      // Ignore parsing errors
+    } catch (_) {
+      // ignore unparseable rows
     }
   }
 
@@ -467,14 +466,27 @@ async function uploadVendInvoice(req, res, next) {
       });
     }
 
+    // Maximum invoice lines per Oracle REST call.
+    // Oracle's REST gateway returns HTTP 504 for large payloads; 100 lines is a
+    // safe upper bound based on observed failures.  The hard cap of 100 prevents
+    // a misconfigured env var from allowing dangerously large payloads.
+    const HARD_MAX_CHUNK_SIZE = 100;
+    const LINE_CHUNK_SIZE = Math.min(
+      parseInt(process.env.ORACLE_INVOICE_LINE_CHUNK_SIZE, 10) || 100,
+      HARD_MAX_CHUNK_SIZE,
+    );
+
+    // Compute a single CrossReference base for this entire upload request.
+    // Incrementing in-memory for each chunk (rather than re-querying the DB each
+    // time) guarantees every chunk in this batch gets a unique CrossReference.
+    let nextCrossRef = await getNextCrossReferenceBase();
+
     // Generate payloads for each invoice group
     const payloads = [];
     // Stats tracked separately — not added to payload objects
     const payloadStats = [];
 
     for (const group of Object.values(invoiceGroups)) {
-      const crossReference = await getNextCrossReference();
-
       // Determine payment type label for comments
       let paymentTypeLabel = 'Cash/Bank';
       if (group.paymentType === 'TABBY') {
@@ -483,39 +495,60 @@ async function uploadVendInvoice(req, res, next) {
         paymentTypeLabel = 'Tamara';
       }
 
-      const payload = {
-        BusinessUnit: 'AlQurashi-KSA',
-        TransactionSource: 'Vend',
-        TransactionType: 'Vend Invoice',
-        TransactionDate: group.date,
-        AccountingDate: group.date,
-        BillToCustomerName: group.customerName,
-        BillToCustomerNumber: group.customerNumber,
-        BillToSite: group.siteNumber,
-        PaymentTerms: 'IMMEDIATE',
-        InvoiceCurrencyCode: 'SAR',
-        CrossReference: String(crossReference),
-        Comments: `${paymentTypeLabel} payment - Invoice generated from request ID ${crossReference}`,
-        receivablesInvoiceLines: group.lines,
-      };
+      // Split lines into chunks to avoid Oracle gateway timeouts on large payloads
+      const allLines = group.lines;
+      const totalChunks = Math.ceil(allLines.length / LINE_CHUNK_SIZE);
 
-      // Compute payload totals in separate variables (not attached to the payload)
-      const lineCount = group.lines.length;
-      let totalAmount = 0;
-      for (const line of group.lines) {
-        totalAmount += (line.Quantity || 0) * (line.UnitSellingPrice || 0);
+      if (totalChunks > 1) {
+        console.log(`[Vend Invoice] ${group.subinventoryCode}/${group.paymentType}: ${allLines.length} lines → ${totalChunks} chunks of ≤${LINE_CHUNK_SIZE}`);
       }
-      totalAmount = Math.round(totalAmount * 100) / 100;
 
-      payloads.push(payload);
-      payloadStats.push({
-        crossReference: String(crossReference),
-        billToCustomerName: group.customerName,
-        transactionDate: group.date,
-        paymentType: group.paymentType,
-        lineCount,
-        totalAmount,
-      });
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        const chunkLines = allLines.slice(chunkIndex * LINE_CHUNK_SIZE, (chunkIndex + 1) * LINE_CHUNK_SIZE);
+
+        // Re-number lines within this chunk starting at 1 (Oracle requires sequential LineNumbers)
+        const renumberedLines = chunkLines.map((line, idx) => ({ ...line, LineNumber: idx + 1 }));
+
+        // Each chunk gets its own unique CrossReference, incremented in-memory.
+        const crossReference = nextCrossRef++;
+        const chunkSuffix = totalChunks > 1 ? ` (part ${chunkIndex + 1}/${totalChunks})` : '';
+
+        const payload = {
+          BusinessUnit: 'AlQurashi-KSA',
+          TransactionSource: 'Vend',
+          TransactionType: 'Vend Invoice',
+          TransactionDate: group.date,
+          AccountingDate: group.date,
+          BillToCustomerName: group.customerName,
+          BillToCustomerNumber: group.customerNumber,
+          BillToSite: group.siteNumber,
+          PaymentTerms: 'IMMEDIATE',
+          InvoiceCurrencyCode: 'SAR',
+          CrossReference: String(crossReference),
+          Comments: `${paymentTypeLabel} payment - Invoice generated from request ID ${crossReference}${chunkSuffix}`,
+          receivablesInvoiceLines: renumberedLines,
+        };
+
+        // Compute payload totals in separate variables (not attached to the payload)
+        const lineCount = renumberedLines.length;
+        let totalAmount = 0;
+        for (const line of renumberedLines) {
+          totalAmount += (line.Quantity || 0) * (line.UnitSellingPrice || 0);
+        }
+        totalAmount = Math.round(totalAmount * 100) / 100;
+
+        payloads.push(payload);
+        payloadStats.push({
+          crossReference: String(crossReference),
+          billToCustomerName: group.customerName,
+          transactionDate: group.date,
+          paymentType: group.paymentType,
+          lineCount,
+          totalAmount,
+          chunkIndex: totalChunks > 1 ? chunkIndex + 1 : undefined,
+          totalChunks: totalChunks > 1 ? totalChunks : undefined,
+        });
+      }
     }
 
     // Split payloads into positive and negative based on totalAmount
@@ -548,7 +581,7 @@ async function uploadVendInvoice(req, res, next) {
       negativeTotalAmount,
     };
 
-    console.log(`✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines (${positivePayloads.length} positive, ${negativePayloads.length} negative)`);
+    console.log(`✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines (${positivePayloads.length} positive, ${negativePayloads.length} negative, chunk size: ${LINE_CHUNK_SIZE})`);
 
     return res.json({
       success: true,
