@@ -864,7 +864,19 @@ async function createInvoiceBatch(req, res, next) {
           }
 
           if (responseStatus === 'SUCCESS') {
-            console.log(`✅ [Pipeline] Invoice ${uploadRecord.id} SUCCESS - TxnNumber: ${oracleData?.TransactionNumber}`);
+            // Guard: Oracle sometimes returns HTTP 200 without a TransactionNumber when it
+            // silently rejects the invoice (e.g. duplicate CrossReference, over-large payload).
+            // Treat this as a business failure so it is clearly visible in the pipeline UI.
+            if (!oracleData?.TransactionNumber) {
+              responseStatus  = 'FAILED';
+              responseMessage = 'Oracle returned HTTP 200 but no TransactionNumber — possible duplicate CrossReference or oversized payload';
+              console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} FAILED - HTTP ${httpStatus} - ${responseMessage}`);
+              if (oracleData) {
+                console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} Oracle response:`, JSON.stringify(oracleData));
+              }
+            } else {
+              console.log(`✅ [Pipeline] Invoice ${uploadRecord.id} SUCCESS - TxnNumber: ${oracleData.TransactionNumber}`);
+            }
           } else {
             console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} FAILED - HTTP ${httpStatus} - ${responseMessage}`);
             if (oracleData) {
