@@ -803,7 +803,10 @@ async function createInvoiceBatch(req, res, next) {
       const transientItems = []; // queued for pass-2 retry
 
       const oracleAuth = Buffer.from(`${username}:${password}`).toString('base64');
-      const invoiceTimeout = parseInt(process.env.ORACLE_SOAP_TIMEOUT) || 120000;
+      const invoiceTimeout = parseInt(process.env.ORACLE_AR_INVOICE_TIMEOUT, 10)
+        || parseInt(process.env.ORACLE_SOAP_TIMEOUT, 10)
+        || 300000;
+      const LINE_CHUNK_SIZE = parseInt(process.env.ORACLE_INVOICE_LINE_CHUNK_SIZE, 10) || 200;
 
       /**
        * Submits one invoice to Oracle via REST and persists the result.
@@ -830,129 +833,199 @@ async function createInvoiceBatch(req, res, next) {
           }
         }
 
-        let responseStatus  = 'SUCCESS';
-        let responseMessage = 'Invoice created successfully';
-        let oracleData      = null;
-        let httpStatus      = null;
-        let transient       = false;
+       // ── Split large invoices into chunks to avoid Oracle gateway timeouts ──
+       // Oracle HTTP 504 is triggered when a single REST call has too many lines.
+       // Each chunk becomes a separate Oracle AR transaction with its own TxnNumber.
+       const allLines  = payload.receivablesInvoiceLines ?? [];
+       const chunks    = [];
+       if (allLines.length > LINE_CHUNK_SIZE) {
+         for (let ci = 0; ci < allLines.length; ci += LINE_CHUNK_SIZE) {
+           const slice = allLines.slice(ci, ci + LINE_CHUNK_SIZE);
+           // Re-number LineNumber within each chunk starting from 1
+           chunks.push(slice.map((line, idx) => ({ ...line, LineNumber: idx + 1 })));
+         }
+         console.log(`[Pipeline] Invoice ${uploadRecord.id}: ${allLines.length} lines → ${chunks.length} chunk(s) of ≤${LINE_CHUNK_SIZE}`);
+       } else {
+         chunks.push(allLines);
+       }
 
-        try {
-          const response = await axios.post(endpoint, payload, {
-            headers: {
-              'Content-Type': 'application/json',
-              Accept:         'application/json',
-              Authorization:  `Basic ${oracleAuth}`,
-            },
-            timeout:        invoiceTimeout,
-            validateStatus: () => true,
-          });
+       const isChunked = chunks.length > 1;
 
-          httpStatus = response.status;
-          oracleData = response.data;
+       // ── Helper: submit one chunk (or the full payload when not chunked) ──
+       async function submitChunk(chunkLines, chunkIndex) {
+         const chunkPayload = isChunked
+           ? { ...payload, receivablesInvoiceLines: chunkLines }
+           : payload;
 
-          if (response.status >= 400) {
-            responseStatus  = 'FAILED';
-            responseMessage = `Oracle returned HTTP ${httpStatus}`;
-          } else if (oracleData?.ServiceStatus === 'E') {
-            responseStatus  = 'FAILED';
-            responseMessage = 'Oracle returned ServiceStatus=E (business validation error)';
-          }
+         let status  = 'SUCCESS';
+         let message = 'Invoice created successfully';
+         let data    = null;
+         let http    = null;
+         let transientFlag = false;
 
-          if (responseStatus === 'FAILED') {
-            const errDetail = oracleData
-              ? JSON.stringify(oracleData).slice(0, 500)
-              : '(no response body)';
-            console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} FAILED (HTTP ${httpStatus}): ${errDetail}`);
-          } else {
-            console.log(`✅ [Pipeline] Invoice ${uploadRecord.id} SUCCESS - TxnNumber: ${oracleData?.TransactionNumber}`);
-          }
-        } catch (err) {
-          responseStatus  = 'FAILED';
-          responseMessage = err.message;
-          transient       = isTransientError(err);
-          console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} ${transient && !isRetry ? 'TRANSIENT (queued for retry)' : 'FAILED'}: ${err.message}`);
-        }
+         try {
+           const response = await axios.post(endpoint, chunkPayload, {
+             headers: {
+               'Content-Type': 'application/json',
+               Accept:         'application/json',
+               Authorization:  `Basic ${oracleAuth}`,
+             },
+             timeout:        invoiceTimeout,
+             validateStatus: () => true,
+           });
 
-        // For pass-1 transient failures, mark as queued-for-retry and skip DB storage
-        // so no duplicate FusionInvoiceHeader is created before the retry attempt.
-        if (transient && !isRetry) {
-          await prisma.arInvoiceUpload.update({
-            where: { id: uploadRecord.id },
-            data: {
-              responseStatus:  'FAILED',
-              responseMessage: `Transient error - queued for retry: ${responseMessage}`,
-              httpStatus:      null,
-            },
-          }).catch(() => {});
-          return { success: false, isTransient: true, uploadRecord };
-        }
+           http = response.status;
+           data = response.data;
 
-        // Persist final result to upload record
-        await prisma.arInvoiceUpload.update({
-          where: { id: uploadRecord.id },
-          data: {
-            responseStatus,
-            responseMessage,
-            responseBody: oracleData ? JSON.stringify(oracleData) : responseMessage,
-            httpStatus,
-          },
-        }).catch(() => {});
+           if (response.status >= 400) {
+             status  = 'FAILED';
+             message = `Oracle returned HTTP ${http}`;
+           } else if (data?.ServiceStatus === 'E') {
+             status  = 'FAILED';
+             message = 'Oracle returned ServiceStatus=E (business validation error)';
+           }
 
-        // Persist to FusionInvoiceHeader + FusionInvoiceLine
-        try {
-          const txnNumberRaw = oracleData?.TransactionNumber ?? null;
-          const custTxnIdRaw = oracleData?.CustomerTrxId ?? oracleData?.CustomerTxnId ?? null;
-          const billToAccRaw = payload.BillToCustomerNumber;
+           const tag = isChunked ? ` chunk ${chunkIndex + 1}/${chunks.length}` : '';
+           if (status === 'FAILED') {
+             const errDetail = data ? JSON.stringify(data).slice(0, 500) : '(no response body)';
+             console.error(`❌ [Pipeline] Invoice ${uploadRecord.id}${tag} FAILED (HTTP ${http}): ${errDetail}`);
+           } else {
+             console.log(`✅ [Pipeline] Invoice ${uploadRecord.id}${tag} SUCCESS - TxnNumber: ${data?.TransactionNumber}`);
+           }
+         } catch (err) {
+           status        = 'FAILED';
+           message       = err.message;
+           transientFlag = isTransientError(err);
+           const tag     = isChunked ? ` chunk ${chunkIndex + 1}/${chunks.length}` : '';
+           console.error(`❌ [Pipeline] Invoice ${uploadRecord.id}${tag} ${transientFlag && !isRetry ? 'TRANSIENT (queued for retry)' : 'FAILED'}: ${err.message}`);
+         }
 
-          const fusionHeader = await prisma.fusionInvoiceHeader.create({
-            data: {
-              requestId:        uploadRecord.id,
-              status:           responseStatus === 'SUCCESS' ? 'SUCCESS' : 'Failed',
-              message:          responseMessage,
-              requestDate:      new Date(),
-              billToCustName:   payload.BillToCustomerName   ?? null,
-              billToLocation:   payload.BillToSite            ?? null,
-              billToAccNumber:  billToAccRaw ? parseInt(billToAccRaw, 10) : null,
-              businessUnit:     payload.BusinessUnit          ?? null,
-              paymentTermsName: payload.PaymentTerms          ?? null,
-              txnSource:        payload.TransactionSource     ?? null,
-              txnType:          payload.TransactionType       ?? null,
-              txnDate:          parseOracleDateToUTCMidnight(payload.TransactionDate),
-              glDate:           parseOracleDateToUTCMidnight(payload.AccountingDate),
-              currencyCode:     payload.InvoiceCurrencyCode   ?? null,
-              txnNumber:        txnNumberRaw ? parseInt(txnNumberRaw, 10) : null,
-              customerTxnId:    custTxnIdRaw ? parseInt(custTxnIdRaw, 10) : null,
-              region:           'SA',
-            },
-          });
+         return { status, message, data, http, transient: transientFlag, lines: chunkLines };
+       }
 
-          if (responseStatus === 'SUCCESS') {
-            const lines = payload.receivablesInvoiceLines ?? [];
-            if (lines.length > 0) {
-              await prisma.fusionInvoiceLine.createMany({
-                data: lines.map((line) => ({
-                  requestId:        uploadRecord.id,
-                  status:           'SUCCESS',
-                  requestDate:      new Date(),
-                  headerId:         fusionHeader.id,
-                  invoiceNumber:    txnNumberRaw != null ? String(txnNumberRaw) : null,
-                  lineNumber:       line.LineNumber       != null ? parseInt(line.LineNumber, 10)      : null,
-                  itemNumber:       line.ItemNumber       ?? null,
-                  description:      line.Description      ?? null,
-                  quantity:         line.Quantity          != null ? parseFloat(line.Quantity)         : null,
-                  unitSellingPrice: line.UnitSellingPrice  != null ? parseFloat(line.UnitSellingPrice) : null,
-                  taxCode:          line.TaxClassificationCode ?? null,
-                  salesOrder:       line.SalesOrder        ?? null,
-                  region:           'SA',
-                })),
-              });
-            }
-          }
-        } catch (storeErr) {
-          console.error(`[Pipeline] Failed to store fusion data for invoice ${uploadRecord.id}: ${storeErr.message}`);
-        }
+       // ── Submit all chunks sequentially (safe for Oracle, avoids duplicate load) ──
+       const chunkResults = [];
+       for (let ci = 0; ci < chunks.length; ci++) {
+         const result = await submitChunk(chunks[ci], ci);
+         chunkResults.push(result);
+         // Stop early if a chunk fails — no point submitting further chunks
+         if (result.status === 'FAILED') break;
+       }
 
-        return { success: responseStatus === 'SUCCESS', isTransient: false, uploadRecord };
+       // Determine overall status
+       const failedChunk = chunkResults.find((r) => r.status === 'FAILED');
+       const responseStatus  = failedChunk ? 'FAILED' : 'SUCCESS';
+       const transient       = failedChunk ? failedChunk.transient : false;
+       const successChunks   = chunkResults.filter((r) => r.status === 'SUCCESS');
+
+       let responseMessage;
+       if (isChunked) {
+         responseMessage = responseStatus === 'SUCCESS'
+           ? `Invoice chunked into ${chunks.length} parts: all succeeded`
+           : `Invoice chunk ${chunkResults.length}/${chunks.length} failed: ${failedChunk.message}`;
+       } else {
+         responseMessage = responseStatus === 'SUCCESS'
+           ? 'Invoice created successfully'
+           : failedChunk.message;
+       }
+
+       // Combined response body (first chunk for single, array for chunked)
+       const combinedResponseBody = isChunked
+         ? JSON.stringify(chunkResults.map((r) => r.data))
+         : (chunkResults[0]?.data ? JSON.stringify(chunkResults[0].data) : responseMessage);
+       const lastHttpStatus = chunkResults[chunkResults.length - 1]?.http ?? null;
+
+       // For pass-1 transient failures, mark as queued-for-retry and skip DB storage
+       // so no duplicate FusionInvoiceHeader is created before the retry attempt.
+       if (transient && !isRetry) {
+         await prisma.arInvoiceUpload.update({
+           where: { id: uploadRecord.id },
+           data: {
+             responseStatus:  'FAILED',
+             responseMessage: `Transient error - queued for retry: ${failedChunk.message}`,
+             httpStatus:      null,
+           },
+         }).catch(() => {});
+         return { success: false, isTransient: true, uploadRecord };
+       }
+
+       // Persist final result to upload record
+       await prisma.arInvoiceUpload.update({
+         where: { id: uploadRecord.id },
+         data: {
+           responseStatus,
+           responseMessage,
+           responseBody: combinedResponseBody,
+           httpStatus:   lastHttpStatus,
+         },
+       }).catch(() => {});
+
+       // Persist to FusionInvoiceHeader + FusionInvoiceLine (one header per successful chunk)
+       try {
+         const billToAccRaw = payload.BillToCustomerNumber;
+         const headerBase   = {
+           requestId:        uploadRecord.id,
+           requestDate:      new Date(),
+           billToCustName:   payload.BillToCustomerName   ?? null,
+           billToLocation:   payload.BillToSite            ?? null,
+           billToAccNumber:  billToAccRaw ? parseInt(billToAccRaw, 10) : null,
+           businessUnit:     payload.BusinessUnit          ?? null,
+           paymentTermsName: payload.PaymentTerms          ?? null,
+           txnSource:        payload.TransactionSource     ?? null,
+           txnType:          payload.TransactionType       ?? null,
+           txnDate:          parseOracleDateToUTCMidnight(payload.TransactionDate),
+           glDate:           parseOracleDateToUTCMidnight(payload.AccountingDate),
+           currencyCode:     payload.InvoiceCurrencyCode   ?? null,
+           region:           'SA',
+         };
+
+         for (const chunk of chunkResults) {
+           const txnNumberRaw = chunk.data?.TransactionNumber ?? null;
+           const custTxnIdRaw = chunk.data?.CustomerTrxId ?? chunk.data?.CustomerTxnId ?? null;
+
+           const fusionHeader = await prisma.fusionInvoiceHeader.create({
+             data: {
+               ...headerBase,
+               status:       chunk.status === 'SUCCESS' ? 'SUCCESS' : 'Failed',
+               message:      chunk.message,
+               txnNumber:    txnNumberRaw ? parseInt(txnNumberRaw, 10) : null,
+               customerTxnId: custTxnIdRaw ? parseInt(custTxnIdRaw, 10) : null,
+             },
+           });
+
+           if (chunk.status === 'SUCCESS' && chunk.lines.length > 0) {
+             await prisma.fusionInvoiceLine.createMany({
+               data: chunk.lines.map((line) => ({
+                 requestId:        uploadRecord.id,
+                 status:           'SUCCESS',
+                 requestDate:      new Date(),
+                 headerId:         fusionHeader.id,
+                 invoiceNumber:    txnNumberRaw != null ? String(txnNumberRaw) : null,
+                 lineNumber:       line.LineNumber       != null ? parseInt(line.LineNumber, 10)      : null,
+                 itemNumber:       line.ItemNumber       ?? null,
+                 description:      line.Description      ?? null,
+                 quantity:         line.Quantity          != null ? parseFloat(line.Quantity)         : null,
+                 unitSellingPrice: line.UnitSellingPrice  != null ? parseFloat(line.UnitSellingPrice) : null,
+                 taxCode:          line.TaxClassificationCode ?? null,
+                 salesOrder:       line.SalesOrder        ?? null,
+                 region:           'SA',
+               })),
+             });
+           }
+         }
+
+         // For chunked invoices, also persist a single failed header for any unsubmitted chunks
+         if (isChunked && failedChunk) {
+           const unsubmittedCount = chunks.length - chunkResults.length;
+           if (unsubmittedCount > 0) {
+             console.log(`[Pipeline] Invoice ${uploadRecord.id}: ${unsubmittedCount} chunk(s) not submitted due to earlier failure`);
+           }
+         }
+       } catch (storeErr) {
+         console.error(`[Pipeline] Failed to store fusion data for invoice ${uploadRecord.id}: ${storeErr.message}`);
+       }
+
+       return { success: responseStatus === 'SUCCESS', isTransient: false, uploadRecord };
       }
 
       // ── Pass 1: process all invoices concurrently (capped at INVOICE_CONCURRENCY) ─
