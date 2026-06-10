@@ -25,8 +25,18 @@ jest.mock('../services/prisma', () => ({
   vendInvoiceCrossRef: {
     findUnique: jest.fn(),
     findFirst: jest.fn(),
-    upsert: jest.fn(),
+    create: jest.fn(),
   },
+  // Execute the transaction callback synchronously with the mock itself as the tx
+  $transaction: jest.fn((fn) => fn({
+    fusionInvoiceHeader: { findFirst: jest.fn().mockResolvedValue({ requestId: 100 }) },
+    arInvoiceUpload: { findMany: jest.fn().mockResolvedValue([]) },
+    vendInvoiceCrossRef: {
+      findUnique: jest.fn().mockResolvedValue(null),
+      findFirst: jest.fn().mockResolvedValue(null),
+      create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ crossReference: data.crossReference })),
+    },
+  })),
 }));
 
 jest.mock('../services/fusionSalesMetadataService', () => ({
@@ -40,14 +50,6 @@ describe('vendInvoiceController', () => {
 
     prisma.fusionInvoiceHeader.findFirst.mockResolvedValue({ requestId: 100 });
     prisma.arInvoiceUpload.findMany.mockResolvedValue([]);
-
-    // Simulate no existing CrossReference (new combination) so each test
-    // gets a freshly generated one (101 from the mocked requestId: 100).
-    prisma.vendInvoiceCrossRef.findUnique.mockResolvedValue(null);
-    prisma.vendInvoiceCrossRef.findFirst.mockResolvedValue(null);
-    prisma.vendInvoiceCrossRef.upsert.mockImplementation(({ create }) =>
-      Promise.resolve({ crossReference: create.crossReference })
-    );
 
     XLSX.read.mockReturnValue({
       SheetNames: ['Sheet1'],

@@ -165,74 +165,76 @@ function normalizeDate(raw, fieldName) {
  * (subinventory, date, paymentType).  Re-uploading the same day's data will
  * always return the same CrossReference instead of incrementing it.
  *
+ * The entire find-or-create runs inside a serializable transaction so that
+ * concurrent uploads for different groups cannot race and claim the same
+ * CrossReference value.
+ *
  * @param {string} subinventory  - Store subinventory code (e.g. "AZIZMALL")
  * @param {string} date          - Invoice date in YYYY-MM-DD format
  * @param {string} paymentType   - "NORMAL" | "TABBY" | "TAMARA"
  * @returns {Promise<number>}    Stable CrossReference number
  */
 async function getOrCreateCrossReference(subinventory, date, paymentType) {
-  // 1. Return existing CrossReference for this combination if already assigned.
-  const existing = await prisma.vendInvoiceCrossRef.findUnique({
-    where: {
-      subinventory_date_paymentType: { subinventory, date, paymentType },
-    },
-    select: { crossReference: true },
-  });
-  if (existing) {
-    return existing.crossReference;
-  }
-
-  // 2. Determine the next available CrossReference by scanning the highest
-  //    value across VendInvoiceCrossRef, FusionInvoiceHeader and recent
-  //    ArInvoiceUpload payloads (same sources as the old implementation).
-  const [maxCrossRefRow, maxHeaderRow, recentUploads] = await Promise.all([
-    prisma.vendInvoiceCrossRef.findFirst({
-      orderBy: { crossReference: 'desc' },
+  return prisma.$transaction(async (tx) => {
+    // 1. Return existing CrossReference for this combination if already assigned.
+    const existing = await tx.vendInvoiceCrossRef.findUnique({
+      where: {
+        subinventory_date_paymentType: { subinventory, date, paymentType },
+      },
       select: { crossReference: true },
-    }),
-    prisma.fusionInvoiceHeader.findFirst({
-      orderBy: { requestId: 'desc' },
-      select: { requestId: true },
-    }),
-    prisma.arInvoiceUpload.findMany({
-      where: { payloadJson: { contains: 'CrossReference' } },
-      orderBy: { createdAt: 'desc' },
-      take: 10,
-    }),
-  ]);
-
-  let maxCrossRef = Math.max(
-    maxCrossRefRow?.crossReference ?? 0,
-    maxHeaderRow?.requestId ?? 0,
-    32886, // legacy minimum starting point
-  );
-
-  for (const upload of recentUploads) {
-    try {
-      const payload = JSON.parse(upload.payloadJson);
-      const crossRef = parseInt(payload.CrossReference, 10);
-      if (!isNaN(crossRef) && crossRef > maxCrossRef) {
-        maxCrossRef = crossRef;
-      }
-    } catch (_) {
-      // Ignore parsing errors
+    });
+    if (existing) {
+      return existing.crossReference;
     }
-  }
 
-  const next = maxCrossRef + 1;
+    // 2. Determine the next available CrossReference by scanning the highest
+    //    value across VendInvoiceCrossRef, FusionInvoiceHeader and recent
+    //    ArInvoiceUpload payloads (same sources as the old implementation).
+    const [maxCrossRefRow, maxHeaderRow, recentUploads] = await Promise.all([
+      tx.vendInvoiceCrossRef.findFirst({
+        orderBy: { crossReference: 'desc' },
+        select: { crossReference: true },
+      }),
+      tx.fusionInvoiceHeader.findFirst({
+        orderBy: { requestId: 'desc' },
+        select: { requestId: true },
+      }),
+      tx.arInvoiceUpload.findMany({
+        where: { payloadJson: { contains: 'CrossReference' } },
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      }),
+    ]);
 
-  // 3. Persist the new assignment.  If a concurrent request raced us to the
-  //    same slot, upsert ensures we keep the winner's value and return it.
-  const saved = await prisma.vendInvoiceCrossRef.upsert({
-    where: {
-      subinventory_date_paymentType: { subinventory, date, paymentType },
-    },
-    update: {}, // do not overwrite an existing crossReference
-    create: { subinventory, date, paymentType, crossReference: next },
-    select: { crossReference: true },
+    let maxCrossRef = Math.max(
+      maxCrossRefRow?.crossReference ?? 0,
+      maxHeaderRow?.requestId ?? 0,
+      32886, // legacy minimum starting point
+    );
+
+    for (const upload of recentUploads) {
+      try {
+        const payload = JSON.parse(upload.payloadJson);
+        const crossRef = parseInt(payload.CrossReference, 10);
+        if (!isNaN(crossRef) && crossRef > maxCrossRef) {
+          maxCrossRef = crossRef;
+        }
+      } catch (_) {
+        // Ignore parsing errors
+      }
+    }
+
+    const next = maxCrossRef + 1;
+
+    // 3. Persist the new assignment inside the same transaction so no
+    //    concurrent request can claim the same CrossReference value.
+    const saved = await tx.vendInvoiceCrossRef.create({
+      data: { subinventory, date, paymentType, crossReference: next },
+      select: { crossReference: true },
+    });
+
+    return saved.crossReference;
   });
-
-  return saved.crossReference;
 }
 
 /**
