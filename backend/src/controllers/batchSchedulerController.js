@@ -65,11 +65,11 @@ async function createSchedule(req, res, next) {
       retryEnabled, maxRetries, notifyOnFailure, notificationConfig,
     });
 
-    // Auto-start if enabled
+    // Auto-start the newly created schedule without restarting existing ones
     if (enabled !== false) {
       const created = await scheduler.getSchedule(scheduleId);
       if (created) {
-        await scheduler.start().catch((err) =>
+        await scheduler.startSchedule(created).catch((err) =>
           console.warn(`[BatchScheduler] Could not auto-start schedule ${scheduleId}: ${err.message}`)
         );
       }

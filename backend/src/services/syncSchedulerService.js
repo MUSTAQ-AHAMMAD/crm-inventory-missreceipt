@@ -234,16 +234,17 @@ function computeDateRange(schedule) {
 /**
  * Starts an execution record.
  * @param {string} scheduleId
- * @returns {Promise<object>} ScheduleExecution row
+ * @returns {Promise<object>} ScheduleExecution row (includes startedAt for duration calc)
  */
 async function startExecution(scheduleId) {
   const executionId = randomUUID();
+  const startedAt   = new Date();
   return prisma.scheduleExecution.create({
     data: {
       executionId,
       scheduleId,
-      status   : EXEC_STATUS.RUNNING,
-      startedAt: new Date(),
+      status: EXEC_STATUS.RUNNING,
+      startedAt,
     },
   });
 }
@@ -251,6 +252,8 @@ async function startExecution(scheduleId) {
 /**
  * Finalises an execution record.
  * @param {string} executionId
+ * @param {string} scheduleId   - parent schedule id (avoids extra DB lookup)
+ * @param {Date}   startedAt    - time the execution started (avoids extra DB lookup)
  * @param {object} outcome
  * @param {'SUCCESS'|'FAILED'} outcome.status
  * @param {number}  [outcome.recordsSynced]
@@ -258,10 +261,9 @@ async function startExecution(scheduleId) {
  * @param {string}  [outcome.errorMessage]
  * @returns {Promise<void>}
  */
-async function finishExecution(executionId, outcome) {
+async function finishExecution(executionId, scheduleId, startedAt, outcome) {
   const finishedAt = new Date();
-  const execution  = await prisma.scheduleExecution.findUnique({ where: { executionId } });
-  const durationMs = execution ? (finishedAt - new Date(execution.startedAt)) : 0;
+  const durationMs = startedAt ? (finishedAt - new Date(startedAt)) : 0;
 
   await prisma.scheduleExecution.update({
     where: { executionId },
@@ -275,16 +277,18 @@ async function finishExecution(executionId, outcome) {
     },
   });
 
-  // Update parent schedule counters
-  await prisma.syncSchedule.update({
-    where: { scheduleId: execution?.scheduleId },
-    data : {
-      lastRunAt    : finishedAt,
-      lastRunStatus: outcome.status,
-      runCount     : { increment: 1 },
-      failureCount : outcome.status === EXEC_STATUS.FAILED ? { increment: 1 } : undefined,
-    },
-  }).catch(() => { /* ignore if schedule was deleted */ });
+  if (scheduleId) {
+    // Update parent schedule counters — ignore if schedule was deleted
+    await prisma.syncSchedule.update({
+      where: { scheduleId },
+      data : {
+        lastRunAt    : finishedAt,
+        lastRunStatus: outcome.status,
+        runCount     : { increment: 1 },
+        failureCount : outcome.status === EXEC_STATUS.FAILED ? { increment: 1 } : undefined,
+      },
+    }).catch(() => {});
+  }
 }
 
 // ─── Job dispatcher ───────────────────────────────────────────────────────────
@@ -332,7 +336,7 @@ async function executeSchedule(schedule) {
 
     const result = await handler(dateFrom, dateTo, schedule);
 
-    await finishExecution(execution.executionId, {
+    await finishExecution(execution.executionId, schedule.scheduleId, execution.startedAt, {
       status       : EXEC_STATUS.SUCCESS,
       recordsSynced: result.recordsSynced || 0,
       recordsFailed: result.recordsFailed || 0,
@@ -350,7 +354,7 @@ async function executeSchedule(schedule) {
   } catch (err) {
     console.error(`[Scheduler] Schedule ${schedule.scheduleId} failed: ${err.message}`);
 
-    await finishExecution(execution.executionId, {
+    await finishExecution(execution.executionId, schedule.scheduleId, execution.startedAt, {
       status      : EXEC_STATUS.FAILED,
       errorMessage: err.message,
     });
@@ -480,4 +484,5 @@ module.exports = {
   // Lifecycle
   start,
   stop,
+  startSchedule,
 };
