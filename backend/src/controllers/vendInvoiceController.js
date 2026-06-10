@@ -467,14 +467,17 @@ async function uploadVendInvoice(req, res, next) {
       });
     }
 
+    // Maximum number of invoice lines per Oracle REST call. Oracle's REST gateway
+    // will return HTTP 504 when a single payload contains too many lines (e.g. 1700+).
+    // Splitting into smaller chunks keeps each request well within Oracle's timeout.
+    const LINE_CHUNK_SIZE = parseInt(process.env.ORACLE_INVOICE_LINE_CHUNK_SIZE, 10) || 200;
+
     // Generate payloads for each invoice group
     const payloads = [];
     // Stats tracked separately — not added to payload objects
     const payloadStats = [];
 
     for (const group of Object.values(invoiceGroups)) {
-      const crossReference = await getNextCrossReference();
-
       // Determine payment type label for comments
       let paymentTypeLabel = 'Cash/Bank';
       if (group.paymentType === 'TABBY') {
@@ -483,39 +486,55 @@ async function uploadVendInvoice(req, res, next) {
         paymentTypeLabel = 'Tamara';
       }
 
-      const payload = {
-        BusinessUnit: 'AlQurashi-KSA',
-        TransactionSource: 'Vend',
-        TransactionType: 'Vend Invoice',
-        TransactionDate: group.date,
-        AccountingDate: group.date,
-        BillToCustomerName: group.customerName,
-        BillToCustomerNumber: group.customerNumber,
-        BillToSite: group.siteNumber,
-        PaymentTerms: 'IMMEDIATE',
-        InvoiceCurrencyCode: 'SAR',
-        CrossReference: String(crossReference),
-        Comments: `${paymentTypeLabel} payment - Invoice generated from request ID ${crossReference}`,
-        receivablesInvoiceLines: group.lines,
-      };
+      // Split lines into chunks to avoid Oracle gateway timeouts on large payloads
+      const allLines = group.lines;
+      const totalChunks = Math.ceil(allLines.length / LINE_CHUNK_SIZE);
 
-      // Compute payload totals in separate variables (not attached to the payload)
-      const lineCount = group.lines.length;
-      let totalAmount = 0;
-      for (const line of group.lines) {
-        totalAmount += (line.Quantity || 0) * (line.UnitSellingPrice || 0);
+      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+        const chunkLines = allLines.slice(chunkIndex * LINE_CHUNK_SIZE, (chunkIndex + 1) * LINE_CHUNK_SIZE);
+
+        // Re-number lines within this chunk starting at 1 (Oracle requires sequential LineNumbers)
+        const renumberedLines = chunkLines.map((line, idx) => ({ ...line, LineNumber: idx + 1 }));
+
+        const crossReference = await getNextCrossReference();
+        const chunkSuffix = totalChunks > 1 ? ` (part ${chunkIndex + 1}/${totalChunks})` : '';
+
+        const payload = {
+          BusinessUnit: 'AlQurashi-KSA',
+          TransactionSource: 'Vend',
+          TransactionType: 'Vend Invoice',
+          TransactionDate: group.date,
+          AccountingDate: group.date,
+          BillToCustomerName: group.customerName,
+          BillToCustomerNumber: group.customerNumber,
+          BillToSite: group.siteNumber,
+          PaymentTerms: 'IMMEDIATE',
+          InvoiceCurrencyCode: 'SAR',
+          CrossReference: String(crossReference),
+          Comments: `${paymentTypeLabel} payment - Invoice generated from request ID ${crossReference}${chunkSuffix}`,
+          receivablesInvoiceLines: renumberedLines,
+        };
+
+        // Compute payload totals in separate variables (not attached to the payload)
+        const lineCount = renumberedLines.length;
+        let totalAmount = 0;
+        for (const line of renumberedLines) {
+          totalAmount += (line.Quantity || 0) * (line.UnitSellingPrice || 0);
+        }
+        totalAmount = Math.round(totalAmount * 100) / 100;
+
+        payloads.push(payload);
+        payloadStats.push({
+          crossReference: String(crossReference),
+          billToCustomerName: group.customerName,
+          transactionDate: group.date,
+          paymentType: group.paymentType,
+          lineCount,
+          totalAmount,
+          chunkIndex: totalChunks > 1 ? chunkIndex + 1 : undefined,
+          totalChunks: totalChunks > 1 ? totalChunks : undefined,
+        });
       }
-      totalAmount = Math.round(totalAmount * 100) / 100;
-
-      payloads.push(payload);
-      payloadStats.push({
-        crossReference: String(crossReference),
-        billToCustomerName: group.customerName,
-        transactionDate: group.date,
-        paymentType: group.paymentType,
-        lineCount,
-        totalAmount,
-      });
     }
 
     // Split payloads into positive and negative based on totalAmount
@@ -548,7 +567,7 @@ async function uploadVendInvoice(req, res, next) {
       negativeTotalAmount,
     };
 
-    console.log(`✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines (${positivePayloads.length} positive, ${negativePayloads.length} negative)`);
+    console.log(`✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines (${positivePayloads.length} positive, ${negativePayloads.length} negative, chunk size: ${parseInt(process.env.ORACLE_INVOICE_LINE_CHUNK_SIZE, 10) || 200})`);
 
     return res.json({
       success: true,
