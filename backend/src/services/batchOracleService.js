@@ -22,7 +22,7 @@
  *   ORACLE_SOAP_TIMEOUT=120000        (SOAP request timeout ms)
  *   ORACLE_AR_INVOICE_TIMEOUT=300000  (REST invoice timeout ms)
  *   ORACLE_INVOICE_LINE_CHUNK_SIZE=100 (batch chunk size)
- *   ORACLE_INVOICE_CONCURRENCY=3      (parallel workers)
+ *   ORACLE_INVOICE_CONCURRENCY=1      (parallel workers; default 1 = sequential)
  */
 
 const axios  = require('axios');
@@ -78,7 +78,8 @@ function getBatchConfig() {
                     parseInt(process.env.ORACLE_SOAP_TIMEOUT,          10)  || 300000,
 
     // Concurrency (parallel workers per batch run)
-    concurrency   : parseInt(process.env.ORACLE_INVOICE_CONCURRENCY,  10)  || 3,
+    // Default 1 = process invoices one at a time (sequential) to avoid Oracle conflicts.
+    concurrency   : parseInt(process.env.ORACLE_INVOICE_CONCURRENCY,  10)  || 1,
   };
 }
 
