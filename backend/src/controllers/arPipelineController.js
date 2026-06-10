@@ -858,7 +858,14 @@ async function createInvoiceBatch(req, res, next) {
             responseMessage = 'Oracle returned ServiceStatus=E (business validation error)';
           }
 
-          console.log(`✅ [Pipeline] Invoice ${uploadRecord.id} ${responseStatus} - TxnNumber: ${oracleData?.TransactionNumber}`);
+          if (responseStatus === 'FAILED') {
+            const errDetail = oracleData
+              ? JSON.stringify(oracleData).slice(0, 500)
+              : '(no response body)';
+            console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} FAILED (HTTP ${httpStatus}): ${errDetail}`);
+          } else {
+            console.log(`✅ [Pipeline] Invoice ${uploadRecord.id} SUCCESS - TxnNumber: ${oracleData?.TransactionNumber}`);
+          }
         } catch (err) {
           responseStatus  = 'FAILED';
           responseMessage = err.message;
