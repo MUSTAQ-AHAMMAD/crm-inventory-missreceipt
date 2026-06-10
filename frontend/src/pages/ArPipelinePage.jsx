@@ -22,6 +22,10 @@ import ErrorAlert from '../components/common/ErrorAlert'
 
 // ─── Shared helpers ──────────────────────────────────────────────────────────
 
+// Splitting large AR invoice batches into chunks prevents HTTP gateway timeouts
+// and keeps each Oracle REST call small (mirrors RECEIPT_CHUNK_SIZE for receipts).
+const INVOICE_CHUNK_SIZE = parseInt(import.meta.env.VITE_INVOICE_CHUNK_SIZE, 10) || 20
+
 function fmt(n, digits = 2) {
   if (n == null || n === '') return '—'
   const num = parseFloat(n)
@@ -736,6 +740,7 @@ export default function ArPipelinePage() {
     payloads: null,        // { positivePayloads, negativePayloads, stats }
     createResults: null,   // { total, successCount, failureCount }
     batchId: null,         // batchId returned from create-invoice-batch (async)
+    chunkProgress: { current: 0, total: 0 }, // chunk N of M indicator during creating
     error: '',
   })
 
@@ -769,22 +774,6 @@ export default function ArPipelinePage() {
       return data.status === 'PROCESSING' ? 2000 : false
     },
   })
-
-  // When batch finishes, update s1 state
-  useEffect(() => {
-    if (!batchProgress || s1.status !== 'creating') return
-    const { status, successCount, failureCount, totalRecords, invoiceResults } = batchProgress
-    if (status === 'PROCESSING') return
-    const newStatus = failureCount === 0 ? 'done' : successCount === 0 ? 'error' : 'partial'
-    setS1(prev => ({
-      ...prev,
-      status: newStatus,
-      createResults: { total: totalRecords, successCount, failureCount, invoiceResults: invoiceResults || null },
-      error: failureCount > 0 && successCount === 0 ? `All ${failureCount} invoices failed.` : '',
-    }))
-    refetchSummary()
-    queryClient.invalidateQueries({ queryKey: ['arPipelinePendingApply'] })
-  }, [batchProgress, s1.status, refetchSummary, queryClient])
 
   // ─── Derived flags ────────────────────────────────────────────────────────
   const filesReady       = !!(paymentFile && salesFile)
@@ -835,13 +824,71 @@ export default function ArPipelinePage() {
 
   const handleCreateInvoices = async () => {
     if (!allInvoicePayloads.length) return
-    setS1(prev => ({ ...prev, status: 'creating', createResults: null, batchId: null, error: '' }))
+
+    // Split all payloads into chunks so each HTTP request stays small and
+    // Oracle is never flooded with one massive body (mirrors VendReceiptPage chunking).
+    const chunks = []
+    for (let i = 0; i < allInvoicePayloads.length; i += INVOICE_CHUNK_SIZE) {
+      chunks.push(allInvoicePayloads.slice(i, i + INVOICE_CHUNK_SIZE))
+    }
+
+    setS1(prev => ({
+      ...prev,
+      status: 'creating',
+      createResults: null,
+      batchId: null,
+      chunkProgress: { current: 0, total: chunks.length },
+      error: '',
+    }))
+
+    let totalSuccess = 0
+    let totalFail = 0
+    const allInvoiceResults = []
+
     try {
-      const res = await api.post('/ar-pipeline/create-invoice-batch', {
-        payloads: allInvoicePayloads,
-      })
-      // Respond with batchId immediately; polling useQuery handles completion
-      setS1(prev => ({ ...prev, batchId: res.data.batchId }))
+      for (let ci = 0; ci < chunks.length; ci++) {
+        // Update chunk counter so the UI shows "Chunk N of M"
+        setS1(prev => ({ ...prev, chunkProgress: { current: ci + 1, total: chunks.length } }))
+
+        // Submit this chunk; backend responds immediately with a batchId
+        const res = await api.post('/ar-pipeline/create-invoice-batch', { payloads: chunks[ci] })
+        const batchId = res.data.batchId
+        setS1(prev => ({ ...prev, batchId }))
+
+        // Poll imperatively until Oracle finishes processing this chunk
+        let batchResult = null
+        while (true) {
+          const data = await api.get(`/ar-pipeline/invoice-batch/${batchId}/progress`).then(r => r.data)
+          if (data.status !== 'PROCESSING') { batchResult = data; break }
+          await new Promise(r => setTimeout(r, 2000))
+        }
+
+        totalSuccess += batchResult.successCount || 0
+        totalFail    += batchResult.failureCount || 0
+
+        // Merge per-invoice results, re-indexing so indices are globally unique
+        const offset = ci * INVOICE_CHUNK_SIZE
+        if (batchResult.invoiceResults) {
+          for (const r of batchResult.invoiceResults) {
+            allInvoiceResults.push({ ...r, index: offset + r.index })
+          }
+        }
+      }
+
+      const newStatus = totalFail === 0 ? 'done' : totalSuccess === 0 ? 'error' : 'partial'
+      setS1(prev => ({
+        ...prev,
+        status: newStatus,
+        createResults: {
+          total: allInvoicePayloads.length,
+          successCount: totalSuccess,
+          failureCount: totalFail,
+          invoiceResults: allInvoiceResults.length > 0 ? allInvoiceResults : null,
+        },
+        error: totalFail > 0 && totalSuccess === 0 ? `All ${totalFail} invoices failed.` : '',
+      }))
+      refetchSummary()
+      queryClient.invalidateQueries({ queryKey: ['arPipelinePendingApply'] })
     } catch (err) {
       const msg = err.response?.data?.error || 'Batch invoice creation failed.'
       setS1(prev => ({ ...prev, status: 'error', error: msg }))
@@ -1099,23 +1146,47 @@ export default function ArPipelinePage() {
           )}
 
           {/* Live progress during batch creation */}
-          {s1.status === 'creating' && batchProgress && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm">
-              <p className="font-semibold text-blue-700 mb-2">⏳ Processing invoices in background…</p>
-              <div className="flex items-center gap-3">
-                <div className="flex-1 bg-blue-100 rounded-full h-2 overflow-hidden">
-                  <div
-                    className="bg-blue-500 h-2 rounded-full transition-all"
-                    style={{ width: `${batchProgress.totalRecords > 0 ? Math.round((batchProgress.processed / batchProgress.totalRecords) * 100) : 0}%` }}
-                  />
-                </div>
-                <span className="text-xs text-blue-700 whitespace-nowrap">
-                  {batchProgress.processed} / {batchProgress.totalRecords}
-                </span>
+          {s1.status === 'creating' && (
+            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="font-semibold text-blue-700">⏳ Processing invoices…</p>
+                {s1.chunkProgress.total > 1 && (
+                  <span className="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
+                    Chunk {s1.chunkProgress.current} of {s1.chunkProgress.total}
+                  </span>
+                )}
               </div>
-              {(batchProgress.successCount > 0 || batchProgress.failureCount > 0) && (
-                <p className="text-xs text-blue-600 mt-1">
-                  ✓ {batchProgress.successCount} succeeded · ✗ {batchProgress.failureCount} failed
+              {/* Overall chunk progress bar */}
+              {s1.chunkProgress.total > 1 && (
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 bg-blue-100 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-blue-400 h-2 rounded-full transition-all"
+                      style={{ width: `${Math.round((s1.chunkProgress.current / s1.chunkProgress.total) * 100)}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-blue-600 whitespace-nowrap">
+                    {s1.chunkProgress.current} / {s1.chunkProgress.total} chunks
+                  </span>
+                </div>
+              )}
+              {/* Per-chunk invoice progress bar (from latest batchProgress poll) */}
+              {batchProgress && (
+                <div className="flex items-center gap-3">
+                  <div className="flex-1 bg-blue-100 rounded-full h-2 overflow-hidden">
+                    <div
+                      className="bg-blue-500 h-2 rounded-full transition-all"
+                      style={{ width: `${batchProgress.totalRecords > 0 ? Math.round((batchProgress.processed / batchProgress.totalRecords) * 100) : 0}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-blue-700 whitespace-nowrap">
+                    {batchProgress.processed} / {batchProgress.totalRecords} in chunk
+                  </span>
+                </div>
+              )}
+              {batchProgress && (batchProgress.successCount > 0 || batchProgress.failureCount > 0) && (
+                <p className="text-xs text-blue-600">
+                  ✓ {batchProgress.successCount} succeeded · ✗ {batchProgress.failureCount} failed (this chunk)
                 </p>
               )}
             </div>
