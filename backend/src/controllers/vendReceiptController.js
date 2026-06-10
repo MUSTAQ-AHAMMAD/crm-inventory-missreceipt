@@ -129,11 +129,11 @@ function parseNum(row, aliases, def = 0) {
 function normalizeDate(raw) {
   if (!raw) return null;
   if (raw instanceof Date) {
-    // xlsx creates Date objects using local time, so read them back with local methods
-    // to preserve the exact date shown in the Excel sheet without any timezone shift.
-    const y = raw.getFullYear();
-    const m = String(raw.getMonth() + 1).padStart(2, '0');
-    const d = String(raw.getDate()).padStart(2, '0');
+    // Use UTC methods to match how vendInvoiceController reads dates, avoiding
+    // any local-timezone shift that would cause a 1-day offset.
+    const y = raw.getUTCFullYear();
+    const m = String(raw.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(raw.getUTCDate()).padStart(2, '0');
     return `${y}-${m}-${d}`;
   }
   const s = String(raw).trim();
@@ -146,7 +146,9 @@ function normalizeDate(raw) {
   if (dmySlash) return `${dmySlash[3]}-${dmySlash[2]}-${dmySlash[1]}`;
   if (/^\d+(\.\d+)?$/.test(s)) {
     const serial = parseFloat(s);
-    const epoch = new Date(Date.UTC(1899, 11, 30));
+    // Use epoch = Dec 31, 1899 (matching vendInvoiceController) so that Excel serial
+    // numbers resolve to the same date in both controllers. Dec 30 epoch was 1 day off.
+    const epoch = new Date(Date.UTC(1899, 11, 31));
     const adj = serial > 60 ? serial - 1 : serial;
     const d = new Date(epoch.getTime() + adj * 86400000);
     const y = d.getUTCFullYear();
@@ -512,15 +514,19 @@ async function canonicalMethodName(rawMethod, region) {
 // ─── Invoice lookup ────────────────────────────────────────────────────────────
 
 /**
- * Find the FusionInvoiceHeader that matches a given store + date + paymentType.
+ * Find the FusionInvoiceHeader that matches a given store + paymentType.
+ * The date from the payment file is NOT used — the most recently created
+ * SUCCESS invoice for the store is returned, and its txnDate becomes the
+ * receipt date.  This avoids any off-by-one-day mismatch between the
+ * payment file date and the AR invoice date.
  *
  * Strategy:
  *  1. Use FusionSalesMetadata to resolve siteNumber for (paymentType, subinventory)
- *  2. Search FusionInvoiceHeader where billToLocation = siteNumber AND txnDate = date
+ *  2. Search FusionInvoiceHeader by billToLocation = siteNumber (no date filter)
  *
- * Returns the most recently created header if multiple exist.
+ * Returns the most recently created header.
  */
-async function findInvoiceHeader(subinventory, date, paymentType) {
+async function findInvoiceHeader(subinventory, paymentType) {
   // 1. Resolve customer site via FusionSalesMetadata
   let siteNumber = null;
   let businessUnit = DEFAULT_BUSINESS_UNIT;
@@ -535,34 +541,22 @@ async function findInvoiceHeader(subinventory, date, paymentType) {
     }
   } catch (_) { /* ignore */ }
 
-  // 2. Build date range for the given date (midnight to midnight UTC)
-  const dayStart = new Date(`${date}T00:00:00.000Z`);
-  const dayEnd   = new Date(`${date}T23:59:59.999Z`);
-
-  // 3. Try matching by billToLocation (siteNumber)
+  // 2. Try matching by billToLocation (siteNumber) — most recent SUCCESS invoice
   let headers = [];
   if (siteNumber) {
     headers = await prisma.fusionInvoiceHeader.findMany({
-      where: {
-        billToLocation: siteNumber,
-        txnDate: { gte: dayStart, lte: dayEnd },
-        status: 'SUCCESS',
-      },
+      where: { billToLocation: siteNumber, status: 'SUCCESS' },
       orderBy: { createdAt: 'desc' },
       take: 1,
     });
   }
 
-  // 3b. Fallback: match by billToAccNumber when billToLocation produced no results
+  // 3. Fallback: match by billToAccNumber
   if (headers.length === 0 && customerAccNumber) {
     const accountNumber = parseInt(customerAccNumber, 10);
     if (!isNaN(accountNumber)) {
       headers = await prisma.fusionInvoiceHeader.findMany({
-        where: {
-          billToAccNumber: accountNumber,
-          txnDate: { gte: dayStart, lte: dayEnd },
-          status: 'SUCCESS',
-        },
+        where: { billToAccNumber: accountNumber, status: 'SUCCESS' },
         orderBy: { createdAt: 'desc' },
         take: 1,
       });
@@ -574,7 +568,6 @@ async function findInvoiceHeader(subinventory, date, paymentType) {
     headers = await prisma.fusionInvoiceHeader.findMany({
       where: {
         billToCustName: { contains: subinventory, mode: 'insensitive' },
-        txnDate: { gte: dayStart, lte: dayEnd },
         status: 'SUCCESS',
       },
       orderBy: { createdAt: 'desc' },
@@ -703,9 +696,9 @@ async function generateReceipts(req, res, next) {
       const isCashRounding = CASH_ROUNDING_METHODS_UPPER.has(methodUpper);
 
       // ── Resolve invoice ───────────────────────────────────────────────────
-      const invoiceCacheKey = `${subinventory}|${date}|${paymentType}`;
+      const invoiceCacheKey = `${subinventory}|${paymentType}`;
       if (!(invoiceCacheKey in invoiceCache)) {
-        invoiceCache[invoiceCacheKey] = await findInvoiceHeader(subinventory, date, paymentType);
+        invoiceCache[invoiceCacheKey] = await findInvoiceHeader(subinventory, paymentType);
       }
       const invoiceInfo = invoiceCache[invoiceCacheKey];
 
@@ -765,8 +758,8 @@ async function generateReceipts(req, res, next) {
         ? (cashAccountId || bankAccountId)
         : bankAccountId;
 
-      // Use the AR invoice's txnDate as the receipt date so it matches the invoice exactly.
-      const receiptDate = invoiceInfo.invoiceDate || date;
+      // Receipt date is always taken directly from the AR invoice — never from the payment file.
+      const receiptDate = invoiceInfo.invoiceDate;
 
       standardPayloads.push({
         ReceiptNumber:             `${canonicalName}-${txnNumber}`,
