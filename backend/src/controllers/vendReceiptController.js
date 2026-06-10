@@ -515,10 +515,11 @@ async function canonicalMethodName(rawMethod, region) {
 
 /**
  * Find the FusionInvoiceHeader that matches a given store + paymentType.
- * The date from the payment file is NOT used — the most recently created
- * SUCCESS invoice for the store is returned, and its txnDate becomes the
- * receipt date.  This avoids any off-by-one-day mismatch between the
- * payment file date and the AR invoice date.
+ * Returns the most recently created SUCCESS invoice for the store so that
+ * the txnNumber, businessUnit, and customerAccNumber are available for the
+ * receipt payload.  The receipt date itself is taken from the payment file
+ * (not from this invoice's txnDate) so it always matches the AR invoice
+ * TransactionDate from Step 1.
  *
  * Strategy:
  *  1. Use FusionSalesMetadata to resolve siteNumber for (paymentType, subinventory)
@@ -758,8 +759,9 @@ async function generateReceipts(req, res, next) {
         ? (cashAccountId || bankAccountId)
         : bankAccountId;
 
-      // Receipt date is always taken directly from the AR invoice — never from the payment file.
-      const receiptDate = invoiceInfo.invoiceDate;
+      // Receipt date comes from the payment file date so it always matches the AR invoice
+      // TransactionDate (both originate from the same daily Vend data).
+      const receiptDate = date;
 
       standardPayloads.push({
         ReceiptNumber:             `${canonicalName}-${txnNumber}`,
