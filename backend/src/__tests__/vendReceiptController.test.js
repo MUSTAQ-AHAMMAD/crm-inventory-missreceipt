@@ -8,6 +8,9 @@
  *  - Strategy 3b: subinventory → FusionSalesMetadata → Oracle SOAP → CUST_ACCOUNT_ID
  *  - Strategy 4:  Oracle SOAP customer lookup (ReceivablesCustomerProfileService)
  *  - Correct SOAP CustomerId population
+ *
+ * Also covers generateReceipts:
+ *  - Receipt date must equal the payment file date (not the invoice's stored txnDate)
  */
 
 jest.mock('../services/prisma', () => ({
@@ -24,6 +27,13 @@ jest.mock('../services/prisma', () => ({
   },
   fusionStandardReceipt: {
     findFirst: jest.fn(),
+    create: jest.fn(),
+  },
+  fusionReceiptMethod: {
+    findFirst: jest.fn(),
+    findMany: jest.fn(),
+  },
+  vendReceiptBatch: {
     create: jest.fn(),
   },
 }));
@@ -45,11 +55,13 @@ jest.mock('p-limit', () => () => (fn) => fn());
 
 const request = require('supertest');
 const express = require('express');
+const fileUpload = require('express-fileupload');
 const axios = require('axios');
+const XLSX = require('xlsx');
 const prisma = require('../services/prisma');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
 
-const { submitStandardReceipts } = require('../controllers/vendReceiptController');
+const { submitStandardReceipts, generateReceipts } = require('../controllers/vendReceiptController');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -61,6 +73,24 @@ function buildApp() {
     next();
   }, submitStandardReceipts);
   return app;
+}
+
+function buildGenerateApp() {
+  const app = express();
+  app.use(fileUpload());
+  app.post('/generate', (req, _res, next) => {
+    req.user = { id: 'test-user' };
+    next();
+  }, generateReceipts);
+  return app;
+}
+
+/** Build a minimal XLSX buffer with payment line rows */
+function buildPaymentXlsx(rows) {
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Sheet1');
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
 }
 
 const BASE_PAYLOAD = {
@@ -544,5 +574,117 @@ describe('submitStandardReceipts – skip rules', () => {
     expect(res.body.skipCount).toBe(0);
     expect(res.body.successCount).toBe(1);
     expect(createOracleSoapClient).toHaveBeenCalled();
+  });
+});
+
+// ─── generateReceipts – receipt date tests ────────────────────────────────────
+
+describe('generateReceipts – receipt date matches payment file date', () => {
+  let app;
+
+  beforeAll(() => {
+    app = buildGenerateApp();
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    // vendReceiptBatch.create returns a minimal batch record
+    prisma.vendReceiptBatch.create.mockResolvedValue({ id: 1 });
+    // fusionReceiptMethod: return a method so canonicalName resolves
+    prisma.fusionReceiptMethod.findFirst.mockResolvedValue({
+      receiptMethodName: 'Mada',
+      receiptMethodId: '300000001518641',
+      receiptBankCharge: 0.015,
+      receiptMethodTax: 0.15,
+    });
+    prisma.fusionReceiptMethod.findMany.mockResolvedValue([]);
+    // VendhqRegister: return a register with bankAccountId
+    prisma.vendhqRegister.findFirst.mockResolvedValue({
+      registerName: 'EXBSA',
+      bankAccountId: '300000016780340',
+      bankAccount: 'Test Bank',
+      cashAccountId: '',
+      region: 'SA',
+    });
+    // resolveOrgIdByRegion uses fusionStandardReceipt.findFirst
+    prisma.fusionStandardReceipt.findFirst.mockResolvedValue(null);
+    // Default: metadata not found (falls through to billToCustName strategy)
+    prisma.fusionSalesMetadata.findFirst.mockResolvedValue(null);
+  });
+
+  test('receipt date equals payment file date even when matched invoice has a different txnDate', async () => {
+    // Invoice in DB is from 2025-03-24 (previous day) — txnDate must NOT bleed into ReceiptDate
+    prisma.fusionInvoiceHeader.findMany.mockResolvedValue([
+      {
+        id: 1,
+        txnNumber: 2671635,
+        txnDate: new Date('2025-03-24T00:00:00.000Z'),
+        billToLocation: null,
+        billToAccNumber: null,
+        billToCustName: 'EXBSA Store',
+        businessUnit: 'AlQurashi-KSA',
+        status: 'SUCCESS',
+        createdAt: new Date('2025-03-24T10:00:00.000Z'),
+      },
+    ]);
+
+    // Payment file date is 2025-03-25 — this is what the receipt date must be
+    const paymentDate = '2025-03-25';
+    const xlsxBuffer = buildPaymentXlsx([
+      { Date: paymentDate, Store: 'EXBSA', 'Payment Method': 'Mada', Amount: 1000 },
+    ]);
+
+    const res = await request(app)
+      .post('/generate')
+      .field('region', 'SA')
+      .attach('paymentLines', xlsxBuffer, 'payments.xlsx');
+
+    expect(res.status).toBe(200);
+    expect(res.body.standardPayloads).toBeDefined();
+    expect(res.body.standardPayloads.length).toBeGreaterThan(0);
+
+    const stdPayload = res.body.standardPayloads[0];
+    // ReceiptDate must equal the payment file date (2025-03-25), not the invoice txnDate (2025-03-24)
+    expect(stdPayload.ReceiptDate).toBe(paymentDate);
+    expect(stdPayload.AccountingDate).toBe(paymentDate);
+
+    if (res.body.miscPayloads?.length > 0) {
+      const miscPayload = res.body.miscPayloads[0];
+      expect(miscPayload.ReceiptDate).toBe(paymentDate);
+      expect(miscPayload.GlDate).toBe(paymentDate);
+      expect(miscPayload.DepositDate).toBe(paymentDate);
+    }
+  });
+
+  test('receipt date equals payment file date when invoice txnDate matches', async () => {
+    // Invoice in DB also from 2025-03-25 — ReceiptDate should still equal payment date
+    prisma.fusionInvoiceHeader.findMany.mockResolvedValue([
+      {
+        id: 2,
+        txnNumber: 2672610,
+        txnDate: new Date('2025-03-25T00:00:00.000Z'),
+        billToLocation: null,
+        billToAccNumber: null,
+        billToCustName: 'EXBSA Store',
+        businessUnit: 'AlQurashi-KSA',
+        status: 'SUCCESS',
+        createdAt: new Date('2025-03-25T08:00:00.000Z'),
+      },
+    ]);
+
+    const paymentDate = '2025-03-25';
+    const xlsxBuffer = buildPaymentXlsx([
+      { Date: paymentDate, Store: 'EXBSA', 'Payment Method': 'Mada', Amount: 500 },
+    ]);
+
+    const res = await request(app)
+      .post('/generate')
+      .field('region', 'SA')
+      .attach('paymentLines', xlsxBuffer, 'payments.xlsx');
+
+    expect(res.status).toBe(200);
+    const stdPayload = res.body.standardPayloads[0];
+    expect(stdPayload.ReceiptDate).toBe(paymentDate);
+    expect(stdPayload.AccountingDate).toBe(paymentDate);
   });
 });
