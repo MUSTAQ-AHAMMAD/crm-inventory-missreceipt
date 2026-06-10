@@ -803,7 +803,12 @@ async function createInvoiceBatch(req, res, next) {
       const transientItems = []; // queued for pass-2 retry
 
       const oracleAuth = Buffer.from(`${username}:${password}`).toString('base64');
-      const invoiceTimeout = parseInt(process.env.ORACLE_SOAP_TIMEOUT) || 120000;
+      // AR invoice REST calls can take longer than SOAP calls (large response body, Oracle processing).
+      // Use a dedicated ORACLE_AR_INVOICE_TIMEOUT (default 5 min) so chunked invoices never time out.
+      const invoiceTimeout =
+        parseInt(process.env.ORACLE_AR_INVOICE_TIMEOUT, 10) ||
+        parseInt(process.env.ORACLE_SOAP_TIMEOUT, 10) ||
+        300000;
 
       /**
        * Submits one invoice to Oracle via REST and persists the result.
