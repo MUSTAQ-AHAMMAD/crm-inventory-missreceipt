@@ -22,6 +22,11 @@ import ErrorAlert from '../components/common/ErrorAlert'
 
 const REGIONS = ['SA', 'KW', 'BH', 'AE', 'OM', 'SN']
 
+// Maximum number of receipt payloads sent in a single API call.
+// Splitting large batches into chunks prevents HTTP gateway timeouts
+// (mirrors ORACLE_INVOICE_LINE_CHUNK_SIZE used for AR/Vend invoices).
+const RECEIPT_CHUNK_SIZE = parseInt(import.meta.env.VITE_RECEIPT_CHUNK_SIZE, 10) || 50
+
 function fmt(n) {
   if (n == null || n === '') return '—'
   const num = parseFloat(n)
@@ -112,6 +117,8 @@ export default function VendReceiptPage() {
   const [error, setError] = useState('')
   const [submittingStd, setSubmittingStd] = useState(false)
   const [submittingMisc, setSubmittingMisc] = useState(false)
+  const [stdChunkProgress, setStdChunkProgress] = useState(null)   // { current, total }
+  const [miscChunkProgress, setMiscChunkProgress] = useState(null) // { current, total }
   const [submitResultStd, setSubmitResultStd] = useState(null)
   const [submitResultMisc, setSubmitResultMisc] = useState(null)
   const [activeTab, setActiveTab] = useState('standard')
@@ -150,36 +157,92 @@ export default function VendReceiptPage() {
   const handleSubmitStandard = async () => {
     if (!result?.standardPayloads?.length) return
     setError('')
+    setSubmitResultStd(null)
+    setStdChunkProgress(null)
     setSubmittingStd(true)
+
+    const payloads = result.standardPayloads
+    const totalChunks = Math.ceil(payloads.length / RECEIPT_CHUNK_SIZE)
+
+    // Aggregated totals across all chunks
+    let totalSuccess = 0
+    let totalFailure = 0
+    let totalSkip = 0
+    let totalTime = 0
+    const allLogs = []
+
     try {
-      const res = await api.post('/vend-receipt/submit-standard', {
-        batchId: result.batchId,
-        payloads: result.standardPayloads,
+      for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+        setStdChunkProgress({ current: chunkIdx + 1, total: totalChunks })
+        const chunk = payloads.slice(chunkIdx * RECEIPT_CHUNK_SIZE, (chunkIdx + 1) * RECEIPT_CHUNK_SIZE)
+        const res = await api.post('/vend-receipt/submit-standard', {
+          batchId: result.batchId,
+          payloads: chunk,
+        })
+        totalSuccess += res.data.successCount ?? 0
+        totalFailure += res.data.failureCount ?? 0
+        totalSkip    += res.data.skipCount    ?? 0
+        totalTime    += res.data.processingTimeSeconds ?? 0
+        if (res.data.logs?.length) allLogs.push(...res.data.logs)
+      }
+
+      setSubmitResultStd({
+        successCount: totalSuccess,
+        failureCount: totalFailure,
+        skipCount: totalSkip,
+        processingTimeSeconds: parseFloat(totalTime.toFixed(2)),
+        logs: allLogs,
       })
-      setSubmitResultStd(res.data)
       queryClient.invalidateQueries({ queryKey: ['vendReceiptBatches'] })
     } catch (err) {
       setError(err.response?.data?.error || 'Standard receipt submission failed.')
     } finally {
       setSubmittingStd(false)
+      setStdChunkProgress(null)
     }
   }
 
   const handleSubmitMisc = async () => {
     if (!result?.miscPayloads?.length) return
     setError('')
+    setSubmitResultMisc(null)
+    setMiscChunkProgress(null)
     setSubmittingMisc(true)
+
+    const payloads = result.miscPayloads
+    const totalChunks = Math.ceil(payloads.length / RECEIPT_CHUNK_SIZE)
+
+    let totalSuccess = 0
+    let totalFailure = 0
+    let totalTime = 0
+    const allLogs = []
+
     try {
-      const res = await api.post('/vend-receipt/submit-misc', {
-        batchId: result.batchId,
-        payloads: result.miscPayloads,
+      for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+        setMiscChunkProgress({ current: chunkIdx + 1, total: totalChunks })
+        const chunk = payloads.slice(chunkIdx * RECEIPT_CHUNK_SIZE, (chunkIdx + 1) * RECEIPT_CHUNK_SIZE)
+        const res = await api.post('/vend-receipt/submit-misc', {
+          batchId: result.batchId,
+          payloads: chunk,
+        })
+        totalSuccess += res.data.successCount ?? 0
+        totalFailure += res.data.failureCount ?? 0
+        totalTime    += res.data.processingTimeSeconds ?? 0
+        if (res.data.logs?.length) allLogs.push(...res.data.logs)
+      }
+
+      setSubmitResultMisc({
+        successCount: totalSuccess,
+        failureCount: totalFailure,
+        processingTimeSeconds: parseFloat(totalTime.toFixed(2)),
+        logs: allLogs,
       })
-      setSubmitResultMisc(res.data)
       queryClient.invalidateQueries({ queryKey: ['vendReceiptBatches'] })
     } catch (err) {
       setError(err.response?.data?.error || 'Misc receipt submission failed.')
     } finally {
       setSubmittingMisc(false)
+      setMiscChunkProgress(null)
     }
   }
 
@@ -382,7 +445,12 @@ export default function VendReceiptPage() {
                   disabled={!result.standardPayloads?.length || submittingStd}
                   className="bg-green-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {submittingStd ? <><Spinner size="sm" /> Submitting…</> : '🚀 Submit Standard Receipts to Oracle'}
+                  {submittingStd
+                    ? <><Spinner size="sm" /> {stdChunkProgress && stdChunkProgress.total > 1
+                        ? `Chunk ${stdChunkProgress.current}/${stdChunkProgress.total}…`
+                        : 'Submitting…'
+                      }</>
+                    : '🚀 Submit Standard Receipts to Oracle'}
                 </button>
                 <button
                   onClick={() => handleCopyJson(result.standardPayloads)}
@@ -423,7 +491,12 @@ export default function VendReceiptPage() {
                   disabled={!result.miscPayloads?.length || submittingMisc}
                   className="bg-orange-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-orange-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
-                  {submittingMisc ? <><Spinner size="sm" /> Submitting…</> : '🚀 Submit Misc Receipts to Oracle'}
+                  {submittingMisc
+                    ? <><Spinner size="sm" /> {miscChunkProgress && miscChunkProgress.total > 1
+                        ? `Chunk ${miscChunkProgress.current}/${miscChunkProgress.total}…`
+                        : 'Submitting…'
+                      }</>
+                    : '🚀 Submit Misc Receipts to Oracle'}
                 </button>
                 <button
                   onClick={() => handleCopyJson(result.miscPayloads)}
