@@ -500,6 +500,84 @@ model FusionApplyReceipt {
   @@index([batchId])
 }
 
+// ─── Batch Scheduling Tables ──────────────────────────────────────────────────
+// Mirrors oracle-crm/src/scheduler.js sync_schedules + schedule_executions tables.
+// Also mirrors oracle-db/init-scripts/02-create-schema.sql SALES_INTEGRATION_STATUS pattern.
+
+// Stores configuration for recurring Oracle Fusion sync jobs.
+// Mirrors oracle-crm/src/scheduler.js sync_schedules table schema.
+model SyncSchedule {
+  id                 Int      @id @default(autoincrement())
+  scheduleId         String   @unique   // UUID
+  name               String
+  enabled            Boolean  @default(true)
+  // AR_INVOICE_BATCH | STANDARD_RECEIPT | MISC_RECEIPT | APPLY_RECEIPT | FULL_PIPELINE
+  scheduleType       String
+  cronExpression     String
+  region             String?
+  // true = use lastSyncTimestamp as cursor; false = use manual dateFrom/dateTo
+  incremental        Boolean  @default(true)
+  dateFrom           String?
+  dateTo             String?
+  lookbackDays       Int      @default(1)
+  retryEnabled       Boolean  @default(true)
+  maxRetries         Int      @default(3)
+  notifyOnFailure    Boolean  @default(true)
+  notificationConfig String?  // JSON: email/webhook settings
+  lastRunAt          DateTime?
+  // Checkpoint – equivalent to JDBC ResultSet cursor position for incremental fetch.
+  // Next run processes only records created after this timestamp.
+  lastSyncTimestamp  String?
+  lastRunStatus      String?  // RUNNING | SUCCESS | FAILED
+  runCount           Int      @default(0)
+  failureCount       Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  executions         ScheduleExecution[]
+
+  @@index([enabled])
+  @@index([scheduleType])
+  @@index([region])
+}
+
+// Tracks each execution of a scheduled batch job.
+// Mirrors oracle-crm/src/scheduler.js schedule_executions table schema.
+model ScheduleExecution {
+  id            Int      @id @default(autoincrement())
+  scheduleId    String
+  schedule      SyncSchedule @relation(fields: [scheduleId], references: [scheduleId])
+  executionId   String   @unique  // UUID
+  status        String   @default("RUNNING")  // RUNNING | SUCCESS | FAILED
+  errorMessage  String?
+  recordsSynced Int      @default(0)
+  recordsFailed Int      @default(0)
+  startedAt     DateTime @default(now())
+  finishedAt    DateTime?
+  durationMs    Int?
+
+  @@index([scheduleId])
+  @@index([startedAt])
+  @@index([status])
+}
+
+// Stores fine-grained batch checkpoints – one row per (scheduleId, batchType, key).
+// Mirrors the SALES_INTEGRATION_STATUS table in integration-Oracle oracle-db schema.
+// Enables resumable processing: if a batch is interrupted, it restarts from the last
+// committed checkpoint rather than reprocessing the entire date range.
+model BatchCheckpoint {
+  id           Int      @id @default(autoincrement())
+  scheduleId   String?  // optional link to a SyncSchedule
+  batchType    String   // e.g. "AR_INVOICE_BATCH", "STANDARD_RECEIPT"
+  checkpointKey String  // e.g. region, dateFrom, or a cursor identifier
+  checkpointValue String // last successfully processed cursor value
+  recordsProcessed Int  @default(0)
+  lastUpdated  DateTime @default(now()) @updatedAt
+
+  @@unique([scheduleId, batchType, checkpointKey])
+  @@index([batchType, checkpointKey])
+}
+
 // VendReceiptBatch - tracks each Vend Receipt payload generation and submission
 model VendReceiptBatch {
   id                 Int      @id @default(autoincrement())

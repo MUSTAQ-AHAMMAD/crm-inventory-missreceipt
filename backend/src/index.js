@@ -25,6 +25,7 @@ const adminRoutes = require('./routes/admin');
 const reportsRoutes = require('./routes/reports');
 const arPipelineRoutes = require('./routes/arPipeline');
 const vendhqRegistersRoutes = require('./routes/vendhqRegisters');
+const batchSchedulerRoutes = require('./routes/batchScheduler');
 
 const { errorHandler } = require('./middleware/errorHandler');
 const { requestLogger } = require('./middleware/requestLogger');
@@ -96,6 +97,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/ar-pipeline', arPipelineRoutes);
 app.use('/api/vendhq-registers', vendhqRegistersRoutes);
+app.use('/api/batch-scheduler', batchSchedulerRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => {
@@ -109,6 +111,13 @@ app.use(errorHandler);
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`CRM Backend running on http://0.0.0.0:${PORT}`);
   console.log(`Swagger docs available at http://0.0.0.0:${PORT}/api/docs`);
+
+  // Start cron-based batch scheduler (mirrors oracle-crm/src/scheduler.js start())
+  // Loads all enabled SyncSchedule rows from DB and starts their cron tasks.
+  const scheduler = require('./services/syncSchedulerService');
+  scheduler.start().catch((err) =>
+    console.warn(`[Scheduler] Failed to start schedules: ${err.message}`)
+  );
 });
 
 server.on('error', (err) => {
