@@ -22,31 +22,28 @@ const axios = require('axios');
 const pLimit = require('p-limit');
 const pRetry = require('p-retry');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
+const {
+  getBatchConfig,
+  isTransientError: isBatchTransientError,
+} = require('../services/batchOracleService');
 
-const CONCURRENT_REQUESTS = 5;
-const MAX_RETRIES = 2;
-const RETRY_MIN_TIMEOUT = 500;
-const RETRY_MAX_TIMEOUT = 3000;
+// Pull concurrency / retry / timeout from the centralised batch config
+// (mirrors jdbc-config.properties pool settings + oracleDbClient.js retry loop)
+const _batchCfg = getBatchConfig();
+const CONCURRENT_REQUESTS = parseInt(process.env.CONCURRENT_REQUESTS, 10) || 5;
+const MAX_RETRIES = _batchCfg.retry.maxRetries;
+const RETRY_MIN_TIMEOUT = _batchCfg.retry.minTimeout;
+const RETRY_MAX_TIMEOUT = _batchCfg.retry.maxTimeout;
 
 // Concurrency for AR Invoice batch creation (Pass 1).
-// Configurable via ORACLE_INVOICE_CONCURRENCY env var (default 3).
-// Higher values reduce wall-clock time; lower values reduce Oracle load.
-const INVOICE_CONCURRENCY = parseInt(process.env.ORACLE_INVOICE_CONCURRENCY, 10) || 3;
+// Configurable via ORACLE_INVOICE_CONCURRENCY env var (default from batchCfg).
+const INVOICE_CONCURRENCY = _batchCfg.concurrency;
 
-/** Classify an error as transient (worth retrying). */
+/** Classify an error as transient (worth retrying).
+ *  Delegates to the centralised batchOracleService.isTransientError()
+ *  which mirrors the identical guard in oracle-crm/src/oracleDbClient.js. */
 function isTransientError(err) {
-  if (!err) return false;
-  const msg = String(err.message || '').toLowerCase();
-  const code = String(err.code || '');
-  return (
-    /timeout/i.test(msg) ||
-    code === 'ECONNABORTED' ||
-    code === 'ECONNRESET' ||
-    code === 'ETIMEDOUT' ||
-    code === 'ENOTFOUND' ||
-    code === 'EPIPE' ||
-    code === 'ECONNREFUSED'
-  );
+  return isBatchTransientError(err);
 }
 
 // SOAP namespaces — match applyReceiptController (standardReceiptService/commonService)
@@ -805,10 +802,7 @@ async function createInvoiceBatch(req, res, next) {
       const oracleAuth = Buffer.from(`${username}:${password}`).toString('base64');
       // AR invoice REST calls can take longer than SOAP calls (large response body, Oracle processing).
       // Use a dedicated ORACLE_AR_INVOICE_TIMEOUT (default 5 min) so chunked invoices never time out.
-      const invoiceTimeout =
-        parseInt(process.env.ORACLE_AR_INVOICE_TIMEOUT, 10) ||
-        parseInt(process.env.ORACLE_SOAP_TIMEOUT, 10) ||
-        300000;
+      const invoiceTimeout = _batchCfg.invoiceTimeout;
 
       /**
        * Submits one invoice to Oracle via REST and persists the result.
