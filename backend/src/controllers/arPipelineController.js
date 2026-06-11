@@ -776,6 +776,11 @@ async function createInvoiceBatch(req, res, next) {
     // Process asynchronously after response is sent
     setImmediate(async () => {
       try {
+      const batchTag = `[Pipeline][Batch#${batch.id}]`;
+
+      // ── Batch start summary ──────────────────────────────────────────────
+      console.log(`${batchTag} ▶ START | invoices=${payloads.length} | concurrency=${INVOICE_CONCURRENCY} | timeout=${_batchCfg.invoiceTimeout}ms | endpoint=${endpoint}`);
+
       // Pre-create all upload records so each invoice is immediately traceable.
       const uploadRecordResults = await Promise.allSettled(
         payloads.map((payload) =>
@@ -790,9 +795,14 @@ async function createInvoiceBatch(req, res, next) {
         )
       );
 
+      const preFailCount = uploadRecordResults.filter(r => r.status === 'rejected').length;
+      if (preFailCount > 0) {
+        console.warn(`${batchTag} ⚠ ${preFailCount}/${payloads.length} upload records failed to pre-create (will retry inline)`);
+      }
+
       const workItems = payloads.map((payload, i) => {
         const pre = uploadRecordResults[i];
-        return { payload, uploadRecord: pre?.status === 'fulfilled' ? pre.value : null };
+        return { payload, uploadRecord: pre?.status === 'fulfilled' ? pre.value : null, index: i + 1 };
       });
 
       let successCount = 0;
@@ -804,14 +814,26 @@ async function createInvoiceBatch(req, res, next) {
       // Use a dedicated ORACLE_AR_INVOICE_TIMEOUT (default 5 min) so chunked invoices never time out.
       const invoiceTimeout = _batchCfg.invoiceTimeout;
 
+      /** Extract a short readable Oracle error from the response body */
+      function extractOracleError(data) {
+        if (!data) return null;
+        // Oracle REST error shapes
+        if (data.detail)  return String(data.detail).slice(0, 300);
+        if (data.title)   return String(data.title).slice(0, 300);
+        if (data.o_errorCode) return `${data.o_errorCode}: ${String(data.o_errorMessage || '').slice(0, 250)}`;
+        if (Array.isArray(data.items) && data.items[0]?.detail) return String(data.items[0].detail).slice(0, 300);
+        return null;
+      }
+
       /**
        * Submits one invoice to Oracle via REST and persists the result.
-       * @param {object} payload      - Invoice payload (JSON)
-       * @param {object} uploadRecord - Pre-created ArInvoiceUpload row (may be null)
-       * @param {boolean} isRetry     - true when called from pass 2 (transient-error retry)
+       * @param {object}  payload      - Invoice payload (JSON)
+       * @param {object}  uploadRecord - Pre-created ArInvoiceUpload row (may be null)
+       * @param {boolean} isRetry      - true when called from pass 2 (transient-error retry)
+       * @param {number}  index        - 1-based position within the batch (for log readability)
        * @returns {{ success: boolean, isTransient: boolean, uploadRecord: object|null }}
        */
-      async function processOne(payload, uploadRecord, isRetry) {
+      async function processOne(payload, uploadRecord, isRetry, index) {
         // Fallback: create upload record if pre-creation failed
         if (!uploadRecord) {
           try {
@@ -824,16 +846,30 @@ async function createInvoiceBatch(req, res, next) {
               },
             });
           } catch (dbErr) {
-            console.error(`[Pipeline] Could not create upload record: ${dbErr.message}`);
+            console.error(`${batchTag} [${index}] Could not create upload record: ${dbErr.message}`);
             return { success: false, isTransient: false, uploadRecord: null };
           }
         }
+
+        const invoiceTag = `${batchTag} [${index}/${workItems.length}][Upload#${uploadRecord.id}]`;
+        const lineCount  = (payload.receivablesInvoiceLines ?? []).length;
+        const customer   = payload.BillToCustomerNumber ?? payload.BillToCustomerName ?? 'unknown';
+        const txnDate    = payload.TransactionDate ?? 'unknown';
+        const crossRef   = payload.receivablesInvoiceLines?.[0]?.CrossReference ?? null;
+
+        // ── Per-invoice start ──────────────────────────────────────────────
+        console.log(
+          `${invoiceTag} ► SUBMITTING | customer=${customer} | date=${txnDate} | lines=${lineCount}` +
+          (crossRef ? ` | crossRef=${crossRef}` : '') +
+          (isRetry ? ' | [RETRY]' : '')
+        );
 
         let responseStatus  = 'SUCCESS';
         let responseMessage = 'Invoice created successfully';
         let oracleData      = null;
         let httpStatus      = null;
         let transient       = false;
+        const t0            = Date.now();
 
         try {
           const response = await axios.post(endpoint, payload, {
@@ -846,6 +882,7 @@ async function createInvoiceBatch(req, res, next) {
             validateStatus: () => true,
           });
 
+          const elapsed = Date.now() - t0;
           httpStatus = response.status;
           oracleData = response.data;
 
@@ -864,24 +901,28 @@ async function createInvoiceBatch(req, res, next) {
             if (!oracleData?.TransactionNumber) {
               responseStatus  = 'FAILED';
               responseMessage = 'Oracle returned HTTP 200 but no TransactionNumber — possible duplicate CrossReference or oversized payload';
-              console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} FAILED - HTTP ${httpStatus} - ${responseMessage}`);
-              if (oracleData) {
-                console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} Oracle response:`, JSON.stringify(oracleData));
-              }
+              const oracleErr = extractOracleError(oracleData);
+              console.error(`❌ ${invoiceTag} FAILED (${elapsed}ms) HTTP ${httpStatus} - ${responseMessage}`);
+              if (oracleErr) console.error(`❌ ${invoiceTag} Oracle error: ${oracleErr}`);
+              if (oracleData) console.error(`❌ ${invoiceTag} Full Oracle response:`, JSON.stringify(oracleData));
             } else {
-              console.log(`✅ [Pipeline] Invoice ${uploadRecord.id} SUCCESS - TxnNumber: ${oracleData.TransactionNumber}`);
+              const custTxnId = oracleData.CustomerTrxId ?? oracleData.CustomerTxnId ?? 'N/A';
+              console.log(`✅ ${invoiceTag} SUCCESS (${elapsed}ms) | TxnNumber=${oracleData.TransactionNumber} | CustomerTrxId=${custTxnId} | HTTP ${httpStatus}`);
             }
           } else {
-            console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} FAILED - HTTP ${httpStatus} - ${responseMessage}`);
-            if (oracleData) {
-              console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} Oracle response:`, JSON.stringify(oracleData));
-            }
+            const oracleErr = extractOracleError(oracleData);
+            console.error(`❌ ${invoiceTag} FAILED (${elapsed}ms) HTTP ${httpStatus} - ${responseMessage}`);
+            if (oracleErr) console.error(`❌ ${invoiceTag} Oracle error: ${oracleErr}`);
+            if (oracleData) console.error(`❌ ${invoiceTag} Full Oracle response:`, JSON.stringify(oracleData));
           }
         } catch (err) {
+          const elapsed   = Date.now() - t0;
           responseStatus  = 'FAILED';
           responseMessage = err.message;
           transient       = isTransientError(err);
-          console.error(`❌ [Pipeline] Invoice ${uploadRecord.id} ${transient && !isRetry ? 'TRANSIENT (queued for retry)' : 'FAILED'}: ${err.message}`);
+          const label     = transient && !isRetry ? 'TRANSIENT (queued for retry)' : 'FAILED';
+          console.error(`❌ ${invoiceTag} ${label} (${elapsed}ms) | error=${err.code ?? err.message}`);
+          if (err.code) console.error(`❌ ${invoiceTag} Error detail: code=${err.code} message=${err.message}`);
         }
 
         // For pass-1 transient failures, mark as queued-for-retry and skip DB storage
@@ -958,9 +999,10 @@ async function createInvoiceBatch(req, res, next) {
                 })),
               });
             }
+            console.log(`   ${invoiceTag} DB saved | Header#${fusionHeader.id} | lines=${lines.length}`);
           }
         } catch (storeErr) {
-          console.error(`[Pipeline] Failed to store fusion data for invoice ${uploadRecord.id}: ${storeErr.message}`);
+          console.error(`${invoiceTag} Failed to store fusion data: ${storeErr.message}`);
         }
 
         return { success: responseStatus === 'SUCCESS', isTransient: false, uploadRecord };
@@ -969,49 +1011,61 @@ async function createInvoiceBatch(req, res, next) {
       // ── Pass 1: process all invoices concurrently (capped at INVOICE_CONCURRENCY) ─
       // JavaScript's event loop is single-threaded so counter mutations are safe across
       // concurrent async tasks — each task only advances at await boundaries.
-      console.log(`[Pipeline] Pass 1: Processing ${workItems.length} invoice(s) with concurrency=${INVOICE_CONCURRENCY}`);
+      const pass1Start = Date.now();
+      console.log(`${batchTag} ── Pass 1 START | ${workItems.length} invoice(s) | concurrency=${INVOICE_CONCURRENCY}`);
       const limitPass1 = pLimit(INVOICE_CONCURRENCY);
       await Promise.all(
         workItems.map((item) =>
           limitPass1(async () => {
-            const result = await processOne(item.payload, item.uploadRecord, false);
+            const result = await processOne(item.payload, item.uploadRecord, false, item.index);
             if (result.success) {
               successCount++;
             } else if (result.isTransient) {
-              transientItems.push({ payload: item.payload, uploadRecord: result.uploadRecord });
+              transientItems.push({ payload: item.payload, uploadRecord: result.uploadRecord, index: item.index });
             } else {
               failureCount++;
             }
           })
         )
       );
+      console.log(
+        `${batchTag} ── Pass 1 DONE (${Date.now() - pass1Start}ms) | ` +
+        `✅ ${successCount} succeeded | ❌ ${failureCount} failed | ⚠ ${transientItems.length} transient`
+      );
 
       // ── Pass 2: retry transient failures sequentially (conservative for Oracle) ─
       if (transientItems.length > 0) {
-        console.log(`[Pipeline] Pass 2: Retrying ${transientItems.length} transient failure(s) sequentially`);
+        const pass2Start = Date.now();
+        console.log(`${batchTag} ── Pass 2 START | retrying ${transientItems.length} transient failure(s) sequentially`);
         for (const item of transientItems) {
-          const result = await processOne(item.payload, item.uploadRecord, true);
+          const result = await processOne(item.payload, item.uploadRecord, true, item.index);
           if (result.success) {
             successCount++;
           } else {
             failureCount++;
           }
         }
+        console.log(
+          `${batchTag} ── Pass 2 DONE (${Date.now() - pass2Start}ms) | ` +
+          `✅ ${successCount} total succeeded | ❌ ${failureCount} total failed`
+        );
       }
 
       const finalStatus = failureCount === 0 ? 'SUCCESS' : successCount === 0 ? 'FAILED' : 'PARTIAL';
       const retryNote   = transientItems.length > 0 ? ` (${transientItems.length} retried after transient error)` : '';
+      const finalMessage = `${successCount} succeeded, ${failureCount} failed out of ${payloads.length}${retryNote}.`;
+      console.log(`${batchTag} ■ COMPLETE | status=${finalStatus} | ${finalMessage}`);
       await prisma.arInvoiceBatch.update({
         where: { id: batch.id },
         data: {
           successCount,
           failureCount,
           status:  finalStatus,
-          message: `${successCount} succeeded, ${failureCount} failed out of ${payloads.length}${retryNote}.`,
+          message: finalMessage,
         },
       });
       } catch (fatalErr) {
-        console.error('[Pipeline:createInvoiceBatch] Fatal background error:', fatalErr.message);
+        console.error(`${batchTag ?? '[Pipeline]'} ✖ FATAL background error: ${fatalErr.message}`, fatalErr.stack);
         await prisma.arInvoiceBatch.update({
           where: { id: batch.id },
           data: { status: 'FAILED', message: `Fatal error: ${fatalErr.message}` },

@@ -467,22 +467,13 @@ async function uploadVendInvoice(req, res, next) {
       });
     }
 
-    // Maximum invoice lines per Oracle REST call.
-    // Oracle's REST gateway returns HTTP 504 for large payloads; 100 lines is a
-    // safe upper bound based on observed failures.  The hard cap of 100 prevents
-    // a misconfigured env var from allowing dangerously large payloads.
-    const HARD_MAX_CHUNK_SIZE = 100;
-    const LINE_CHUNK_SIZE = Math.min(
-      parseInt(process.env.ORACLE_INVOICE_LINE_CHUNK_SIZE, 10) || 100,
-      HARD_MAX_CHUNK_SIZE,
-    );
-
     // Compute a single CrossReference base for this entire upload request.
-    // Incrementing in-memory for each chunk (rather than re-querying the DB each
-    // time) guarantees every chunk in this batch gets a unique CrossReference.
+    // Each group (store/date/payment-type) produces exactly ONE Oracle invoice containing all its
+    // lines (no line-count limit).  The business requirement is one invoice per day per store;
+    // Oracle timeout concerns should be addressed at the HTTP/network layer if needed.
     let nextCrossRef = await getNextCrossReferenceBase();
 
-    // Generate payloads for each invoice group
+    // Generate one payload per invoice group — one invoice per store/date/payment-type.
     const payloads = [];
     // Stats tracked separately — not added to payload objects
     const payloadStats = [];
@@ -496,60 +487,45 @@ async function uploadVendInvoice(req, res, next) {
         paymentTypeLabel = 'Tamara';
       }
 
-      // Split lines into chunks to avoid Oracle gateway timeouts on large payloads
-      const allLines = group.lines;
-      const totalChunks = Math.ceil(allLines.length / LINE_CHUNK_SIZE);
+      // Number all lines sequentially starting at 1 (Oracle requires sequential LineNumbers)
+      const renumberedLines = group.lines.map((line, idx) => ({ ...line, LineNumber: idx + 1 }));
 
-      if (totalChunks > 1) {
-        console.log(`[Vend Invoice] ${group.subinventoryCode}/${group.paymentType}: ${allLines.length} lines → ${totalChunks} chunks of ≤${LINE_CHUNK_SIZE}`);
+      // One CrossReference per group (one invoice per store/date/payment-type)
+      const crossReference = nextCrossRef++;
+
+      const payload = {
+        BusinessUnit: 'AlQurashi-KSA',
+        TransactionSource: 'Vend',
+        TransactionType: 'Vend Invoice',
+        TransactionDate: group.date,
+        AccountingDate: group.date,
+        BillToCustomerName: group.customerName,
+        BillToCustomerNumber: group.customerNumber,
+        BillToSite: group.siteNumber,
+        PaymentTerms: 'IMMEDIATE',
+        InvoiceCurrencyCode: 'SAR',
+        CrossReference: String(crossReference),
+        Comments: `${paymentTypeLabel} payment - Cross-reference: ${crossReference}`,
+        receivablesInvoiceLines: renumberedLines,
+      };
+
+      // Compute payload totals in separate variables (not attached to the payload)
+      const lineCount = renumberedLines.length;
+      let totalAmount = 0;
+      for (const line of renumberedLines) {
+        totalAmount += (line.Quantity || 0) * (line.UnitSellingPrice || 0);
       }
+      totalAmount = Math.round(totalAmount * 100) / 100;
 
-      for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-        const chunkLines = allLines.slice(chunkIndex * LINE_CHUNK_SIZE, (chunkIndex + 1) * LINE_CHUNK_SIZE);
-
-        // Re-number lines within this chunk starting at 1 (Oracle requires sequential LineNumbers)
-        const renumberedLines = chunkLines.map((line, idx) => ({ ...line, LineNumber: idx + 1 }));
-
-        // Each chunk gets its own unique CrossReference, incremented in-memory.
-        const crossReference = nextCrossRef++;
-        const chunkSuffix = totalChunks > 1 ? ` (part ${chunkIndex + 1}/${totalChunks})` : '';
-
-        const payload = {
-          BusinessUnit: 'AlQurashi-KSA',
-          TransactionSource: 'Vend',
-          TransactionType: 'Vend Invoice',
-          TransactionDate: group.date,
-          AccountingDate: group.date,
-          BillToCustomerName: group.customerName,
-          BillToCustomerNumber: group.customerNumber,
-          BillToSite: group.siteNumber,
-          PaymentTerms: 'IMMEDIATE',
-          InvoiceCurrencyCode: 'SAR',
-          CrossReference: String(crossReference),
-          Comments: `${paymentTypeLabel} payment - Invoice generated from request ID ${crossReference}${chunkSuffix}`,
-          receivablesInvoiceLines: renumberedLines,
-        };
-
-        // Compute payload totals in separate variables (not attached to the payload)
-        const lineCount = renumberedLines.length;
-        let totalAmount = 0;
-        for (const line of renumberedLines) {
-          totalAmount += (line.Quantity || 0) * (line.UnitSellingPrice || 0);
-        }
-        totalAmount = Math.round(totalAmount * 100) / 100;
-
-        payloads.push(payload);
-        payloadStats.push({
-          crossReference: String(crossReference),
-          billToCustomerName: group.customerName,
-          transactionDate: group.date,
-          paymentType: group.paymentType,
-          lineCount,
-          totalAmount,
-          chunkIndex: totalChunks > 1 ? chunkIndex + 1 : undefined,
-          totalChunks: totalChunks > 1 ? totalChunks : undefined,
-        });
-      }
+      payloads.push(payload);
+      payloadStats.push({
+        crossReference: String(crossReference),
+        billToCustomerName: group.customerName,
+        transactionDate: group.date,
+        paymentType: group.paymentType,
+        lineCount,
+        totalAmount,
+      });
     }
 
     // Split payloads into positive and negative based on totalAmount
@@ -582,7 +558,7 @@ async function uploadVendInvoice(req, res, next) {
       negativeTotalAmount,
     };
 
-    console.log(`✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines (${positivePayloads.length} positive, ${negativePayloads.length} negative, chunk size: ${LINE_CHUNK_SIZE})`);
+    console.log(`✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines (${positivePayloads.length} positive, ${negativePayloads.length} negative)`);
 
     return res.json({
       success: true,
