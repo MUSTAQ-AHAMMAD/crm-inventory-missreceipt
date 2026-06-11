@@ -9,8 +9,14 @@
  * - Providing comprehensive error handling
  * - Detailed request/response logging for debugging
  * - Production-ready error recovery
+ *
+ * Timeout model mirrors Java InsertObjectFusion.java (OkHttpClient):
+ *   connectTimeout  → ORACLE_SOAP_CONNECT_TIMEOUT (default 30 s)
+ *   requestTimeout  → ORACLE_SOAP_TIMEOUT          (default 300 s)
  */
 
+const https = require('https');
+const http = require('http');
 const axios = require('axios');
 const { XMLParser, XMLBuilder } = require('fast-xml-parser');
 const pRetry = require('p-retry');
@@ -24,7 +30,10 @@ class OracleSoapClient {
     this.maxRetries = config.maxRetries || 3;
     this.retryMinTimeout = config.retryMinTimeout || 1000;
     this.retryMaxTimeout = config.retryMaxTimeout || 10000;
-    this.requestTimeout = config.requestTimeout || 30000;
+    // requestTimeout corresponds to Java OkHttpClient.readTimeout (default 300 s)
+    this.requestTimeout = config.requestTimeout || 300000;
+    // connectTimeout corresponds to Java OkHttpClient.connectTimeout (default 30 s)
+    this.connectTimeout = config.connectTimeout || 30000;
     this.debugMode = config.debugMode || process.env.SOAP_DEBUG === 'true';
 
     // Cache for WSDL data
@@ -193,6 +202,18 @@ class OracleSoapClient {
   }
 
   /**
+   * Builds an http/https Agent with a socket-level connect timeout.
+   * Mirrors Java OkHttpClient.connectTimeout(30, TimeUnit.SECONDS).
+   * The agent is created fresh per call so timeouts are independent.
+   */
+  buildAgent() {
+    const isHttps = this.serviceUrl.startsWith('https');
+    return isHttps
+      ? new https.Agent({ timeout: this.connectTimeout })
+      : new http.Agent({ timeout: this.connectTimeout });
+  }
+
+  /**
    * Builds a SOAP envelope with proper namespaces
    */
   buildSoapEnvelope(operationName, parameters, operationNamespace) {
@@ -353,6 +374,7 @@ class OracleSoapClient {
 
     return pRetry(
       async () => {
+        const agent = this.buildAgent();
         const response = await axios.post(this.serviceUrl, soapEnvelope, {
           headers: {
             'Content-Type': 'text/xml; charset=utf-8',
@@ -361,6 +383,8 @@ class OracleSoapClient {
             'Authorization': `Basic ${Buffer.from(`${this.username}:${this.password}`).toString('base64')}`,
           },
           timeout: this.requestTimeout,
+          httpAgent: agent,
+          httpsAgent: agent,
           validateStatus: () => true, // Don't throw on any status
           responseType: 'text',
           transformResponse: [(data) => data], // Prevent axios from parsing
@@ -463,9 +487,12 @@ class OracleSoapClient {
 
           this.debugLog(`${requestId} Request Headers:`, headers);
 
+          const agent = this.buildAgent();
           const response = await axios.post(this.serviceUrl, soapXml, {
             headers,
             timeout: this.requestTimeout,
+            httpAgent: agent,
+            httpsAgent: agent,
             validateStatus: () => true,
             responseType: 'text',
             transformResponse: [(data) => data],
@@ -588,7 +615,11 @@ class OracleSoapClient {
 }
 
 /**
- * Factory function to create OracleSoapClient instances with environment configuration
+ * Factory function to create OracleSoapClient instances with environment configuration.
+ *
+ * Timeout model mirrors Java InsertObjectFusion.java (OkHttpClient):
+ *   connectTimeout  = ORACLE_SOAP_CONNECT_TIMEOUT (default 30 000 ms = 30 s)
+ *   requestTimeout  = ORACLE_SOAP_TIMEOUT          (default 300 000 ms = 300 s)
  */
 function createOracleSoapClient(serviceUrl, wsdlUrl) {
   const username = process.env.ORACLE_USERNAME;
@@ -612,7 +643,10 @@ function createOracleSoapClient(serviceUrl, wsdlUrl) {
     username,
     password,
     maxRetries,
-    requestTimeout: parseInt(process.env.ORACLE_SOAP_TIMEOUT) || 120000,
+    // Mirrors Java OkHttpClient.readTimeout(300, TimeUnit.SECONDS)
+    requestTimeout: parseInt(process.env.ORACLE_SOAP_TIMEOUT) || 300000,
+    // Mirrors Java OkHttpClient.connectTimeout(30, TimeUnit.SECONDS)
+    connectTimeout: parseInt(process.env.ORACLE_SOAP_CONNECT_TIMEOUT) || 30000,
   });
 }
 
