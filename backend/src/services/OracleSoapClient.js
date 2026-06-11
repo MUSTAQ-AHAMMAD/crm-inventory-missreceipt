@@ -30,11 +30,22 @@ class OracleSoapClient {
     this.maxRetries = config.maxRetries || 3;
     this.retryMinTimeout = config.retryMinTimeout || 1000;
     this.retryMaxTimeout = config.retryMaxTimeout || 10000;
-    // requestTimeout corresponds to Java OkHttpClient.readTimeout (default 300 s)
+    // requestTimeout corresponds to Java OkHttpClient.readTimeout (default 300 s).
+    // axios `timeout` uses socket.setTimeout, which starts from when data is sent,
+    // covering both any lingering TCP handshake and the full response read phase.
     this.requestTimeout = config.requestTimeout || 300000;
-    // connectTimeout corresponds to Java OkHttpClient.connectTimeout (default 30 s)
-    this.connectTimeout = config.connectTimeout || 30000;
+    // socketIdleTimeout is set on the shared Agent as a socket-level idle deadline
+    // (mirrors Java OkHttpClient.connectTimeout intent; exact TCP connect timeout
+    // enforcement in Node.js requires low-level socket event handling beyond axios).
+    this.socketIdleTimeout = config.connectTimeout || 30000;
     this.debugMode = config.debugMode || process.env.SOAP_DEBUG === 'true';
+
+    // Single reusable HTTP/HTTPS Agent with keep-alive and idle socket timeout.
+    // Reusing the agent preserves TCP connection pooling across calls, matching
+    // OkHttpClient's connection-pool behaviour in Java.
+    const isHttps = (config.serviceUrl || '').startsWith('https');
+    const AgentClass = isHttps ? https.Agent : http.Agent;
+    this._agent = new AgentClass({ keepAlive: true, timeout: this.socketIdleTimeout });
 
     // Cache for WSDL data
     this.wsdlCache = null;
@@ -206,13 +217,6 @@ class OracleSoapClient {
    * Mirrors Java OkHttpClient.connectTimeout(30, TimeUnit.SECONDS).
    * The agent is created fresh per call so timeouts are independent.
    */
-  buildAgent() {
-    const isHttps = this.serviceUrl.startsWith('https');
-    return isHttps
-      ? new https.Agent({ timeout: this.connectTimeout })
-      : new http.Agent({ timeout: this.connectTimeout });
-  }
-
   /**
    * Builds a SOAP envelope with proper namespaces
    */
@@ -374,7 +378,6 @@ class OracleSoapClient {
 
     return pRetry(
       async () => {
-        const agent = this.buildAgent();
         const response = await axios.post(this.serviceUrl, soapEnvelope, {
           headers: {
             'Content-Type': 'text/xml; charset=utf-8',
@@ -383,8 +386,8 @@ class OracleSoapClient {
             'Authorization': `Basic ${Buffer.from(`${this.username}:${this.password}`).toString('base64')}`,
           },
           timeout: this.requestTimeout,
-          httpAgent: agent,
-          httpsAgent: agent,
+          httpAgent: this._agent,
+          httpsAgent: this._agent,
           validateStatus: () => true, // Don't throw on any status
           responseType: 'text',
           transformResponse: [(data) => data], // Prevent axios from parsing
@@ -487,12 +490,11 @@ class OracleSoapClient {
 
           this.debugLog(`${requestId} Request Headers:`, headers);
 
-          const agent = this.buildAgent();
           const response = await axios.post(this.serviceUrl, soapXml, {
             headers,
             timeout: this.requestTimeout,
-            httpAgent: agent,
-            httpsAgent: agent,
+            httpAgent: this._agent,
+            httpsAgent: this._agent,
             validateStatus: () => true,
             responseType: 'text',
             transformResponse: [(data) => data],
