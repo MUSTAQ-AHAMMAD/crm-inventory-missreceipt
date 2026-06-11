@@ -4,8 +4,8 @@
  * Covers:
  *  - createInvoiceBatch: async (non-blocking) response, env validation, background processing
  *  - getInvoiceBatchProgress: valid, not-found, invalid id, access control
- *  - getSummary: result limits applied to prevent memory exhaustion on large datasets
- *  - getPendingApply: result limits, pair matching, already-applied exclusion
+ *  - getSummary: unbounded queries (no take cap) to prevent silently truncating large datasets
+ *  - getPendingApply: unbounded queries, pair matching, already-applied exclusion
  *  - submitApply: date fallback from receipt when invoice txnDate/glDate are null
  *  - listInvoices: pagination
  */
@@ -431,22 +431,22 @@ describe('AR Pipeline Controller', () => {
       });
     });
 
-    test('enforces take:2000 on invoice query to cap memory usage', async () => {
+    test('fetches all invoices without a take cap to prevent silent truncation', async () => {
       await request(app).get('/');
       const call = prisma.fusionInvoiceHeader.findMany.mock.calls[0][0];
-      expect(call.take).toBe(2000);
+      expect(call.take).toBeUndefined();
     });
 
-    test('enforces take:2000 on standardReceipt query', async () => {
+    test('fetches all standardReceipts without a take cap to prevent silent truncation', async () => {
       await request(app).get('/');
       const call = prisma.fusionStandardReceipt.findMany.mock.calls[0][0];
-      expect(call.take).toBe(2000);
+      expect(call.take).toBeUndefined();
     });
 
-    test('enforces take:2000 on miscReceipt query', async () => {
+    test('fetches all miscReceipts without a take cap to prevent silent truncation', async () => {
       await request(app).get('/');
       const call = prisma.fusionMiscReceipt.findMany.mock.calls[0][0];
-      expect(call.take).toBe(2000);
+      expect(call.take).toBeUndefined();
     });
 
     test('returns grouped pairs for matching invoice + receipt', async () => {
@@ -485,16 +485,16 @@ describe('AR Pipeline Controller', () => {
       expect(res.body).toMatchObject({ pendingPairs: [], total: 0 });
     });
 
-    test('enforces take:2000 on invoice findMany', async () => {
+    test('fetches all invoices without a take cap to prevent silent truncation', async () => {
       await request(app).get('/');
       const call = prisma.fusionInvoiceHeader.findMany.mock.calls[0][0];
-      expect(call.take).toBe(2000);
+      expect(call.take).toBeUndefined();
     });
 
-    test('enforces take:2000 on standardReceipt findMany', async () => {
+    test('fetches all standardReceipts without a take cap to prevent silent truncation', async () => {
       await request(app).get('/');
       const call = prisma.fusionStandardReceipt.findMany.mock.calls[0][0];
-      expect(call.take).toBe(2000);
+      expect(call.take).toBeUndefined();
     });
 
     test('correctly identifies unapplied invoice–receipt pairs by receipt number suffix', async () => {
