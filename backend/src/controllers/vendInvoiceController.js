@@ -468,7 +468,9 @@ async function uploadVendInvoice(req, res, next) {
     }
 
     // Compute a single CrossReference base for this entire upload request.
-    // Each group (store/date/payment-type) gets exactly one invoice with a unique CrossReference.
+    // Each group (store/date/payment-type) produces exactly ONE Oracle invoice containing all its
+    // lines (no line-count limit).  The business requirement is one invoice per day per store;
+    // Oracle timeout concerns should be addressed at the HTTP/network layer if needed.
     let nextCrossRef = await getNextCrossReferenceBase();
 
     // Generate one payload per invoice group — one invoice per store/date/payment-type.
@@ -503,7 +505,7 @@ async function uploadVendInvoice(req, res, next) {
         PaymentTerms: 'IMMEDIATE',
         InvoiceCurrencyCode: 'SAR',
         CrossReference: String(crossReference),
-        Comments: `${paymentTypeLabel} payment - Invoice generated from request ID ${crossReference}`,
+        Comments: `${paymentTypeLabel} payment - Cross-reference: ${crossReference}`,
         receivablesInvoiceLines: renumberedLines,
       };
 
