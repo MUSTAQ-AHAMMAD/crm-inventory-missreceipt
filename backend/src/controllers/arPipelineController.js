@@ -18,6 +18,8 @@
  */
 
 const prisma = require('../services/prisma');
+const http  = require('http');
+const https = require('https');
 const axios = require('axios');
 const pLimit = require('p-limit');
 const pRetry = require('p-retry');
@@ -38,6 +40,11 @@ const RETRY_MAX_TIMEOUT = _batchCfg.retry.maxTimeout;
 // Concurrency for AR Invoice batch creation (Pass 1).
 // Configurable via ORACLE_INVOICE_CONCURRENCY env var (default from batchCfg).
 const INVOICE_CONCURRENCY = _batchCfg.concurrency;
+
+// Reuse TCP connections across AR invoice REST calls to avoid per-request TLS
+// handshake overhead — mirrors oracle-crm/src/oracleClient.js keepAlive pattern.
+const _arHttpAgent  = new http.Agent ({ keepAlive: true, maxSockets: 32 });
+const _arHttpsAgent = new https.Agent({ keepAlive: true, maxSockets: 32 });
 
 /** Classify an error as transient (worth retrying).
  *  Delegates to the centralised batchOracleService.isTransientError()
@@ -874,11 +881,13 @@ async function createInvoiceBatch(req, res, next) {
         try {
           const response = await axios.post(endpoint, payload, {
             headers: {
-              'Content-Type': 'application/json',
+              'Content-Type': 'application/vnd.oracle.adf.resourceitem+json',
               Accept:         'application/json',
               Authorization:  `Basic ${oracleAuth}`,
             },
             timeout:        invoiceTimeout,
+            httpAgent:      _arHttpAgent,
+            httpsAgent:     _arHttpsAgent,
             validateStatus: () => true,
           });
 

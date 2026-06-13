@@ -4,9 +4,16 @@
  * matching the Oracle Fusion Receivables Invoice REST API.
  */
 
+const http  = require('http');
+const https = require('https');
 const axios = require('axios');
 const prisma = require('../services/prisma');
 const fusionMetadataService = require('../services/fusionSalesMetadataService');
+
+// Reuse TCP connections across AR invoice REST calls to avoid per-request TLS
+// handshake overhead — mirrors oracle-crm/src/oracleClient.js keepAlive pattern.
+const _httpAgent  = new http.Agent ({ keepAlive: true, maxSockets: 32 });
+const _httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 32 });
 
 /**
  * POST /api/ar-invoice/preview
@@ -327,11 +334,13 @@ async function createInvoice(req, res, next) {
     try {
       const response = await axios.post(restEndpoint, payload, {
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/vnd.oracle.adf.resourceitem+json',
           Accept: 'application/json',
           Authorization: `Basic ${oracleAuth}`,
         },
         timeout: invoiceTimeout,
+        httpAgent:  _httpAgent,
+        httpsAgent: _httpsAgent,
         validateStatus: () => true,
       });
 
