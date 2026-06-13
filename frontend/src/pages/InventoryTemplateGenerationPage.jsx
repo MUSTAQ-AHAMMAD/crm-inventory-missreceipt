@@ -42,9 +42,7 @@ export default function InventoryTemplateGenerationPage() {
     formData.append('file', file)
 
     try {
-      const res = await api.post('/inventory-template/preview', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const res = await api.post('/inventory-template/preview', formData)
       setPreviewRows(res.data.previewRows || [])
       setTotalRows(res.data.totalRows || 0)
       setSkippedRows(res.data.skippedRows || 0)
@@ -66,7 +64,6 @@ export default function InventoryTemplateGenerationPage() {
 
     try {
       const res = await api.post('/inventory-template/download', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
         responseType: 'blob',
       })
       const blob = new Blob([res.data], { type: 'text/csv' })
