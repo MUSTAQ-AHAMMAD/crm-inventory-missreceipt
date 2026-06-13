@@ -76,9 +76,7 @@ export default function ArInvoiceDataPage() {
     formData.append('file', file)
 
     try {
-      const res = await api.post('/ar-invoice-data/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const res = await api.post('/ar-invoice-data/upload', formData)
       setResult(res.data)
       setFile(null)
       queryClient.invalidateQueries({ queryKey: ['arInvoiceDataBatches'] })

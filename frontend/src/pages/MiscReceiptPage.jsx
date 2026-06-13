@@ -75,9 +75,7 @@ export default function MiscReceiptPage() {
     const formData = new FormData()
     formData.append('file', file)
     try {
-      const res = await api.post('/misc-receipt/preview', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const res = await api.post('/misc-receipt/preview', formData)
       setXmlPreviews(res.data.previews || [])
       setShowPreview(true)
     } catch (err) {
@@ -97,7 +95,6 @@ export default function MiscReceiptPage() {
     formData.append('file', file)
     try {
       const res = await api.post('/misc-receipt/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (e) => {
           setUploadProgress(Math.round((e.loaded / e.total) * 80))
         },

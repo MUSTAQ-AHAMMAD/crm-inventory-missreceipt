@@ -812,9 +812,7 @@ export default function ArPipelinePage() {
     fd.append('paymentLines', paymentFile)
     fd.append('salesLines', salesFile)
     try {
-      const res = await api.post('/vend-invoice/upload', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const res = await api.post('/vend-invoice/upload', fd)
       setS1(prev => ({ ...prev, status: 'generated', payloads: res.data, error: '' }))
     } catch (err) {
       const msg = err.response?.data?.error || 'Failed to generate invoice payloads.'
@@ -906,9 +904,7 @@ export default function ArPipelinePage() {
     fd.append('paymentLines', paymentFile)
     fd.append('region', 'SA')
     try {
-      const res = await api.post('/vend-receipt/generate', fd, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const res = await api.post('/vend-receipt/generate', fd)
       setS2(prev => ({ ...prev, status: 'generated', batch: res.data, error: '' }))
     } catch (err) {
       const msg = err.response?.data?.error || 'Failed to generate receipt payloads.'

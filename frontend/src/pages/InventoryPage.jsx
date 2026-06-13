@@ -72,7 +72,6 @@ export default function InventoryPage() {
 
     try {
       const res = await api.post('/inventory/bulk-upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (e) => {
           setUploadProgress(Math.round((e.loaded / e.total) * 80))
         },

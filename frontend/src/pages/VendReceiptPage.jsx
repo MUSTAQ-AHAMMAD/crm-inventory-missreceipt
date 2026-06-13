@@ -142,9 +142,7 @@ export default function VendReceiptPage() {
     formData.append('region', region)
 
     try {
-      const res = await api.post('/vend-receipt/generate', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const res = await api.post('/vend-receipt/generate', formData)
       setResult(res.data)
       queryClient.invalidateQueries({ queryKey: ['vendReceiptBatches'] })
     } catch (err) {

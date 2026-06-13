@@ -54,9 +54,7 @@ export default function VendInvoicePage() {
     formData.append('salesLines', salesLinesFile)
 
     try {
-      const res = await api.post('/vend-invoice/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const res = await api.post('/vend-invoice/upload', formData)
       setResult(res.data)
       setPaymentLinesFile(null)
       setSalesLinesFile(null)
