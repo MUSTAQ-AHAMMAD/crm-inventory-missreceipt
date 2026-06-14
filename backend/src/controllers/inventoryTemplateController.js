@@ -28,6 +28,11 @@ const COLUMN_ALIASES = {
     'order lines/order ref',
     'order ref',
     'order reference',
+    // Amro/Odoo exports may use Branch/Name (e.g. "ALARIDAH/8371") as the
+    // combined branch-and-order-ref field when no separate Order Ref column exists.
+    'branch/name',
+    'branch name',
+    'order lines/branch/name',
   ],
   itemNumber: [
     'order lines/product/barcode',
