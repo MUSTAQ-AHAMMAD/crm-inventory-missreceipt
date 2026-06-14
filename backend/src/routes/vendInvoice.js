@@ -5,6 +5,7 @@
  */
 
 const express = require('express');
+const fileUpload = require('express-fileupload');
 const { authenticate } = require('../middleware/auth');
 const { activityLogger } = require('../middleware/activityLogger');
 const {
@@ -15,6 +16,13 @@ const {
 } = require('../controllers/vendInvoiceController');
 
 const router = express.Router();
+
+// File upload middleware for Excel uploads on this router
+router.use(fileUpload({
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit
+  abortOnLimit: true,
+  responseOnLimit: 'File size exceeds the 50MB limit.',
+}));
 
 // ── Protected routes (JWT auth + activity logging) ──────────────────────
 router.use(authenticate, activityLogger);
