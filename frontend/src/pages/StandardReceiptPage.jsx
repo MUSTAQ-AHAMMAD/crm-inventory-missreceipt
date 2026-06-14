@@ -74,9 +74,7 @@ export default function StandardReceiptPage() {
     const formData = new FormData()
     formData.append('file', file)
     try {
-      const res = await api.post('/standard-receipt/preview', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const res = await api.post('/standard-receipt/preview', formData)
       setPayloadPreviews(res.data.previews || [])
       setShowPreview(true)
     } catch (err) {
@@ -96,7 +94,6 @@ export default function StandardReceiptPage() {
     formData.append('file', file)
     try {
       const res = await api.post('/standard-receipt/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (e) => {
           setUploadProgress(Math.round((e.loaded / e.total) * 80))
         },

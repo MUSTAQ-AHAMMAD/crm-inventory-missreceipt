@@ -74,9 +74,7 @@ export default function ApplyReceiptPage() {
     const formData = new FormData()
     formData.append('file', file)
     try {
-      const res = await api.post('/apply-receipt/preview', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const res = await api.post('/apply-receipt/preview', formData)
       setPayloadPreviews(res.data.previews || [])
       setShowPreview(true)
     } catch (err) {
@@ -94,9 +92,7 @@ export default function ApplyReceiptPage() {
     const formData = new FormData()
     formData.append('file', file)
     try {
-      const res = await api.post('/apply-receipt/verify', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      const res = await api.post('/apply-receipt/verify', formData)
       setVerifiedPayloads(res.data.verifiedPayloads || [])
       setVerificationErrors(res.data.errors || [])
       setShowVerification(true)
@@ -117,7 +113,6 @@ export default function ApplyReceiptPage() {
     formData.append('file', file)
     try {
       const res = await api.post('/apply-receipt/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
         onUploadProgress: (e) => {
           setUploadProgress(Math.round((e.loaded / e.total) * 80))
         },
