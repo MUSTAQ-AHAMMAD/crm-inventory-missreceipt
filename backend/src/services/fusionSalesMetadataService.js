@@ -77,6 +77,7 @@ function mapToArInvoiceHeader(metadata) {
     BillToCustomerName: metadata.billToName,
     BillToCustomerNumber: metadata.billToAccount.toString(),
     BillToSite: metadata.siteNumber,
+    ConversionRateType: metadata.rateIsCorporate === '1' ? 'Corporate' : 'User',
   };
 }
 
