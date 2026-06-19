@@ -30,6 +30,7 @@ const OPTIONAL_FIELDS = [
   'businessUnit',
   'transactionSource',
   'transactionType',
+  'conversionRateType',
   'crossReference',
   'comments',
   'lineNumber',
@@ -138,6 +139,7 @@ async function normalizeRow(row, rowIndex) {
     businessUnit: String(row.businessUnit ?? headerData.BusinessUnit ?? '').trim(),
     transactionSource: String(row.transactionSource ?? headerData.TransactionSource ?? '').trim(),
     transactionType: String(row.transactionType ?? headerData.TransactionType ?? '').trim(),
+    conversionRateType: String(row.conversionRateType ?? headerData.ConversionRateType ?? 'Corporate').trim(),
     transactionDate: normalizeDate(row.transactionDate, 'transactionDate'),
     accountingDate: normalizeDate(row.accountingDate, 'accountingDate'),
     paymentTerms: String(row.paymentTerms ?? '').trim(),
@@ -245,6 +247,7 @@ async function previewCsvPayload(req, res, next) {
             BillToSite: record.siteNumber,
             PaymentTerms: record.paymentTerms,
             InvoiceCurrencyCode: record.invoiceCurrencyCode,
+            ConversionRateType: record.conversionRateType || 'Corporate',
             CrossReference: record.crossReference,
             Comments: record.comments,
           },
@@ -511,6 +514,7 @@ async function generatePayload(req, res, next) {
             BillToSite: record.siteNumber,
             PaymentTerms: record.paymentTerms,
             InvoiceCurrencyCode: record.invoiceCurrencyCode,
+            ConversionRateType: record.conversionRateType || 'Corporate',
             CrossReference: record.crossReference,
             Comments: record.comments,
           },
@@ -596,6 +600,7 @@ function downloadTemplate(req, res) {
     'AlQurashi-KSA',       // businessUnit
     'Vend',                // transactionSource
     'Vend Invoice',        // transactionType
+    'Corporate',           // conversionRateType
     'REF123',              // crossReference
     'Sample comment',      // comments
     '1',                   // lineNumber

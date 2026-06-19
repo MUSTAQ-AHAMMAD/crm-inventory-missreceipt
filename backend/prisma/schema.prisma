@@ -270,6 +270,7 @@ model ArInvoiceData {
   accountingDate          String   // YYYY-MM-DD format
   paymentTerms            String
   invoiceCurrencyCode     String
+  conversionRateType      String   @default("Corporate")
   crossReference          String?
   comments                String?
 

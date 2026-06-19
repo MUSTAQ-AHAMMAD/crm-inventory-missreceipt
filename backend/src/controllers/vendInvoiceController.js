@@ -420,6 +420,7 @@ async function uploadVendInvoice(req, res, next) {
               customerName: headerData.BillToCustomerName || branch || subinventoryCode,
               customerNumber: headerData.BillToCustomerNumber || '',
               siteNumber: headerData.BillToSite || '',
+              conversionRateType: headerData.ConversionRateType || 'Corporate',
               lines: [],
             };
           }
@@ -504,6 +505,7 @@ async function uploadVendInvoice(req, res, next) {
         BillToSite: group.siteNumber,
         PaymentTerms: 'IMMEDIATE',
         InvoiceCurrencyCode: 'SAR',
+        ConversionRateType: group.conversionRateType || 'Corporate',
         CrossReference: String(crossReference),
         Comments: `${paymentTypeLabel} payment - Cross-reference: ${crossReference}`,
         receivablesInvoiceLines: renumberedLines,
