@@ -505,7 +505,6 @@ async function uploadVendInvoice(req, res, next) {
         BillToSite: group.siteNumber,
         PaymentTerms: 'IMMEDIATE',
         InvoiceCurrencyCode: 'SAR',
-        // ConversionRateType must be omitted for ledger-currency (SAR) transactions (Oracle AR-856150)
         CrossReference: String(crossReference),
         Comments: `${paymentTypeLabel} payment - Cross-reference: ${crossReference}`,
         receivablesInvoiceLines: renumberedLines,
