@@ -24,7 +24,10 @@ import ErrorAlert from '../components/common/ErrorAlert'
 
 // Splitting large AR invoice batches into chunks prevents HTTP gateway timeouts
 // and keeps each Oracle REST call small (mirrors RECEIPT_CHUNK_SIZE for receipts).
-const INVOICE_CHUNK_SIZE = parseInt(import.meta.env.VITE_INVOICE_CHUNK_SIZE, 10) || 20
+const INVOICE_CHUNK_SIZE = parseInt(import.meta.env.VITE_INVOICE_CHUNK_SIZE, 10) || 50
+
+// Polling interval in ms when waiting for an invoice batch to complete.
+const POLL_INTERVAL_MS = parseInt(import.meta.env.VITE_POLL_INTERVAL_MS, 10) || 1000
 
 function fmt(n, digits = 2) {
   if (n == null || n === '') return '—'
@@ -770,8 +773,8 @@ export default function ArPipelinePage() {
     queryFn:  () => api.get(`/ar-pipeline/invoice-batch/${s1.batchId}/progress`).then((r) => r.data),
     enabled:  !!(s1.batchId && s1.status === 'creating'),
     refetchInterval: (data) => {
-      if (!data) return 2000
-      return data.status === 'PROCESSING' ? 2000 : false
+      if (!data) return POLL_INTERVAL_MS
+      return data.status === 'PROCESSING' ? POLL_INTERVAL_MS : false
     },
   })
 
@@ -844,27 +847,42 @@ export default function ArPipelinePage() {
     const allInvoiceResults = []
 
     try {
-      for (let ci = 0; ci < chunks.length; ci++) {
-        // Update chunk counter so the UI shows "Chunk N of M"
-        setS1(prev => ({ ...prev, chunkProgress: { current: ci + 1, total: chunks.length } }))
+      // Submit all chunks concurrently — backend responds immediately with a batchId
+      // for each, so submitting them in parallel has zero Oracle cost at this point.
+      const batchIds = await Promise.all(
+        chunks.map(chunk =>
+          api.post('/ar-pipeline/create-invoice-batch', { payloads: chunk }).then(r => {
+            // Keep the progress query pointed at the most recently submitted batch
+            setS1(prev => ({ ...prev, batchId: r.data.batchId }))
+            return r.data.batchId
+          })
+        )
+      )
 
-        // Submit this chunk; backend responds immediately with a batchId
-        const res = await api.post('/ar-pipeline/create-invoice-batch', { payloads: chunks[ci] })
-        const batchId = res.data.batchId
-        setS1(prev => ({ ...prev, batchId }))
+      // Poll all batches in parallel. Each resolves as soon as its batch completes.
+      // chunkProgress.current is incremented as each batch finishes so the progress
+      // bar advances in real time.
+      const batchResults = await Promise.all(
+        batchIds.map(async (batchId) => {
+          while (true) {
+            const data = await api.get(`/ar-pipeline/invoice-batch/${batchId}/progress`).then(r => r.data)
+            if (data.status !== 'PROCESSING') {
+              setS1(prev => ({
+                ...prev,
+                chunkProgress: { ...prev.chunkProgress, current: prev.chunkProgress.current + 1 },
+              }))
+              return data
+            }
+            await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
+          }
+        })
+      )
 
-        // Poll imperatively until Oracle finishes processing this chunk
-        let batchResult = null
-        while (true) {
-          const data = await api.get(`/ar-pipeline/invoice-batch/${batchId}/progress`).then(r => r.data)
-          if (data.status !== 'PROCESSING') { batchResult = data; break }
-          await new Promise(r => setTimeout(r, 2000))
-        }
-
+      // Merge per-invoice results, re-indexing so indices are globally unique
+      for (let ci = 0; ci < batchResults.length; ci++) {
+        const batchResult = batchResults[ci]
         totalSuccess += batchResult.successCount || 0
         totalFail    += batchResult.failureCount || 0
-
-        // Merge per-invoice results, re-indexing so indices are globally unique
         const offset = ci * INVOICE_CHUNK_SIZE
         if (batchResult.invoiceResults) {
           for (const r of batchResult.invoiceResults) {
@@ -1148,7 +1166,7 @@ export default function ArPipelinePage() {
                 <p className="font-semibold text-blue-700">⏳ Processing invoices…</p>
                 {s1.chunkProgress.total > 1 && (
                   <span className="text-xs font-medium text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
-                    Chunk {s1.chunkProgress.current} of {s1.chunkProgress.total}
+                    {s1.chunkProgress.current} / {s1.chunkProgress.total} batches done
                   </span>
                 )}
               </div>
