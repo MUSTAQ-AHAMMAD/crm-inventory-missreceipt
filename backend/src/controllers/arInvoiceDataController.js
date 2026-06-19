@@ -247,7 +247,10 @@ async function previewCsvPayload(req, res, next) {
             BillToSite: record.siteNumber,
             PaymentTerms: record.paymentTerms,
             InvoiceCurrencyCode: record.invoiceCurrencyCode,
-            ConversionRateType: record.conversionRateType || 'Corporate',
+            // Omit ConversionRateType for ledger-currency (SAR) transactions (Oracle AR-856150)
+            ...(record.invoiceCurrencyCode?.toUpperCase() !== 'SAR'
+              ? { ConversionRateType: record.conversionRateType || 'Corporate' }
+              : {}),
             CrossReference: record.crossReference,
             Comments: record.comments,
           },
@@ -514,7 +517,10 @@ async function generatePayload(req, res, next) {
             BillToSite: record.siteNumber,
             PaymentTerms: record.paymentTerms,
             InvoiceCurrencyCode: record.invoiceCurrencyCode,
-            ConversionRateType: record.conversionRateType || 'Corporate',
+            // Omit ConversionRateType for ledger-currency (SAR) transactions (Oracle AR-856150)
+            ...(record.invoiceCurrencyCode?.toUpperCase() !== 'SAR'
+              ? { ConversionRateType: record.conversionRateType || 'Corporate' }
+              : {}),
             CrossReference: record.crossReference,
             Comments: record.comments,
           },
