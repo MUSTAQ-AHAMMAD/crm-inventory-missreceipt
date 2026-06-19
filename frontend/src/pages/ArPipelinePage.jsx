@@ -849,10 +849,11 @@ export default function ArPipelinePage() {
     try {
       // Submit all chunks concurrently — backend responds immediately with a batchId
       // for each, so submitting them in parallel has zero Oracle cost at this point.
+      // Non-deterministic batchId writes are intentional: s1.batchId just needs to hold
+      // any in-flight batchId so the React Query progress display has something to poll.
       const batchIds = await Promise.all(
         chunks.map(chunk =>
           api.post('/ar-pipeline/create-invoice-batch', { payloads: chunk }).then(r => {
-            // Keep the progress query pointed at the most recently submitted batch
             setS1(prev => ({ ...prev, batchId: r.data.batchId }))
             return r.data.batchId
           })
@@ -860,8 +861,8 @@ export default function ArPipelinePage() {
       )
 
       // Poll all batches in parallel. Each resolves as soon as its batch completes.
-      // chunkProgress.current is incremented as each batch finishes so the progress
-      // bar advances in real time.
+      // React functional updates (prev => ...) are applied sequentially by the scheduler,
+      // so concurrent increments to chunkProgress.current are always correct.
       const batchResults = await Promise.all(
         batchIds.map(async (batchId) => {
           while (true) {
