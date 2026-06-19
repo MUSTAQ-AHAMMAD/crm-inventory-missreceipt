@@ -251,6 +251,7 @@ async function previewCsvPayload(req, res, next) {
             ...(record.invoiceCurrencyCode?.toUpperCase() !== 'SAR'
               ? { ConversionRateType: record.conversionRateType || 'Corporate' }
               : {}),
+            Complete: true,
             CrossReference: record.crossReference,
             Comments: record.comments,
           },
@@ -521,6 +522,7 @@ async function generatePayload(req, res, next) {
             ...(record.invoiceCurrencyCode?.toUpperCase() !== 'SAR'
               ? { ConversionRateType: record.conversionRateType || 'Corporate' }
               : {}),
+            Complete: true,
             CrossReference: record.crossReference,
             Comments: record.comments,
           },
