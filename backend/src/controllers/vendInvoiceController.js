@@ -505,6 +505,7 @@ async function uploadVendInvoice(req, res, next) {
         BillToSite: group.siteNumber,
         PaymentTerms: 'IMMEDIATE',
         InvoiceCurrencyCode: 'SAR',
+        Complete: true,
         CrossReference: String(crossReference),
         Comments: `${paymentTypeLabel} payment - Cross-reference: ${crossReference}`,
         receivablesInvoiceLines: renumberedLines,
