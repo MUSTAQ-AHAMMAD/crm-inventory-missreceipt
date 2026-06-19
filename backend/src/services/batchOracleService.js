@@ -78,8 +78,9 @@ function getBatchConfig() {
                     parseInt(process.env.ORACLE_SOAP_TIMEOUT,          10)  || 300000,
 
     // Concurrency (parallel workers per batch run)
-    // Default 1 = process invoices one at a time (sequential) to avoid Oracle conflicts.
-    concurrency   : parseInt(process.env.ORACLE_INVOICE_CONCURRENCY,  10)  || 1,
+    // Default 5 = process up to 5 invoices in parallel.
+    // Increase via ORACLE_INVOICE_CONCURRENCY env var; lower to 1 if Oracle throttles.
+    concurrency   : parseInt(process.env.ORACLE_INVOICE_CONCURRENCY,  10)  || 5,
   };
 }
 
