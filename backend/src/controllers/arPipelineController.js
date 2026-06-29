@@ -18,10 +18,10 @@
  */
 
 const prisma = require('../services/prisma');
-const axios = require('axios');
 const pLimit = require('p-limit');
 const pRetry = require('p-retry');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
+const { buildArInvoiceSoapEnvelope, AR_INVOICE_SOAP_ACTION } = require('../services/soapEnvelopeBuilder');
 const {
   getBatchConfig,
   isTransientError: isBatchTransientError,
@@ -148,6 +148,52 @@ async function applyReceiptSoap(row) {
   console.log(`[Pipeline:ApplyReceipt] <<< Response body:\n${response.data}`);
 
   return response;
+}
+
+/**
+ * Extract invoice data from SOAP XML response.
+ * Parses the createSimpleInvoiceResponse structure from Oracle RecInvoiceService.
+ * 
+ * @param {object} parsed - Parsed XML object from OracleSoapClient
+ * @returns {object} - Extracted invoice data matching REST response format
+ */
+function extractInvoiceDataFromSoap(parsed) {
+  try {
+    // Navigate SOAP envelope structure
+    const envelope = parsed['soapenv:Envelope'] || parsed['env:Envelope'] || parsed['Envelope'] || {};
+    const body = envelope['soapenv:Body'] || envelope['env:Body'] || envelope['Body'] || {};
+    const response = body['ns2:createSimpleInvoiceResponse'] || 
+                     body['createSimpleInvoiceResponse'] || 
+                     body['typ:createSimpleInvoiceResponse'] || 
+                     {};
+    const result = response['result'] || response['ns2:result'] || response['typ:result'] || {};
+
+    // Extract invoice data from the result
+    // The SOAP response structure will vary, but typically includes fields like:
+    // - TrxNumber (TransactionNumber)
+    // - CustomerTrxId
+    // - Other invoice fields
+    
+    const invoiceData = {
+      TransactionNumber: result['TrxNumber'] || result['TransactionNumber'] || null,
+      CustomerTrxId: result['CustomerTrxId'] || null,
+      BillToCustomerName: result['BillToCustomerName'] || null,
+      BillToCustomerNumber: result['BillToAccountNumber'] || result['BillToCustomerNumber'] || null,
+      BillToSite: result['BillToLocation'] || result['BillToSite'] || null,
+      BusinessUnit: result['BusinessUnit'] || null,
+      TransactionSource: result['TransactionSource'] || null,
+      TransactionType: result['TransactionType'] || null,
+      TransactionDate: result['TrxDate'] || result['TransactionDate'] || null,
+      AccountingDate: result['GlDate'] || result['AccountingDate'] || null,
+      InvoiceCurrencyCode: result['InvoiceCurrencyCode'] || null,
+      PaymentTerms: result['PaymentTermsName'] || result['PaymentTerms'] || null,
+    };
+
+    return invoiceData;
+  } catch (error) {
+    console.error('[AR Pipeline] Error extracting data from SOAP response:', error.message);
+    return {};
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -728,14 +774,14 @@ async function listMiscReceipts(req, res, next) {
 
 // ---------------------------------------------------------------------------
 // POST /api/ar-pipeline/create-invoice-batch
-// Creates multiple AR Invoice payloads in Oracle via REST API.
+// Creates multiple AR Invoice payloads in Oracle via SOAP API.
 // Strategy:
 //   Pass 1 – process all invoices concurrently (capped at ORACLE_INVOICE_CONCURRENCY,
 //            default 3) so Oracle is never overloaded while still cutting wall-clock time
 //            vs. purely sequential processing.
 //   Pass 2 – re-submit only invoices that failed with a transient network error in pass 1
 //            (timeout, ECONNRESET, ETIMEDOUT, EPIPE, etc.); done sequentially to be safe.
-//            Oracle business errors (4xx / ServiceStatus=E) are permanent failures — not retried.
+//            Oracle business errors (4xx / SOAP Faults) are permanent failures — not retried.
 // Responds immediately with a batchId; processing continues in the background.
 // Poll GET /api/ar-pipeline/invoice-batch/:batchId/progress for status.
 // ---------------------------------------------------------------------------
@@ -747,7 +793,7 @@ async function createInvoiceBatch(req, res, next) {
       return res.status(400).json({ error: 'payloads must be a non-empty array.' });
     }
 
-    const endpoint     = process.env.ORACLE_AR_INVOICE_URL;
+    const endpoint     = process.env.ORACLE_AR_INVOICE_SOAP_URL;
     const username     = process.env.ORACLE_USERNAME;
     const password     = process.env.ORACLE_PASSWORD;
 
@@ -755,7 +801,7 @@ async function createInvoiceBatch(req, res, next) {
       return res.status(500).json({ error: 'Oracle credentials not configured. Check ORACLE_USERNAME and ORACLE_PASSWORD in .env' });
     }
     if (!endpoint) {
-      return res.status(500).json({ error: 'ORACLE_AR_INVOICE_URL is not configured in .env' });
+      return res.status(500).json({ error: 'ORACLE_AR_INVOICE_SOAP_URL is not configured in .env' });
     }
 
     // Create a batch tracking record and respond immediately
@@ -810,23 +856,33 @@ async function createInvoiceBatch(req, res, next) {
       const transientItems = []; // queued for pass-2 retry
 
       const oracleAuth = Buffer.from(`${username}:${password}`).toString('base64');
-      // AR invoice REST calls can take longer than SOAP calls (large response body, Oracle processing).
-      // Use a dedicated ORACLE_AR_INVOICE_TIMEOUT (default 5 min) so chunked invoices never time out.
+      // AR invoice SOAP calls use ORACLE_SOAP_TIMEOUT (default 5 min).
       const invoiceTimeout = _batchCfg.invoiceTimeout;
 
-      /** Extract a short readable Oracle error from the response body */
+      /** Extract a short readable Oracle error from the SOAP response */
       function extractOracleError(data) {
         if (!data) return null;
-        // Oracle REST error shapes
-        if (data.detail)  return String(data.detail).slice(0, 300);
-        if (data.title)   return String(data.title).slice(0, 300);
-        if (data.o_errorCode) return `${data.o_errorCode}: ${String(data.o_errorMessage || '').slice(0, 250)}`;
-        if (Array.isArray(data.items) && data.items[0]?.detail) return String(data.items[0].detail).slice(0, 300);
+        // For SOAP responses, data is typically a string (XML)
+        if (typeof data === 'string') {
+          // Try to extract fault string or error message from XML
+          const faultMatch = data.match(/<faultstring[^>]*>([^<]+)<\/faultstring>/i);
+          if (faultMatch) return faultMatch[1].slice(0, 300);
+          
+          const errorMatch = data.match(/<[^:]+:message[^>]*>([^<]+)<\/[^:]+:message>/i);
+          if (errorMatch) return errorMatch[1].slice(0, 300);
+        }
+        // REST error shapes (fallback for compatibility)
+        if (data && typeof data === 'object') {
+          if (data.detail)  return String(data.detail).slice(0, 300);
+          if (data.title)   return String(data.title).slice(0, 300);
+          if (data.o_errorCode) return `${data.o_errorCode}: ${String(data.o_errorMessage || '').slice(0, 250)}`;
+          if (Array.isArray(data.items) && data.items[0]?.detail) return String(data.items[0].detail).slice(0, 300);
+        }
         return null;
       }
 
       /**
-       * Submits one invoice to Oracle via REST and persists the result.
+       * Submits one invoice to Oracle via SOAP and persists the result.
        * @param {object}  payload      - Invoice payload (JSON)
        * @param {object}  uploadRecord - Pre-created ArInvoiceUpload row (may be null)
        * @param {boolean} isRetry      - true when called from pass 2 (transient-error retry)
@@ -871,27 +927,23 @@ async function createInvoiceBatch(req, res, next) {
         let transient       = false;
         const t0            = Date.now();
 
+        // Build SOAP envelope
+        const soapXml = buildArInvoiceSoapEnvelope(payload);
+
         try {
-          const response = await axios.post(endpoint, payload, {
-            headers: {
-              'Content-Type': 'application/json',
-              Accept:         'application/json',
-              Authorization:  `Basic ${oracleAuth}`,
-            },
-            timeout:        invoiceTimeout,
-            validateStatus: () => true,
-          });
+          const soapClient = createOracleSoapClient(endpoint);
+          const response = await soapClient.callWithCustomEnvelope(soapXml, AR_INVOICE_SOAP_ACTION);
 
           const elapsed = Date.now() - t0;
           httpStatus = response.status;
-          oracleData = response.data;
+          
+          // Parse SOAP response to extract invoice data
+          const parsed = response.parsed;
+          oracleData = extractInvoiceDataFromSoap(parsed);
 
           if (response.status >= 400) {
             responseStatus  = 'FAILED';
             responseMessage = `Oracle returned HTTP ${httpStatus}`;
-          } else if (oracleData?.ServiceStatus === 'E') {
-            responseStatus  = 'FAILED';
-            responseMessage = 'Oracle returned ServiceStatus=E (business validation error)';
           }
 
           if (responseStatus === 'SUCCESS') {
@@ -901,19 +953,19 @@ async function createInvoiceBatch(req, res, next) {
             if (!oracleData?.TransactionNumber) {
               responseStatus  = 'FAILED';
               responseMessage = 'Oracle returned HTTP 200 but no TransactionNumber — possible duplicate CrossReference or oversized payload';
-              const oracleErr = extractOracleError(oracleData);
+              const oracleErr = extractOracleError(response.data);
               console.error(`❌ ${invoiceTag} FAILED (${elapsed}ms) HTTP ${httpStatus} - ${responseMessage}`);
               if (oracleErr) console.error(`❌ ${invoiceTag} Oracle error: ${oracleErr}`);
-              if (oracleData) console.error(`❌ ${invoiceTag} Full Oracle response:`, JSON.stringify(oracleData));
+              if (response.data) console.error(`❌ ${invoiceTag} Full Oracle response:`, response.data);
             } else {
               const custTxnId = oracleData.CustomerTrxId ?? oracleData.CustomerTxnId ?? 'N/A';
               console.log(`✅ ${invoiceTag} SUCCESS (${elapsed}ms) | TxnNumber=${oracleData.TransactionNumber} | CustomerTrxId=${custTxnId} | HTTP ${httpStatus}`);
             }
           } else {
-            const oracleErr = extractOracleError(oracleData);
+            const oracleErr = extractOracleError(response.data);
             console.error(`❌ ${invoiceTag} FAILED (${elapsed}ms) HTTP ${httpStatus} - ${responseMessage}`);
             if (oracleErr) console.error(`❌ ${invoiceTag} Oracle error: ${oracleErr}`);
-            if (oracleData) console.error(`❌ ${invoiceTag} Full Oracle response:`, JSON.stringify(oracleData));
+            if (response.data) console.error(`❌ ${invoiceTag} Full Oracle response:`, response.data);
           }
         } catch (err) {
           const elapsed   = Date.now() - t0;

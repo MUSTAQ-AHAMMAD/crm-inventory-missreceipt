@@ -1,12 +1,13 @@
 /**
- * AR Invoice controller - Handles Oracle Fusion AR Invoice creation via REST API
- * Sends JSON payload to Oracle's receivablesInvoices REST resource,
- * matching the Oracle Fusion Receivables Invoice REST API.
+ * AR Invoice controller - Handles Oracle Fusion AR Invoice creation via SOAP API
+ * Sends SOAP XML envelope to Oracle's RecInvoiceService (createSimpleInvoice operation),
+ * matching the Oracle Fusion Receivables Invoice SOAP API.
  */
 
-const axios = require('axios');
 const prisma = require('../services/prisma');
 const fusionMetadataService = require('../services/fusionSalesMetadataService');
+const { createOracleSoapClient } = require('../services/OracleSoapClient');
+const { buildArInvoiceSoapEnvelope, AR_INVOICE_SOAP_ACTION } = require('../services/soapEnvelopeBuilder');
 
 /**
  * POST /api/ar-invoice/preview
@@ -83,12 +84,16 @@ async function previewPayload(req, res, next) {
       });
     }
 
+    // Generate SOAP envelope for preview
+    const soapEnvelope = buildArInvoiceSoapEnvelope(payload);
+
     // Return validated payload
     return res.json({
       valid: true,
-      message: 'Payload is valid and ready to send to Oracle via REST',
+      message: 'Payload is valid and ready to send to Oracle via SOAP',
       payload,
-      restEndpoint: process.env.ORACLE_AR_INVOICE_URL || '(ORACLE_AR_INVOICE_URL not set)',
+      soapEnvelope,
+      soapEndpoint: process.env.ORACLE_AR_INVOICE_SOAP_URL || '(ORACLE_AR_INVOICE_SOAP_URL not set)',
     });
 
   } catch (err) {
@@ -112,6 +117,52 @@ function parseOracleDate(value) {
   return Number.isNaN(d.getTime())
     ? null
     : new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+}
+
+/**
+ * Extract invoice data from SOAP XML response.
+ * Parses the createSimpleInvoiceResponse structure from Oracle RecInvoiceService.
+ * 
+ * @param {object} parsed - Parsed XML object from OracleSoapClient
+ * @returns {object} - Extracted invoice data matching REST response format
+ */
+function extractInvoiceDataFromSoap(parsed) {
+  try {
+    // Navigate SOAP envelope structure
+    const envelope = parsed['soapenv:Envelope'] || parsed['env:Envelope'] || parsed['Envelope'] || {};
+    const body = envelope['soapenv:Body'] || envelope['env:Body'] || envelope['Body'] || {};
+    const response = body['ns2:createSimpleInvoiceResponse'] || 
+                     body['createSimpleInvoiceResponse'] || 
+                     body['typ:createSimpleInvoiceResponse'] || 
+                     {};
+    const result = response['result'] || response['ns2:result'] || response['typ:result'] || {};
+
+    // Extract invoice data from the result
+    // The SOAP response structure will vary, but typically includes fields like:
+    // - TrxNumber (TransactionNumber)
+    // - CustomerTrxId
+    // - Other invoice fields
+    
+    const invoiceData = {
+      TransactionNumber: result['TrxNumber'] || result['TransactionNumber'] || null,
+      CustomerTrxId: result['CustomerTrxId'] || null,
+      BillToCustomerName: result['BillToCustomerName'] || null,
+      BillToCustomerNumber: result['BillToAccountNumber'] || result['BillToCustomerNumber'] || null,
+      BillToSite: result['BillToLocation'] || result['BillToSite'] || null,
+      BusinessUnit: result['BusinessUnit'] || null,
+      TransactionSource: result['TransactionSource'] || null,
+      TransactionType: result['TransactionType'] || null,
+      TransactionDate: result['TrxDate'] || result['TransactionDate'] || null,
+      AccountingDate: result['GlDate'] || result['AccountingDate'] || null,
+      InvoiceCurrencyCode: result['InvoiceCurrencyCode'] || null,
+      PaymentTerms: result['PaymentTermsName'] || result['PaymentTerms'] || null,
+    };
+
+    return invoiceData;
+  } catch (error) {
+    console.error('[AR Invoice] Error extracting data from SOAP response:', error.message);
+    return {};
+  }
 }
 
 /**
@@ -284,11 +335,11 @@ async function createInvoice(req, res, next) {
       }
     }
 
-    // Get Oracle REST endpoint
-    const restEndpoint = process.env.ORACLE_AR_INVOICE_URL;
-    if (!restEndpoint) {
+    // Get Oracle SOAP endpoint
+    const soapEndpoint = process.env.ORACLE_AR_INVOICE_SOAP_URL;
+    if (!soapEndpoint) {
       return res.status(500).json({
-        error: 'Oracle AR Invoice REST URL not configured. Check ORACLE_AR_INVOICE_URL in .env'
+        error: 'Oracle AR Invoice SOAP URL not configured. Check ORACLE_AR_INVOICE_SOAP_URL in .env'
       });
     }
 
@@ -301,7 +352,7 @@ async function createInvoice(req, res, next) {
     }
 
     console.log(`\n[AR Invoice] Creating invoice for customer ${payload.BillToCustomerName}`);
-    console.log(`[AR Invoice] REST Endpoint: ${restEndpoint}`);
+    console.log(`[AR Invoice] SOAP Endpoint: ${soapEndpoint}`);
 
     // Create upload record
     const uploadRecord = await prisma.arInvoiceUpload.create({
@@ -318,33 +369,24 @@ async function createInvoice(req, res, next) {
     let httpStatus = null;
     let oracleData = null;
 
-    const oracleAuth = Buffer.from(`${username}:${password}`).toString('base64');
-    const invoiceTimeout =
-      parseInt(process.env.ORACLE_AR_INVOICE_TIMEOUT, 10) ||
-      parseInt(process.env.ORACLE_SOAP_TIMEOUT, 10) ||
-      300000;
+    // Build SOAP envelope
+    const soapXml = buildArInvoiceSoapEnvelope(payload);
 
     try {
-      const response = await axios.post(restEndpoint, payload, {
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          Authorization: `Basic ${oracleAuth}`,
-        },
-        timeout: invoiceTimeout,
-        validateStatus: () => true,
-      });
+      console.log(`[AR Invoice] Sending SOAP request for invoice`);
+      const soapClient = createOracleSoapClient(soapEndpoint);
+      const response = await soapClient.callWithCustomEnvelope(soapXml, AR_INVOICE_SOAP_ACTION);
 
       httpStatus = response.status;
-      oracleData = response.data;
-      responseBody = JSON.stringify(oracleData);
+      responseBody = response.data;
+      
+      // Parse SOAP response to extract invoice data
+      const parsed = response.parsed;
+      oracleData = extractInvoiceDataFromSoap(parsed);
 
       if (response.status >= 400) {
         responseStatus = 'FAILED';
         responseMessage = `Oracle returned HTTP ${httpStatus}`;
-      } else if (oracleData?.ServiceStatus === 'E') {
-        responseStatus = 'FAILED';
-        responseMessage = 'Oracle returned ServiceStatus=E (business validation error)';
       }
 
       console.log(`✅ [AR Invoice] Success - HTTP ${httpStatus}`);
@@ -353,7 +395,7 @@ async function createInvoice(req, res, next) {
     } catch (error) {
       responseStatus = 'FAILED';
       httpStatus = error.response?.status || null;
-      responseBody = error.response?.data ? JSON.stringify(error.response.data) : error.message;
+      responseBody = error.response?.data || error.message;
       oracleData = null;
       responseMessage = `Failed to create invoice: ${error.message}`;
 
