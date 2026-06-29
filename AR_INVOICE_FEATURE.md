@@ -4,7 +4,7 @@ This document describes the AR Invoice creation feature added to the CRM Invento
 
 ## Overview
 
-The AR Invoice feature allows users to create Accounts Receivable (AR) invoices in Oracle Fusion using a REST API. Users can submit a JSON payload through a web interface, and the system stores both the request and Oracle's response in the database.
+The AR Invoice feature allows users to create Accounts Receivable (AR) invoices in Oracle Fusion using a SOAP API. Users can submit a JSON payload through a web interface, which is converted to a SOAP envelope and sent to Oracle's RecInvoiceService. The system stores both the request and Oracle's response in the database.
 
 ## Architecture
 
@@ -15,12 +15,12 @@ The AR Invoice feature allows users to create Accounts Receivable (AR) invoices 
      - Request payload (JSON)
      - Response status (SUCCESS, FAILED, PROCESSING)
      - Response message
-     - Full Oracle API response
+     - Full Oracle SOAP response
      - HTTP status code
      - User ID and creation timestamp
 
 2. **Controller** (`backend/src/controllers/arInvoiceController.js`)
-   - `createInvoice()`: Validates payload, sends to Oracle, stores response
+   - `createInvoice()`: Validates payload, builds SOAP envelope, sends to Oracle, stores response
    - `listUploads()`: Returns paginated list of all AR Invoice uploads
    - `getUpload()`: Returns detailed information about a specific upload
 
@@ -28,6 +28,11 @@ The AR Invoice feature allows users to create Accounts Receivable (AR) invoices 
    - `POST /api/ar-invoice/create` - Create new AR Invoice
    - `GET /api/ar-invoice/uploads` - List all uploads
    - `GET /api/ar-invoice/uploads/:id` - Get upload details
+
+4. **SOAP Envelope Builder** (`backend/src/services/soapEnvelopeBuilder.js`)
+   - `buildArInvoiceSoapEnvelope()`: Converts JSON payload to Oracle SOAP XML format
+   - Handles field mapping (e.g., BillToSite → BillToLocation, TransactionDate → TrxDate)
+   - Supports both regular items (with ItemNumber) and discount lines (with MemoLine)
 
 ### Frontend Components
 
@@ -40,7 +45,7 @@ The AR Invoice feature allows users to create Accounts Receivable (AR) invoices 
 
 2. **AR Invoice Detail Page** (`frontend/src/pages/ArInvoiceDetailPage.jsx`)
    - Displays full request payload
-   - Shows Oracle API response
+   - Shows Oracle SOAP response
    - Status and metadata display
 
 3. **Navigation**
@@ -52,12 +57,15 @@ The AR Invoice feature allows users to create Accounts Receivable (AR) invoices 
 Add the following to your `backend/.env` file:
 
 ```env
-# Oracle REST API endpoint for AR Invoice creation
-ORACLE_AR_INVOICE_URL=https://ehxk-test.fa.em2.oraclecloud.com/fscmRestApi/resources/11.13.18.05/receivablesInvoices
+# Oracle SOAP endpoint for AR Invoice creation (createSimpleInvoice)
+ORACLE_AR_INVOICE_SOAP_URL=https://ehxk-test.fa.em2.oraclecloud.com/fscmService/RecInvoiceService
 
 # Oracle credentials (shared with other features)
 ORACLE_USERNAME=your-username
 ORACLE_PASSWORD=your-password
+
+# Optional: Timeout for AR invoice SOAP calls (default 300000ms = 5 minutes)
+ORACLE_SOAP_TIMEOUT=300000
 ```
 
 ## API Request Format
@@ -95,6 +103,36 @@ ORACLE_PASSWORD=your-password
 - `Comments`: Invoice comments
 - `SalesOrder`: Sales order reference (per line)
 - `MemoLine`: Memo line text (per line)
+
+### JSON to SOAP Field Mapping
+
+The system accepts JSON payloads and converts them to SOAP XML format for Oracle's RecInvoiceService. The mapping is:
+
+**Header Fields:**
+- `BusinessUnit` → `<inv:BusinessUnit>`
+- `TransactionSource` → `<inv:TransactionSource>`
+- `TransactionType` → `<inv:TransactionType>`
+- `TransactionDate` → `<inv:TrxDate>`
+- `AccountingDate` → `<inv:GlDate>`
+- `BillToCustomerName` → `<inv:BillToCustomerName>`
+- `BillToCustomerNumber` → `<inv:BillToAccountNumber>`
+- `BillToSite` → `<inv:BillToLocation>`
+- `PaymentTerms` → `<inv:PaymentTermsName>`
+- `InvoiceCurrencyCode` → `<inv:InvoiceCurrencyCode>`
+- `ConversionRateType` → `<inv:ConversionRateType>` (optional)
+
+**Line Fields:**
+- `LineNumber` → `<inv:LineNumber>`
+- `ItemNumber` → `<inv:ItemNumber>` (omit for discount lines)
+- `MemoLine` → `<inv:MemoLineName>` (for discount lines only)
+- `Description` → `<inv:Description>`
+- `Quantity` → `<inv:Quantity>` with `<adf:Value>` and `<adf:UnitCode>`
+- `UnitSellingPrice` → `<inv:UnitSellingPrice>` with `<adf:Value>` and `<adf:CurrencyCode>`
+- `TaxClassificationCode` → `<inv:TaxClassificationCode>`
+- `SalesOrder` → `<inv:SalesOrder>` (optional)
+- `SalesOrderLine` → `<inv:SalesOrderLine>` (optional)
+
+The SOAP envelope is built using `buildArInvoiceSoapEnvelope()` from `backend/src/services/soapEnvelopeBuilder.js` and sent via `OracleSoapClient.callWithCustomEnvelope()` with the `createSimpleInvoice` SOAP action.
 
 ## Sample Payload
 
