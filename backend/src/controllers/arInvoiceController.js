@@ -353,6 +353,7 @@ async function createInvoice(req, res, next) {
 
     console.log(`\n[AR Invoice] Creating invoice for customer ${payload.BillToCustomerName}`);
     console.log(`[AR Invoice] SOAP Endpoint: ${soapEndpoint}`);
+    console.log(`[AR Invoice] Payload being sent:`, JSON.stringify(payload, null, 2));
 
     // Create upload record
     const uploadRecord = await prisma.arInvoiceUpload.create({
@@ -374,11 +375,19 @@ async function createInvoice(req, res, next) {
 
     try {
       console.log(`[AR Invoice] Sending SOAP request for invoice`);
+      console.log(`[AR Invoice] API URL: ${soapEndpoint}`);
       const soapClient = createOracleSoapClient(soapEndpoint);
       const response = await soapClient.callWithCustomEnvelope(soapXml, AR_INVOICE_SOAP_ACTION);
 
       httpStatus = response.status;
       responseBody = response.data;
+      
+      // Log full response from API
+      console.log(`[AR Invoice] Full API Response:`, JSON.stringify({
+        status: response.status,
+        data: response.data,
+        headers: response.headers
+      }, null, 2));
       
       // Parse SOAP response to extract invoice data
       const parsed = response.parsed;
@@ -401,6 +410,11 @@ async function createInvoice(req, res, next) {
 
       console.error(`❌ [AR Invoice] Failed - HTTP ${httpStatus}`);
       console.error(`Error: ${error.message}`);
+      console.error(`[AR Invoice] Error Response:`, JSON.stringify({
+        status: error.response?.status,
+        data: error.response?.data,
+        message: error.message
+      }, null, 2));
     }
 
     // Update upload record with response
