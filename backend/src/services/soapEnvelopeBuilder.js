@@ -58,15 +58,20 @@ function escapeXml(value) {
 
 /**
  * Rounds a numeric value to 2 decimal places for currency amounts.
- * Handles strings, numbers, null, and undefined.
+ * Handles strings and numbers. Returns the value as a string with 2 decimal places.
  * 
- * @param {string|number|null|undefined} value - The value to round
+ * Note: This function assumes the value has already been validated as non-null
+ * by the calling envelope builder's required field checks.
+ * 
+ * @param {string|number} value - The value to round (should be non-null)
  * @returns {string} The rounded value as a string with 2 decimal places
+ * @throws {Error} If the value cannot be converted to a valid number
  */
 function roundAmount(value) {
-  if (value == null || value === '') return '0.00';
   const num = Number(value);
-  if (isNaN(num)) return '0.00';
+  if (isNaN(num)) {
+    throw new Error(`Invalid numeric value for amount: "${value}"`);
+  }
   return (Math.round(num * 100) / 100).toFixed(2);
 }
 
