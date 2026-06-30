@@ -64,14 +64,17 @@ async function previewPayload(req, res, next) {
       // Validate each line item
       for (const [index, line] of payload.receivablesInvoiceLines.entries()) {
         // ItemNumber may be empty for discount/memo lines that supply MemoLine instead
-        const hasItemIdentifier = line.ItemNumber || line.MemoLine;
+        const hasItemIdentifier = line.ItemNumber || line.MemoLine || line.MemoLineName;
         if (!line.LineNumber || !hasItemIdentifier || !line.Description) {
-          validationErrors.push(`Line ${index + 1}: Missing required fields: LineNumber, ItemNumber or MemoLine, and Description`);
+          validationErrors.push(`Line ${index + 1}: Missing required fields: LineNumber, ItemNumber or MemoLine/MemoLineName, and Description`);
         }
         // Quantity and UnitSellingPrice can legitimately be 0 (free/zero-price items)
         if (line.Quantity == null || line.UnitSellingPrice == null || !line.TaxClassificationCode) {
           validationErrors.push(`Line ${index + 1}: Missing required fields: Quantity, UnitSellingPrice, or TaxClassificationCode`);
         }
+        // UomCode is required (defaults to 'EA' in SOAP envelope builder if missing)
+        // CurrencyCode is required per line (defaults to header currency if missing)
+        // SalesOrderLine is optional but recommended
       }
     }
 
@@ -321,10 +324,10 @@ async function createInvoice(req, res, next) {
     // Validate each line item
     for (const [index, line] of payload.receivablesInvoiceLines.entries()) {
       // ItemNumber may be empty for discount/memo lines that supply MemoLine instead
-      const hasItemIdentifier = line.ItemNumber || line.MemoLine;
+      const hasItemIdentifier = line.ItemNumber || line.MemoLine || line.MemoLineName;
       if (!line.LineNumber || !hasItemIdentifier || !line.Description) {
         return res.status(400).json({
-          error: `Line ${index + 1}: Missing required fields: LineNumber, ItemNumber or MemoLine, Description`
+          error: `Line ${index + 1}: Missing required fields: LineNumber, ItemNumber or MemoLine/MemoLineName, Description`
         });
       }
       // Quantity and UnitSellingPrice can legitimately be 0 (free/zero-price items)
@@ -333,6 +336,9 @@ async function createInvoice(req, res, next) {
           error: `Line ${index + 1}: Missing required fields: Quantity, UnitSellingPrice, TaxClassificationCode`
         });
       }
+      // UomCode is required (defaults to 'EA' in SOAP envelope builder if missing)
+      // CurrencyCode is required per line (defaults to header currency if missing)
+      // SalesOrderLine is optional but recommended
     }
 
     // Get Oracle SOAP endpoint

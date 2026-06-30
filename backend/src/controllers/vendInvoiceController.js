@@ -437,23 +437,30 @@ async function uploadVendInvoice(req, res, next) {
                Description: 'Discount Item',
                Quantity: quantity,
                UnitSellingPrice: unitSellingPrice,
-               TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
-               SalesOrder: salesOrderRef,
-               MemoLine: 'Discount Item',
-             });
-           } else {
-             // Omit MemoLine entirely for regular item lines; sending MemoLine: null
-             // alongside ItemNumber causes Oracle error AR-855636.
-             invoiceGroups[groupKey].lines.push({
-               LineNumber: lineNumber,
-               ItemNumber: itemNumber,
-               Description: description,
-               Quantity: quantity,
-               UnitSellingPrice: unitSellingPrice,
-               TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
-               SalesOrder: salesOrderRef,
-             });
-           }
+              UomCode: 'EA',
+              CurrencyCode: 'SAR',
+              TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
+              SalesOrder: salesOrderRef,
+              SalesOrderLine: lineNumber,
+              MemoLineName: 'Discount Item',
+              MemoLine: 'Discount Item',
+            });
+          } else {
+            // Omit MemoLine entirely for regular item lines; sending MemoLine: null
+            // alongside ItemNumber causes Oracle error AR-855636.
+            invoiceGroups[groupKey].lines.push({
+              LineNumber: lineNumber,
+              ItemNumber: itemNumber,
+              Description: description,
+              Quantity: quantity,
+              UnitSellingPrice: unitSellingPrice,
+              UomCode: 'EA',
+              CurrencyCode: 'SAR',
+              TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
+              SalesOrder: salesOrderRef,
+              SalesOrderLine: lineNumber,
+            });
+          }
         }
       } catch (err) {
         errors.push({ row: i + 2, error: err.message });
@@ -503,7 +510,7 @@ async function uploadVendInvoice(req, res, next) {
         BillToCustomerName: group.customerName,
         BillToCustomerNumber: group.customerNumber,
         BillToSite: group.siteNumber,
-        PaymentTerms: 'IMMEDIATE',
+        PaymentTerms: 'Immediate',
         InvoiceCurrencyCode: 'SAR',
         CrossReference: String(crossReference),
         Comments: `${paymentTypeLabel} payment - Cross-reference: ${crossReference}`,

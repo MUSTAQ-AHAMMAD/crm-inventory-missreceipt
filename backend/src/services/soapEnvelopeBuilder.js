@@ -219,22 +219,24 @@ function optionalTag(ns, tag, value) {
 /**
  * Builds a createSimpleInvoice SOAP envelope for Oracle RecInvoiceService.
  *
- * Maps the same JSON fields as FusionInvoiceTransform.java (integration-Oracle):
- *   BillToCustomerName   → BillToCustomerName
- *   BillToSite           → BillToLocation
- *   BillToCustomerNumber → BillToAccountNumber
- *   BusinessUnit         → BusinessUnit
- *   TransactionSource    → TransactionSource
- *   TransactionType      → TransactionType
- *   InvoiceCurrencyCode  → InvoiceCurrencyCode
- *   ConversionRateType   → ConversionRateType
- *   PaymentTerms         → PaymentTermsName
- *   TransactionDate      → TrxDate
- *   AccountingDate       → GlDate
+ * Correct Oracle field mappings:
+ *   BillToCustomerName     → BillToCustomerName
+ *   BillToCustomerNumber   → BillToAccountNumber   (payload field name)
+ *   BillToSite             → BillToLocation        (payload field name)
+ *   BusinessUnit           → BusinessUnit
+ *   TransactionSource      → TransactionSource
+ *   TransactionType        → TransactionType
+ *   InvoiceCurrencyCode    → InvoiceCurrencyCode
+ *   ConversionRateType     → ConversionRateType    (conditionally omitted for SAR)
+ *   PaymentTerms           → PaymentTermsName      (payload field name)
+ *   TransactionDate        → TrxDate
+ *   AccountingDate         → GlDate                (payload field name)
  *
- * Line fields:
- *   LineNumber, ItemNumber (omit for discount), MemoLine (discount only),
- *   Description, Quantity (MeasureType), UnitSellingPrice (AmountType),
+ * Line fields (REQUIRED by Oracle):
+ *   LineNumber, ItemNumber (or MemoLineName for discounts/returns),
+ *   Description, Quantity (MeasureType with UnitCode),
+ *   UnitSellingPrice (AmountType with CurrencyCode),
+ *   UomCode (line-level UOM), CurrencyCode (line-level),
  *   SalesOrder, SalesOrderLine, TaxClassificationCode
  *
  * @param {object} payload - AR Invoice payload with header + receivablesInvoiceLines
@@ -244,27 +246,41 @@ function buildArInvoiceSoapEnvelope(payload) {
   const currency = payload.InvoiceCurrencyCode || '';
 
   const lineXml = lines.map((line) => {
-    const uom        = String(line.UnitOfMeasure ?? line.UOM ?? 'EA').trim();
-    const isDiscount = !line.ItemNumber || String(line.ItemNumber).trim() === '';
-    const itemTag    = isDiscount ? '' : `          <inv:ItemNumber>${escapeXml(line.ItemNumber)}</inv:ItemNumber>\n`;
-    const memoTag    = isDiscount ? `          <inv:MemoLineName>${escapeXml(line.MemoLine ?? 'Discount Item')}</inv:MemoLineName>\n` : '';
-    const soTag      = line.SalesOrder     ? `          <inv:SalesOrder>${escapeXml(line.SalesOrder)}</inv:SalesOrder>\n`                 : '';
-    const solTag     = line.SalesOrderLine != null ? `          <inv:SalesOrderLine>${escapeXml(line.SalesOrderLine)}</inv:SalesOrderLine>\n` : '';
+    // UomCode: required per-line UOM (defaults to 'EA')
+    const uomCode       = String(line.UomCode ?? line.UnitOfMeasure ?? line.UOM ?? 'EA').trim();
+    // CurrencyCode: required per-line currency (defaults to header currency)
+    const lineCurrency  = String(line.CurrencyCode ?? currency).trim();
+    
+    const isDiscount    = !line.ItemNumber || String(line.ItemNumber).trim() === '';
+    const itemTag       = isDiscount ? '' : `          <inv:ItemNumber>${escapeXml(line.ItemNumber)}</inv:ItemNumber>\n`;
+    const memoTag       = isDiscount ? `          <inv:MemoLineName>${escapeXml(line.MemoLineName ?? line.MemoLine ?? 'Discount Item')}</inv:MemoLineName>\n` : '';
+    const soTag         = line.SalesOrder     ? `          <inv:SalesOrder>${escapeXml(line.SalesOrder)}</inv:SalesOrder>\n`                 : '';
+    const solTag        = line.SalesOrderLine != null ? `          <inv:SalesOrderLine>${escapeXml(line.SalesOrderLine)}</inv:SalesOrderLine>\n` : '';
+    const uomCodeTag    = `          <inv:UomCode>${escapeXml(uomCode)}</inv:UomCode>\n`;
+    const currencyTag   = `          <inv:CurrencyCode>${escapeXml(lineCurrency)}</inv:CurrencyCode>\n`;
 
     return `        <inv:InvoiceLine>
           <inv:LineNumber>${escapeXml(line.LineNumber)}</inv:LineNumber>
 ${itemTag}${memoTag}          <inv:Description>${escapeXml(line.Description)}</inv:Description>
           <inv:Quantity>
             <adf:Value>${escapeXml(line.Quantity)}</adf:Value>
-            <adf:UnitCode>${escapeXml(uom)}</adf:UnitCode>
+            <adf:UnitCode>${escapeXml(uomCode)}</adf:UnitCode>
           </inv:Quantity>
-          <inv:UnitSellingPrice>
+${uomCodeTag}          <inv:UnitSellingPrice>
             <adf:Value>${escapeXml(roundAmount(line.UnitSellingPrice))}</adf:Value>
-            <adf:CurrencyCode>${escapeXml(currency)}</adf:CurrencyCode>
+            <adf:CurrencyCode>${escapeXml(lineCurrency)}</adf:CurrencyCode>
           </inv:UnitSellingPrice>
-${soTag}${solTag}          <inv:TaxClassificationCode>${escapeXml(line.TaxClassificationCode)}</inv:TaxClassificationCode>
+${currencyTag}${soTag}${solTag}          <inv:TaxClassificationCode>${escapeXml(line.TaxClassificationCode)}</inv:TaxClassificationCode>
         </inv:InvoiceLine>`;
   }).join('\n');
+
+  // ConversionRateType: Oracle rejects this field when InvoiceCurrencyCode matches ledger currency (SAR).
+  // Per stored memory: "ConversionRateType must be omitted from AR invoice REST payloads when 
+  // InvoiceCurrencyCode is SAR (ledger currency). Oracle rejects it with AR-856150."
+  // For SOAP API, we apply the same rule.
+  const conversionRateTag = (currency.toUpperCase() === 'SAR') 
+    ? '' 
+    : optionalTag('inv', 'ConversionRateType', payload.ConversionRateType);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
@@ -276,13 +292,13 @@ ${soTag}${solTag}          <inv:TaxClassificationCode>${escapeXml(line.TaxClassi
     <typ:createSimpleInvoice>
       <typ:invoice>
         ${optionalTag('inv', 'BillToCustomerName',   payload.BillToCustomerName)}
-        ${optionalTag('inv', 'BillToLocation',       payload.BillToSite)}
         ${optionalTag('inv', 'BillToAccountNumber',  payload.BillToCustomerNumber)}
-        ${optionalTag('inv', 'BusinessUnit',          payload.BusinessUnit)}
+        ${optionalTag('inv', 'BillToLocation',       payload.BillToSite)}
+        ${optionalTag('inv', 'BusinessUnit',         payload.BusinessUnit)}
         ${optionalTag('inv', 'TransactionSource',    payload.TransactionSource)}
         ${optionalTag('inv', 'TransactionType',      payload.TransactionType)}
         <inv:InvoiceCurrencyCode>${escapeXml(currency)}</inv:InvoiceCurrencyCode>
-        ${optionalTag('inv', 'ConversionRateType',   payload.ConversionRateType)}
+        ${conversionRateTag}
         ${optionalTag('inv', 'PaymentTermsName',     payload.PaymentTerms)}
         <inv:TrxDate>${escapeXml(payload.TransactionDate)}</inv:TrxDate>
         ${optionalTag('inv', 'GlDate', payload.AccountingDate)}
