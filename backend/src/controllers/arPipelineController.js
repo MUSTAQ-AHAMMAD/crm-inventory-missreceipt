@@ -919,6 +919,12 @@ async function createInvoiceBatch(req, res, next) {
           (crossRef ? ` | crossRef=${crossRef}` : '') +
           (isRetry ? ' | [RETRY]' : '')
         );
+        
+        // Log full payload if verbose logging is enabled (WARNING: may contain sensitive data)
+        if (process.env.AR_INVOICE_VERBOSE_LOGGING === 'true') {
+          console.log(`${invoiceTag} Payload being sent:`, JSON.stringify(payload, null, 2));
+        }
+        console.log(`${invoiceTag} API URL: ${endpoint}`);
 
         let responseStatus  = 'SUCCESS';
         let responseMessage = 'Invoice created successfully';
@@ -936,6 +942,15 @@ async function createInvoiceBatch(req, res, next) {
 
           const elapsed = Date.now() - t0;
           httpStatus = response.status;
+          
+          // Log full API response if verbose logging is enabled (WARNING: may contain sensitive data)
+          if (process.env.AR_INVOICE_VERBOSE_LOGGING === 'true') {
+            console.log(`${invoiceTag} Full API Response:`, JSON.stringify({
+              status: response.status,
+              data: response.data,
+              headers: response.headers
+            }, null, 2));
+          }
           
           // Parse SOAP response to extract invoice data
           const parsed = response.parsed;
@@ -975,6 +990,15 @@ async function createInvoiceBatch(req, res, next) {
           const label     = transient && !isRetry ? 'TRANSIENT (queued for retry)' : 'FAILED';
           console.error(`❌ ${invoiceTag} ${label} (${elapsed}ms) | error=${err.code ?? err.message}`);
           if (err.code) console.error(`❌ ${invoiceTag} Error detail: code=${err.code} message=${err.message}`);
+          
+          // Log error response if verbose logging is enabled
+          if (process.env.AR_INVOICE_VERBOSE_LOGGING === 'true' && err.response) {
+            console.error(`${invoiceTag} Error Response:`, JSON.stringify({
+              status: err.response.status,
+              data: err.response.data,
+              message: err.message
+            }, null, 2));
+          }
         }
 
         // For pass-1 transient failures, mark as queued-for-retry and skip DB storage

@@ -565,6 +565,13 @@ class OracleSoapClient {
 
           // Success response
           console.log(`[OracleSoapClient] ${requestId} ✅ Success - HTTP ${response.status} in ${elapsed}ms`);
+          
+          // Log full response XML for successful requests (not truncated)
+          if (this.debugMode) {
+            console.log(`[OracleSoapClient] ${requestId} Full Response XML:`, xmlResponse);
+          } else {
+            console.log(`[OracleSoapClient] ${requestId} Response XML:`, this.truncateXml(xmlResponse, 1500));
+          }
 
           return {
             success: true,
@@ -572,6 +579,7 @@ class OracleSoapClient {
             statusText: response.statusText,
             data: xmlResponse,
             parsed: this.xmlParser.parse(xmlResponse),
+            headers: response.headers,
             requestId,
             elapsed,
           };
