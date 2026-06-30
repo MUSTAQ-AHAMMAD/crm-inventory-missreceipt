@@ -480,8 +480,8 @@
           </div>
           <div class="info-note" style="margin-top:8px;">
             <strong>💡 Tip:</strong> Alternative column names are accepted — e.g. <em>Order Lines/Product/Barcode</em>
-            maps to <em>ItemNumber</em>; <em>Order Lines/Branch/Name</em> maps to <em>SubinventoryCode</em>.
-            UOM defaults to <em>Each</em> when omitted.
+            maps to <em>ItemNumber</em>; <em>Order Lines/Branch/Name</em> maps to <em>SubinventoryCode</em>;
+            <em>Order Lines/Base UoM</em> maps to <em>TransactionUnitOfMeasure</em> (required).
           </div>
         </div>
 
@@ -534,7 +534,7 @@
               <li><strong>Product/Barcode</strong> → ItemNumber</li>
               <li><strong>Order Ref</strong> → TransactionReference</li>
               <li><strong>Total</strong> (inverted) → TransactionQuantity</li>
-              <li><strong>Base UoM</strong> → UOM (default: <em>Each</em>)</li>
+              <li><strong>Order Lines/Base UoM</strong> → UOM (required)</li>
             </ul>
           </div>
           <div>

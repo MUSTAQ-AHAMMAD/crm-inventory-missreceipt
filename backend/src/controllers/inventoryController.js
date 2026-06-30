@@ -147,6 +147,7 @@ function normalizeRow(row) {
  *  - Empty transaction type
  *  - Zero or invalid transaction quantity
  *  - Missing subinventory (tries to extract from TransactionReference)
+ *  - Missing TransactionUnitOfMeasure (UoM)
  */
 function validateRow(row) {
   if (!row.ItemNumber || row.ItemNumber.trim() === '') {
@@ -158,6 +159,9 @@ function validateRow(row) {
   const qty = parseFloat(row.TransactionQuantity);
   if (isNaN(qty) || qty === 0) {
     return 'Zero or invalid transaction quantity';
+  }
+  if (!row.TransactionUnitOfMeasure || row.TransactionUnitOfMeasure.trim() === '') {
+    return 'Empty unit of measure (UoM) - Order Lines/Base UoM is required';
   }
   const { value: formattedDate, error: dateError } = formatDateToISO(row.TransactionDate);
   if (dateError) {
@@ -300,8 +304,8 @@ function mapRowToPayload(row, organizationName) {
   // Convert TransactionDate to ISO 8601 format required by Oracle
   const txDate = row.__formattedTransactionDate || formatDateToISO(row.TransactionDate).value || '';
 
-  // Default TransactionUnitOfMeasure to "Each" when not provided
-  const uom = row.TransactionUnitOfMeasure?.trim() || 'Each';
+  // Read TransactionUnitOfMeasure directly from CSV (validated in validateRow)
+  const uom = row.TransactionUnitOfMeasure?.trim();
 
   // TransactionQuantity is already validated (non-NaN, non-zero) in validateRow.
   // Preserve the original CSV string value (e.g. "-1.00") instead of parsing and

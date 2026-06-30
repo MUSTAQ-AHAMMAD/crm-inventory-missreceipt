@@ -146,7 +146,7 @@ The SOAP envelope is built using `buildArInvoiceSoapEnvelope()` from `backend/sr
   "BillToCustomerName": "Aziz Mall",
   "BillToCustomerNumber": "13",
   "BillToSite": "13",
-  "PaymentTerms": "IMMEDIATE",
+  "PaymentTerms": "Immediate",
   "InvoiceCurrencyCode": "SAR",
   "CrossReference": "32886",
   "Comments": "Invoice generated from request ID 32886",
@@ -157,9 +157,11 @@ The SOAP envelope is built using `buildArInvoiceSoapEnvelope()` from `backend/sr
       "Description": "DOSE COLLECTION-HAPPINESS DOSE ROSE TOBACCO (PINK)/ Each",
       "Quantity": 2,
       "UnitSellingPrice": 94.79,
+      "UomCode": "EA",
+      "CurrencyCode": "SAR",
       "TaxClassificationCode": "OUTPUT-GOODS-DOM-15%",
       "SalesOrder": "AZIZMALL/64181",
-      "MemoLine": null
+      "SalesOrderLine": 1
     }
   ]
 }

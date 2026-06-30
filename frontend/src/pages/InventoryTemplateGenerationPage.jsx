@@ -103,7 +103,7 @@ export default function InventoryTemplateGenerationPage() {
               <li>Product/Barcode → ItemNumber</li>
               <li>Order Ref → TransactionReference</li>
               <li>Order Lines/Order Ref/Date (optional) → TransactionDate</li>
-              <li>Base UoM (optional) → TransactionUnitOfMeasure</li>
+              <li>Order Lines/Base UoM (required) → TransactionUnitOfMeasure</li>
               <li>Total → TransactionQuantity</li>
               <li>Picking Type/Name (optional) → Checked for "REFUND"</li>
             </ul>
