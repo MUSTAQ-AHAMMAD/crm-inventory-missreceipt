@@ -355,9 +355,9 @@ const SECTIONS = [
       { name: 'BillToCustomerName', required: true, note: 'Oracle customer name' },
       { name: 'BillToCustomerNumber', required: true, note: 'Oracle customer account number' },
       { name: 'BillToSite', required: true, note: 'Oracle customer site' },
-      { name: 'PaymentTerms', required: true, note: 'e.g. IMMEDIATE, NET30' },
+      { name: 'PaymentTerms', required: true, note: 'e.g. Immediate, NET30' },
       { name: 'InvoiceCurrencyCode', required: true, note: 'e.g. SAR' },
-      { name: 'receivablesInvoiceLines', required: true, note: 'Array of line items' },
+      { name: 'receivablesInvoiceLines', required: true, note: 'Array of line items (each with UomCode, CurrencyCode, SalesOrderLine)' },
     ],
   },
 
