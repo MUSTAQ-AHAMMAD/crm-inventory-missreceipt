@@ -250,7 +250,7 @@ function buildArInvoiceSoapEnvelope(payload) {
           <inv:LineNumber>${escapeXml(line.LineNumber)}</inv:LineNumber>
 ${itemTag}${memoTag}          <inv:Description>${escapeXml(line.Description)}</inv:Description>
           <inv:Quantity>
-            <adf:Value>${roundAmount(line.Quantity)}</adf:Value>
+            <adf:Value>${escapeXml(line.Quantity)}</adf:Value>
             <adf:UnitCode>${escapeXml(uom)}</adf:UnitCode>
           </inv:Quantity>
           <inv:UnitSellingPrice>
