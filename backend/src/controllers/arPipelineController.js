@@ -164,9 +164,10 @@ function extractInvoiceDataFromSoap(parsed) {
     const body = envelope['soapenv:Body'] || envelope['env:Body'] || envelope['Body'] || {};
     const response = body['ns2:createSimpleInvoiceResponse'] || 
                      body['createSimpleInvoiceResponse'] || 
+                     body['inv:createSimpleInvoiceResponse'] || 
                      body['typ:createSimpleInvoiceResponse'] || 
                      {};
-    const result = response['result'] || response['ns2:result'] || response['typ:result'] || {};
+    const result = response['result'] || response['ns2:result'] || response['inv:result'] || response['typ:result'] || {};
 
     // Extract invoice data from the result
     // The SOAP response structure will vary, but typically includes fields like:
