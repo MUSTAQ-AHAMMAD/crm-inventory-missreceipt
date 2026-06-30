@@ -150,8 +150,8 @@ export default function InventoryPage() {
             <span className="font-mono">Order Lines/Branch/Name</span> for <span className="font-mono">SubinventoryCode</span>,{' '}
             <span className="font-mono">diff</span> for <span className="font-mono">TransactionQuantity</span>,{' '}
             <span className="font-mono">Order Lines/Order Ref</span> for <span className="font-mono">TransactionReference</span>,{' '}
-            <span className="font-mono">Order Lines/Order Ref/Date</span> for <span className="font-mono">TransactionDate</span>).
-            UOM defaults to <span className="font-mono">Each</span> when not provided.
+            <span className="font-mono">Order Lines/Order Ref/Date</span> for <span className="font-mono">TransactionDate</span>,{' '}
+            <span className="font-mono">Order Lines/Base UoM</span> for <span className="font-mono">TransactionUnitOfMeasure</span>).
           </p>
         </div>
 
