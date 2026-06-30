@@ -56,6 +56,25 @@ function escapeXml(value) {
     .replace(/'/g, '&apos;');
 }
 
+/**
+ * Rounds a numeric value to 2 decimal places for currency amounts.
+ * Handles strings and numbers. Returns the value as a string with 2 decimal places.
+ * 
+ * Note: This function assumes the value has already been validated as non-null
+ * by the calling envelope builder's required field checks.
+ * 
+ * @param {string|number} value - The value to round (should be non-null)
+ * @returns {string} The rounded value as a string with 2 decimal places
+ * @throws {Error} If the value cannot be converted to a valid number
+ */
+function roundAmount(value) {
+  const num = Number(value);
+  if (isNaN(num)) {
+    throw new Error(`Invalid numeric value for amount: "${value}"`);
+  }
+  return (Math.round(num * 100) / 100).toFixed(2);
+}
+
 // ── Standard Receipt ───────────────────────────────────────────────────────────
 
 /**
@@ -86,7 +105,7 @@ function buildStandardReceiptEnvelope(row) {
   <soapenv:Body>
     <typ:createStandardReceipt>
       <typ:standardReceipt>
-        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(row.Amount)}</com:Amount>
+        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(roundAmount(row.Amount))}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
         <com:GlDate>${escapeXml(row.ReceiptDate)}</com:GlDate>
@@ -143,7 +162,7 @@ function buildMiscReceiptEnvelope(row) {
   <soapenv:Body>
     <typ:createMiscellaneousReceipt>
       <typ:miscellaneousReceipt>
-        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(row.Amount)}</com:Amount>
+        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(roundAmount(row.Amount))}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
@@ -240,7 +259,7 @@ ${itemTag}${memoTag}          <inv:Description>${escapeXml(line.Description)}</i
             <adf:UnitCode>${escapeXml(uom)}</adf:UnitCode>
           </inv:Quantity>
           <inv:UnitSellingPrice>
-            <adf:Value>${escapeXml(line.UnitSellingPrice)}</adf:Value>
+            <adf:Value>${escapeXml(roundAmount(line.UnitSellingPrice))}</adf:Value>
             <adf:CurrencyCode>${escapeXml(currency)}</adf:CurrencyCode>
           </inv:UnitSellingPrice>
 ${soTag}${solTag}          <inv:TaxClassificationCode>${escapeXml(line.TaxClassificationCode)}</inv:TaxClassificationCode>
