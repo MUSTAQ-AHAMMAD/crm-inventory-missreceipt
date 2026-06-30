@@ -432,11 +432,15 @@ async function uploadVendInvoice(req, res, next) {
            // Omit ItemNumber entirely so Oracle does not receive both ItemNumber
            // and MemoLine in the same line (AR-855636).
            if (!itemNumber) {
-             invoiceGroups[groupKey].lines.push({
-               LineNumber: lineNumber,
-               Description: 'Discount Item',
-               Quantity: quantity,
-               UnitSellingPrice: unitSellingPrice,
+            // Both MemoLineName and MemoLine are included for compatibility:
+            // - MemoLineName is the correct Oracle SOAP field name per problem statement
+            // - MemoLine is kept for backward compatibility with existing code that may reference it
+            // The SOAP envelope builder (soapEnvelopeBuilder.js) prioritizes MemoLineName.
+            invoiceGroups[groupKey].lines.push({
+              LineNumber: lineNumber,
+              Description: 'Discount Item',
+              Quantity: quantity,
+              UnitSellingPrice: unitSellingPrice,
               UomCode: 'EA',
               CurrencyCode: 'SAR',
               TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
