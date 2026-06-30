@@ -138,8 +138,8 @@ The corrected SOAP envelope now generates:
   xmlns:adf="http://xmlns.oracle.com/adf/svc/types/">
   <soapenv:Header/>
   <soapenv:Body>
-    <typ:createSimpleInvoice>
-      <typ:invoice>
+    <inv:createSimpleInvoice>
+      <inv:invoiceHeader>
         <inv:BillToCustomerName>Red Sea Mall</inv:BillToCustomerName>
         <inv:BillToAccountNumber>9</inv:BillToAccountNumber>
         <inv:BillToLocation>9</inv:BillToLocation>
@@ -171,11 +171,13 @@ The corrected SOAP envelope now generates:
           <inv:TaxClassificationCode>OUTPUT-GOODS-DOM-15%</inv:TaxClassificationCode>
         </inv:InvoiceLine>
         
-      </typ:invoice>
-    </typ:createSimpleInvoice>
+      </inv:invoiceHeader>
+    </inv:createSimpleInvoice>
   </soapenv:Body>
 </soapenv:Envelope>
 ```
+
+**Important:** The structure uses `inv:createSimpleInvoice` and `inv:invoiceHeader` (not `typ:createSimpleInvoice` and `typ:invoice`).
 
 ## Testing Strategy
 

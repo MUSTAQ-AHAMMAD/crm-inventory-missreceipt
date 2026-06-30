@@ -289,8 +289,8 @@ ${currencyTag}${soTag}${solTag}          <inv:TaxClassificationCode>${escapeXml(
   xmlns:adf="${AR_INV_ADF_NS}">
   <soapenv:Header/>
   <soapenv:Body>
-    <typ:createSimpleInvoice>
-      <typ:invoice>
+    <inv:createSimpleInvoice>
+      <inv:invoiceHeader>
         ${optionalTag('inv', 'BillToCustomerName',   payload.BillToCustomerName)}
         ${optionalTag('inv', 'BillToAccountNumber',  payload.BillToCustomerNumber)}
         ${optionalTag('inv', 'BillToLocation',       payload.BillToSite)}
@@ -303,8 +303,8 @@ ${currencyTag}${soTag}${solTag}          <inv:TaxClassificationCode>${escapeXml(
         <inv:TrxDate>${escapeXml(payload.TransactionDate)}</inv:TrxDate>
         ${optionalTag('inv', 'GlDate', payload.AccountingDate)}
         ${lineXml}
-      </typ:invoice>
-    </typ:createSimpleInvoice>
+      </inv:invoiceHeader>
+    </inv:createSimpleInvoice>
   </soapenv:Body>
 </soapenv:Envelope>`;
 }
