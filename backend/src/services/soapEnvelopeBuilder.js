@@ -105,7 +105,7 @@ function buildStandardReceiptEnvelope(row) {
   <soapenv:Body>
     <typ:createStandardReceipt>
       <typ:standardReceipt>
-        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${roundAmount(row.Amount)}</com:Amount>
+        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(roundAmount(row.Amount))}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
         <com:GlDate>${escapeXml(row.ReceiptDate)}</com:GlDate>
@@ -162,7 +162,7 @@ function buildMiscReceiptEnvelope(row) {
   <soapenv:Body>
     <typ:createMiscellaneousReceipt>
       <typ:miscellaneousReceipt>
-        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${roundAmount(row.Amount)}</com:Amount>
+        <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(roundAmount(row.Amount))}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
@@ -259,7 +259,7 @@ ${itemTag}${memoTag}          <inv:Description>${escapeXml(line.Description)}</i
             <adf:UnitCode>${escapeXml(uom)}</adf:UnitCode>
           </inv:Quantity>
           <inv:UnitSellingPrice>
-            <adf:Value>${roundAmount(line.UnitSellingPrice)}</adf:Value>
+            <adf:Value>${escapeXml(roundAmount(line.UnitSellingPrice))}</adf:Value>
             <adf:CurrencyCode>${escapeXml(currency)}</adf:CurrencyCode>
           </inv:UnitSellingPrice>
 ${soTag}${solTag}          <inv:TaxClassificationCode>${escapeXml(line.TaxClassificationCode)}</inv:TaxClassificationCode>
