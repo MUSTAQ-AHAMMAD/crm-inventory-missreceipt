@@ -9,7 +9,7 @@ Fixed the AR Invoice SOAP envelope builder to match the **proven working payload
 The previous implementation used an **incorrect SOAP structure**:
 - ❌ Root: `inv:createSimpleInvoice` with `inv:invoiceHeader` wrapper
 - ❌ Line fields used nested structures for Quantity and UnitSellingPrice
-- ❌ ConversionRateType was conditionally omitted for SAR currency
+- ❌ ConversionRateType handling was incorrect
 - ❌ Multiple redundant namespace declarations
 
 This structure was **rejected by Oracle** and failed to create invoices.
@@ -20,7 +20,7 @@ Updated to use the **correct SOAP structure** verified in production:
 - ✅ Root: `typ:createSimpleInvoice` with `typ:invoiceHeaderInformation` wrapper
 - ✅ Quantity uses `unitCode` attribute: `<typ:Quantity unitCode="Ea">1</typ:Quantity>`
 - ✅ UnitSellingPrice uses `currencyCode` attribute: `<typ:UnitSellingPrice currencyCode="SAR">300.00</typ:UnitSellingPrice>`
-- ✅ ConversionRateType **always included** (defaults to "Corporate")
+- ✅ ConversionRateType **conditionally omitted for SAR** (Oracle error AR-856150), included for other currencies
 - ✅ Clean namespace declarations (only `typ` namespace needed)
 
 ## Working Payload Structure
@@ -40,7 +40,7 @@ Updated to use the **correct SOAP structure** verified in production:
         <typ:TransactionSource>Vend</typ:TransactionSource>
         <typ:TransactionType>Vend Invoice</typ:TransactionType>
         <typ:InvoiceCurrencyCode>SAR</typ:InvoiceCurrencyCode>
-        <typ:ConversionRateType>Corporate</typ:ConversionRateType>
+        <!-- ConversionRateType omitted for SAR to avoid Oracle AR-856150 error -->
         <typ:PaymentTermsName>IMMEDIATE</typ:PaymentTermsName>
         <typ:TrxDate>2026-06-01</typ:TrxDate>
         <typ:GlDate>2026-06-01</typ:GlDate>
@@ -164,7 +164,7 @@ const payload = {
 3. **Namespace**: All field tags now use `typ:` prefix instead of `inv:`
 4. **Quantity Format**: Now uses attribute `unitCode="Ea"` instead of nested structure
 5. **UnitSellingPrice Format**: Now uses attribute `currencyCode="SAR"` instead of nested structure
-6. **ConversionRateType**: Always included (defaults to "Corporate"), not conditionally omitted
+6. **ConversionRateType**: Conditionally **omitted for SAR** currency (Oracle error AR-856150), included for other currencies (defaults to "Corporate")
 7. **UOM Default**: Changed from 'EA' to 'Ea' (capitalized)
 8. **Namespace Cleanup**: Removed unused `adf` and `inv` namespace declarations
 
