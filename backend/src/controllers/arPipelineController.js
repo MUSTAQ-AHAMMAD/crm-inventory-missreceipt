@@ -923,7 +923,9 @@ async function createInvoiceBatch(req, res, next) {
         
         // Log full payload if verbose logging is enabled (WARNING: may contain sensitive data)
         if (process.env.AR_INVOICE_VERBOSE_LOGGING === 'true') {
-          console.log(`${invoiceTag} Payload being sent:`, JSON.stringify(payload, null, 2));
+          console.log(`${invoiceTag} ═══ INVOICE PAYLOAD START ═══`);
+          console.log(JSON.stringify(payload, null, 2));
+          console.log(`${invoiceTag} ═══ INVOICE PAYLOAD END ═══`);
         }
         console.log(`${invoiceTag} API URL: ${endpoint}`);
 
@@ -936,6 +938,13 @@ async function createInvoiceBatch(req, res, next) {
 
         // Build SOAP envelope
         const soapXml = buildArInvoiceSoapEnvelope(payload);
+        
+        // Log SOAP envelope if verbose logging is enabled
+        if (process.env.AR_INVOICE_VERBOSE_LOGGING === 'true') {
+          console.log(`${invoiceTag} ═══ SOAP ENVELOPE START ═══`);
+          console.log(soapXml);
+          console.log(`${invoiceTag} ═══ SOAP ENVELOPE END ═══`);
+        }
 
         try {
           const soapClient = createOracleSoapClient(endpoint);
@@ -946,16 +955,31 @@ async function createInvoiceBatch(req, res, next) {
           
           // Log full API response if verbose logging is enabled (WARNING: may contain sensitive data)
           if (process.env.AR_INVOICE_VERBOSE_LOGGING === 'true') {
-            console.log(`${invoiceTag} Full API Response:`, JSON.stringify({
-              status: response.status,
-              data: response.data,
-              headers: response.headers
-            }, null, 2));
+            console.log(`${invoiceTag} ═══ FULL API RESPONSE START ═══`);
+            console.log(`${invoiceTag} Status: ${response.status}`);
+            console.log(`${invoiceTag} Response Data (XML):`, response.data);
+            console.log(`${invoiceTag} Response Headers:`, JSON.stringify(response.headers, null, 2));
+            console.log(`${invoiceTag} ═══ FULL API RESPONSE END ═══`);
           }
           
           // Parse SOAP response to extract invoice data
           const parsed = response.parsed;
+          
+          // Log parsed response structure if verbose logging is enabled
+          if (process.env.AR_INVOICE_VERBOSE_LOGGING === 'true') {
+            console.log(`${invoiceTag} ═══ PARSED RESPONSE STRUCTURE START ═══`);
+            console.log(JSON.stringify(parsed, null, 2));
+            console.log(`${invoiceTag} ═══ PARSED RESPONSE STRUCTURE END ═══`);
+          }
+          
           oracleData = extractInvoiceDataFromSoap(parsed);
+          
+          // Log extracted invoice data if verbose logging is enabled
+          if (process.env.AR_INVOICE_VERBOSE_LOGGING === 'true') {
+            console.log(`${invoiceTag} ═══ EXTRACTED INVOICE DATA START ═══`);
+            console.log(JSON.stringify(oracleData, null, 2));
+            console.log(`${invoiceTag} ═══ EXTRACTED INVOICE DATA END ═══`);
+          }
 
           if (response.status >= 400) {
             responseStatus  = 'FAILED';
@@ -972,7 +996,9 @@ async function createInvoiceBatch(req, res, next) {
               const oracleErr = extractOracleError(response.data);
               console.error(`❌ ${invoiceTag} FAILED (${elapsed}ms) HTTP ${httpStatus} - ${responseMessage}`);
               if (oracleErr) console.error(`❌ ${invoiceTag} Oracle error: ${oracleErr}`);
-              if (response.data) console.error(`❌ ${invoiceTag} Full Oracle response:`, response.data);
+              console.error(`❌ ${invoiceTag} ═══ FULL ORACLE RESPONSE START ═══`);
+              console.error(response.data);
+              console.error(`❌ ${invoiceTag} ═══ FULL ORACLE RESPONSE END ═══`);
             } else {
               const custTxnId = oracleData.CustomerTrxId ?? oracleData.CustomerTxnId ?? 'N/A';
               console.log(`✅ ${invoiceTag} SUCCESS (${elapsed}ms) | TxnNumber=${oracleData.TransactionNumber} | CustomerTrxId=${custTxnId} | HTTP ${httpStatus}`);
@@ -981,7 +1007,9 @@ async function createInvoiceBatch(req, res, next) {
             const oracleErr = extractOracleError(response.data);
             console.error(`❌ ${invoiceTag} FAILED (${elapsed}ms) HTTP ${httpStatus} - ${responseMessage}`);
             if (oracleErr) console.error(`❌ ${invoiceTag} Oracle error: ${oracleErr}`);
-            if (response.data) console.error(`❌ ${invoiceTag} Full Oracle response:`, response.data);
+            console.error(`❌ ${invoiceTag} ═══ FULL ORACLE RESPONSE START ═══`);
+            console.error(response.data);
+            console.error(`❌ ${invoiceTag} ═══ FULL ORACLE RESPONSE END ═══`);
           }
         } catch (err) {
           const elapsed   = Date.now() - t0;

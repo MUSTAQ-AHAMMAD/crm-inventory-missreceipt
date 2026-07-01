@@ -38,7 +38,8 @@ class OracleSoapClient {
     // (mirrors Java OkHttpClient.connectTimeout intent; exact TCP connect timeout
     // enforcement in Node.js requires low-level socket event handling beyond axios).
     this.socketIdleTimeout = config.connectTimeout || 30000;
-    this.debugMode = config.debugMode || process.env.SOAP_DEBUG === 'true';
+    // Enable verbose logging if SOAP_DEBUG or AR_INVOICE_VERBOSE_LOGGING is true
+    this.debugMode = config.debugMode || process.env.SOAP_DEBUG === 'true' || process.env.AR_INVOICE_VERBOSE_LOGGING === 'true';
 
     // Single reusable HTTP/HTTPS Agent with keep-alive and idle socket timeout.
     // Reusing the agent preserves TCP connection pooling across calls, matching
@@ -465,9 +466,12 @@ class OracleSoapClient {
       throw new Error('Service URL is not configured');
     }
 
-    // Always log the request XML for debugging (truncated in normal mode, full in debug mode)
-    if (this.debugMode) {
-      console.log(`[OracleSoapClient] ${requestId} Full Request XML:`, soapXml);
+    // Always log the request XML for debugging
+    // When verbose logging is enabled (SOAP_DEBUG or AR_INVOICE_VERBOSE_LOGGING), log the FULL request without truncation
+    if (this.debugMode || process.env.AR_INVOICE_VERBOSE_LOGGING === 'true') {
+      console.log(`[OracleSoapClient] ${requestId} ═══ FULL REQUEST XML START ═══`);
+      console.log(soapXml);
+      console.log(`[OracleSoapClient] ${requestId} ═══ FULL REQUEST XML END ═══`);
     } else {
       console.log(`[OracleSoapClient] ${requestId} Request XML (truncated):`, this.truncateXml(soapXml, 500));
     }
@@ -520,7 +524,9 @@ class OracleSoapClient {
           if (response.status >= 500) {
             // Log FULL response XML for 500 errors (don't truncate)
             console.error(`[OracleSoapClient] ${requestId} HTTP ${response.status} error`);
-            console.error(`[OracleSoapClient] ${requestId} Full Response XML:`, xmlResponse);
+            console.error(`[OracleSoapClient] ${requestId} ═══ FULL ERROR RESPONSE XML START ═══`);
+            console.error(xmlResponse);
+            console.error(`[OracleSoapClient] ${requestId} ═══ FULL ERROR RESPONSE XML END ═══`);
 
             const errorMessage = fault ? fault.message : `HTTP ${response.status} error`;
 
@@ -566,11 +572,14 @@ class OracleSoapClient {
           // Success response
           console.log(`[OracleSoapClient] ${requestId} ✅ Success - HTTP ${response.status} in ${elapsed}ms`);
           
-          // Log full response XML for successful requests (not truncated)
-          if (this.debugMode) {
-            console.log(`[OracleSoapClient] ${requestId} Full Response XML:`, xmlResponse);
+          // Log full response XML for successful requests
+          // When verbose logging is enabled (SOAP_DEBUG or AR_INVOICE_VERBOSE_LOGGING), log the FULL response without truncation
+          if (this.debugMode || process.env.AR_INVOICE_VERBOSE_LOGGING === 'true') {
+            console.log(`[OracleSoapClient] ${requestId} ═══ FULL RESPONSE XML START ═══`);
+            console.log(xmlResponse);
+            console.log(`[OracleSoapClient] ${requestId} ═══ FULL RESPONSE XML END ═══`);
           } else {
-            console.log(`[OracleSoapClient] ${requestId} Response XML:`, this.truncateXml(xmlResponse, 1500));
+            console.log(`[OracleSoapClient] ${requestId} Response XML (truncated):`, this.truncateXml(xmlResponse, 1500));
           }
 
           return {
