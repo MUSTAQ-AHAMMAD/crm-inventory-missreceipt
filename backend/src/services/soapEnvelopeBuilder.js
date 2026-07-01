@@ -169,7 +169,7 @@ function buildArInvoiceSoapEnvelope(payload) {
   // Build invoice lines using inv: namespace
   const lineXml = lines.map((line) => {
     const lineNum = line.LineNumber || 0;
-    const uomCode = String(line.UomCode ?? line.UnitOfMeasure ?? line.UOM ?? 'Ea').trim();
+    const uomCode = String(line.UomCode ?? line.UnitOfMeasure ?? line.UOM ?? 'EA').trim().toUpperCase();
     const lineCurrency = String(line.CurrencyCode ?? currency).trim();
     
     // Determine if this is a discount/memo line
@@ -193,7 +193,9 @@ function buildArInvoiceSoapEnvelope(payload) {
     lineXml += `
           <inv:Description>${escapeXml(line.Description || '')}</inv:Description>
           <inv:Quantity unitCode="${escapeXml(uomCode)}">${Math.abs(line.Quantity || 0)}</inv:Quantity>
-          <inv:UnitSellingPrice currencyCode="${escapeXml(lineCurrency)}">${roundAmount(line.UnitSellingPrice)}</inv:UnitSellingPrice>`;
+          <inv:UomCode>${escapeXml(uomCode)}</inv:UomCode>
+          <inv:UnitSellingPrice currencyCode="${escapeXml(lineCurrency)}">${roundAmount(line.UnitSellingPrice)}</inv:UnitSellingPrice>
+          <inv:CurrencyCode>${escapeXml(lineCurrency)}</inv:CurrencyCode>`;
 
     // SalesOrder (optional but recommended)
     if (line.SalesOrder) {
