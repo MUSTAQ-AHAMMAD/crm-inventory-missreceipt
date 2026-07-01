@@ -171,7 +171,7 @@ function buildArInvoiceSoapEnvelope(payload) {
   // Build invoice lines using inv: namespace
   const lineXml = lines.map((line) => {
     const lineNum = line.LineNumber || 0;
-    // Use mapUomCode to properly map UoM values like "Each" → "Ea", "Gram" → "G"
+    // Use mapUomCode to properly map UoM values like "Each" → "Ea"
     const rawUom = line.UomCode ?? line.UnitOfMeasure ?? line.UOM;
     const uomCode = mapUomCode(rawUom, 'Ea');
     const lineCurrency = String(line.CurrencyCode ?? currency).trim();
@@ -197,9 +197,7 @@ function buildArInvoiceSoapEnvelope(payload) {
     lineXml += `
           <inv:Description>${escapeXml(line.Description || '')}</inv:Description>
           <inv:Quantity unitCode="${escapeXml(uomCode)}">${Math.abs(line.Quantity || 0)}</inv:Quantity>
-          <inv:UomCode>${escapeXml(uomCode)}</inv:UomCode>
-          <inv:UnitSellingPrice currencyCode="${escapeXml(lineCurrency)}">${roundAmount(line.UnitSellingPrice)}</inv:UnitSellingPrice>
-          <inv:CurrencyCode>${escapeXml(lineCurrency)}</inv:CurrencyCode>`;
+          <inv:UnitSellingPrice currencyCode="${escapeXml(lineCurrency)}">${roundAmount(line.UnitSellingPrice)}</inv:UnitSellingPrice>`;
 
     // SalesOrder (optional but recommended)
     if (line.SalesOrder) {
