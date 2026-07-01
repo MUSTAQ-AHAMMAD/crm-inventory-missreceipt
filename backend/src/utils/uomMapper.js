@@ -231,7 +231,7 @@ function addCustomMapping(description, code) {
   const upperCode = String(code).toUpperCase().trim();
   
   if (!isValidUomCode(upperCode)) {
-    throw new Error(`Invalid UOM code format: ${code}. Must be 2-4 uppercase letters.`);
+    throw new Error(`Invalid UOM code format: ${code}. Must be 1-4 uppercase letters or numbers.`);
   }
   
   UOM_MAPPING[normalized] = upperCode;

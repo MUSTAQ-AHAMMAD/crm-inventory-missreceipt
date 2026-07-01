@@ -27,6 +27,11 @@ const fs = require('fs');
 const path = require('path');
 const { mapUomCode, isValidUomCode } = require('../src/utils/uomMapper');
 
+// Configuration constants
+const DISPLAY_LIMIT = 20; // Number of rows to display in console output
+const DEFAULT_CURRENCY = 'SAR'; // Default currency for AR invoices
+const DEFAULT_TAX_CODE = 'OUTPUT-GOODS-DOM-15%'; // Default tax classification code
+
 // Parse command line arguments
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -226,7 +231,7 @@ function processSalesLines(rawData) {
  * Format data for display
  */
 function formatForDisplay(data) {
-  console.log(`\n📋 Processed Sales Lines (showing first 20):\n`);
+  console.log(`\n📋 Processed Sales Lines (showing first ${DISPLAY_LIMIT}):\n`);
   console.log('─'.repeat(120));
   console.log(
     'Line'.padEnd(6) +
@@ -239,7 +244,7 @@ function formatForDisplay(data) {
   );
   console.log('─'.repeat(120));
   
-  data.slice(0, 20).forEach(row => {
+  data.slice(0, DISPLAY_LIMIT).forEach(row => {
     console.log(
       String(row.lineNumber).padEnd(6) +
       String(row.itemNumber).substring(0, 14).padEnd(15) +
@@ -251,8 +256,8 @@ function formatForDisplay(data) {
     );
   });
   
-  if (data.length > 20) {
-    console.log(`\n   ... and ${data.length - 20} more rows`);
+  if (data.length > DISPLAY_LIMIT) {
+    console.log(`\n   ... and ${data.length - DISPLAY_LIMIT} more rows`);
   }
   
   console.log('─'.repeat(120));
@@ -269,10 +274,10 @@ function convertToArInvoiceFormat(data) {
     Quantity: row.quantity || 0,
     UomCode: row.mappedUom,
     UnitSellingPrice: row.unitPrice || 0,
-    CurrencyCode: 'SAR', // Default currency
+    CurrencyCode: DEFAULT_CURRENCY,
     SalesOrder: row.salesOrder || null,
     SalesOrderLine: row.salesOrderLine || null,
-    TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%', // Default tax code
+    TaxClassificationCode: DEFAULT_TAX_CODE,
   }));
 }
 
