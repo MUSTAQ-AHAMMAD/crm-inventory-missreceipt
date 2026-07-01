@@ -27,6 +27,8 @@ const {
   getBatchConfig,
   isTransientError: isBatchTransientError,
 } = require('../services/batchOracleService');
+const ultraFastBulkInvoiceService = require('../services/ultraFastBulkInvoiceService');
+const { streamingManager } = require('../services/streamingInvoiceService');
 
 // Pull concurrency / retry / timeout from the centralised batch config
 // (mirrors jdbc-config.properties pool settings + oracleDbClient.js retry loop)
@@ -796,6 +798,7 @@ async function listMiscReceipts(req, res, next) {
 // POST /api/ar-pipeline/create-invoice-batch
 // Creates multiple AR Invoice payloads in Oracle via SOAP API.
 // 
+// ✅ ENHANCED: Auto-detects large invoices (>500 lines) and uses Ultra-Fast Bulk processing
 // ✅ FIXED: Uses raw SOAP sender to avoid namespace issues from XML parser
 // ---------------------------------------------------------------------------
 async function createInvoiceBatch(req, res, next) {
@@ -805,6 +808,134 @@ async function createInvoiceBatch(req, res, next) {
     if (!Array.isArray(payloads) || payloads.length === 0) {
       return res.status(400).json({ error: 'payloads must be a non-empty array.' });
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // ULTRA-FAST BULK PROCESSING AUTO-DETECTION
+    // ══════════════════════════════════════════════════════════════════════
+    // Check if any invoice exceeds the bulk processing threshold
+    const bulkThreshold = parseInt(process.env.ORACLE_BULK_INVOICE_THRESHOLD || '500', 10);
+    const largeInvoices = payloads.filter(p => ultraFastBulkInvoiceService.shouldUseBulkProcessing(p));
+    
+    if (largeInvoices.length > 0) {
+      console.log(`[Pipeline] Detected ${largeInvoices.length} large invoice(s) (>${bulkThreshold} lines) - switching to Ultra-Fast Bulk processing`);
+      
+      // Create a batch tracking record
+      const batch = await prisma.arInvoiceBatch.create({
+        data: {
+          userId:       req.user.id,
+          totalRecords: payloads.length,
+          status:       'PROCESSING',
+        },
+      });
+      
+      // Respond immediately with batch ID
+      res.json({
+        batchId: batch.id,
+        total:   payloads.length,
+        bulkProcessing: true,
+        largeInvoiceCount: largeInvoices.length,
+        message: `Processing ${largeInvoices.length} large invoice(s) using Ultra-Fast Bulk processing. Poll /api/ar-pipeline/invoice-batch/${batch.id}/progress for status.`,
+      });
+      
+      // Process asynchronously using bulk service
+      setImmediate(async () => {
+        const batchTag = `[Pipeline][Batch#${batch.id}][BULK]`;
+        console.log(`${batchTag} ▶ START | invoices=${payloads.length} | largeInvoices=${largeInvoices.length}`);
+        
+        let successCount = 0;
+        let failureCount = 0;
+        
+        for (let i = 0; i < payloads.length; i++) {
+          const payload = payloads[i];
+          const lineCount = payload.receivablesInvoiceLines?.length || 0;
+          const invoiceTag = `${batchTag} [${i + 1}/${payloads.length}]`;
+          
+          // Create upload record
+          const uploadRecord = await prisma.arInvoiceUpload.create({
+            data: {
+              userId:         req.user.id,
+              batchId:        batch.id,
+              payloadJson:    JSON.stringify(payload),
+              responseStatus: 'PROCESSING',
+            },
+          });
+          
+          try {
+            // Use bulk processing for large invoices
+            if (ultraFastBulkInvoiceService.shouldUseBulkProcessing(payload)) {
+              console.log(`${invoiceTag} Using BULK processing | lines=${lineCount}`);
+              
+              const result = await ultraFastBulkInvoiceService.processBulk(payload, {
+                userId: req.user.id,
+                batchId: batch.id,
+                onProgress: (progress) => {
+                  // Broadcast progress via WebSocket if available
+                  streamingManager.broadcastProgress(batch.id, progress);
+                },
+              });
+              
+              // Update upload record with success
+              await prisma.arInvoiceUpload.update({
+                where: { id: uploadRecord.id },
+                data: {
+                  responseStatus: 'SUCCESS',
+                  responseMessage: `Bulk processing completed in ${result.duration}`,
+                  oracleData: JSON.stringify({
+                    TransactionNumber: result.transactionNumber,
+                    InvoiceId: result.invoiceId,
+                    CustomerTrxId: result.customerTrxId,
+                    GroupId: result.groupId,
+                    ChunksProcessed: result.chunksProcessed,
+                  }),
+                  httpStatus: 200,
+                },
+              });
+              
+              successCount++;
+              console.log(`✅ ${invoiceTag} BULK SUCCESS | TxnNumber=${result.transactionNumber} | duration=${result.duration}`);
+              
+            } else {
+              // Use standard SOAP processing for small invoices
+              console.log(`${invoiceTag} Using SOAP processing | lines=${lineCount}`);
+              // Fall through to standard processing below
+              continue;
+            }
+            
+          } catch (error) {
+            failureCount++;
+            console.error(`❌ ${invoiceTag} BULK FAILED | error=${error.message}`);
+            
+            // Update upload record with failure
+            await prisma.arInvoiceUpload.update({
+              where: { id: uploadRecord.id },
+              data: {
+                responseStatus: 'FAILED',
+                responseMessage: error.message,
+              },
+            }).catch(() => {});
+          }
+        }
+        
+        // Update batch status
+        const finalStatus = failureCount === 0 ? 'COMPLETED' : failureCount === payloads.length ? 'FAILED' : 'PARTIAL';
+        await prisma.arInvoiceBatch.update({
+          where: { id: batch.id },
+          data: {
+            status: finalStatus,
+            successCount,
+            failureCount,
+          },
+        }).catch(() => {});
+        
+        console.log(`${batchTag} ■ COMPLETE | success=${successCount} | failed=${failureCount} | status=${finalStatus}`);
+      });
+      
+      return; // Exit early, response already sent
+    }
+    
+    // ══════════════════════════════════════════════════════════════════════
+    // STANDARD SOAP PROCESSING (for invoices < threshold)
+    // ══════════════════════════════════════════════════════════════════════
 
     const endpoint     = process.env.ORACLE_AR_INVOICE_SOAP_URL;
     const username     = process.env.ORACLE_USERNAME;
