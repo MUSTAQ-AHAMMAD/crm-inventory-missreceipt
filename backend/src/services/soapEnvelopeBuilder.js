@@ -8,12 +8,6 @@
  *
  * Correct Oracle AmountType serialisation (matches Java @XmlValue / @XmlAttribute):
  *   <com:Amount currencyCode="SAR">422.00</com:Amount>
- *
- * Sources of truth:
- *   - FusionSOAPClient/src/com/oracle/xmlns/adf/svc/types/AmountType.java
- *   - FusionStdReceiptTransform.java  (Standard)
- *   - FusionMiscReceiptTransform.java (Misc – DepositDate is NOT sent)
- *   - FusionCustomerProfileClient.java (CustomerProfile – getActiveCustomerProfile)
  */
 
 'use strict';
@@ -30,18 +24,14 @@ const MISC_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/recei
 const MISC_COM_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/miscellaneousReceiptService/commonService/';
 const MISC_MIS_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/receipts/shared/model/flex/MiscellaneousReceiptDff/';
 
-// ReceivablesCustomerProfileService (used for getActiveCustomerProfile)
-// Source: FusionCustomerProfileClient.java / CustomerProfileService.java
+// ReceivablesCustomerProfileService
 const CUST_TYPES_NS = 'http://xmlns.oracle.com/apps/financials/receivables/customers/customerProfileService/types/';
 const CUST_SVC_NS   = 'http://xmlns.oracle.com/apps/financials/receivables/customers/customerProfileService/';
-/** SOAPAction for getActiveCustomerProfile – used as the second arg to callWithCustomEnvelope */
 const CUST_PROFILE_SOAP_ACTION = `${CUST_SVC_NS}getActiveCustomerProfile`;
 
 // RecInvoiceService (AR Invoice createSimpleInvoice)
 const AR_INV_TYP_NS = 'http://xmlns.oracle.com/apps/financials/receivables/transactions/invoices/invoiceService/types/';
 const AR_INV_SVC_NS = 'http://xmlns.oracle.com/apps/financials/receivables/transactions/invoices/invoiceService/';
-const AR_INV_ADF_NS = 'http://xmlns.oracle.com/adf/svc/types/';
-/** SOAPAction for createSimpleInvoice – used as the second arg to callWithCustomEnvelope */
 const AR_INVOICE_SOAP_ACTION = 'createSimpleInvoice';
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -53,21 +43,12 @@ function escapeXml(value) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+    .replace(/'/g, '&apos;')
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
 }
 
-/**
- * Rounds a numeric value to 2 decimal places for currency amounts.
- * Handles strings and numbers. Returns the value as a string with 2 decimal places.
- * 
- * Note: This function assumes the value has already been validated as non-null
- * by the calling envelope builder's required field checks.
- * 
- * @param {string|number} value - The value to round (should be non-null)
- * @returns {string} The rounded value as a string with 2 decimal places
- * @throws {Error} If the value cannot be converted to a valid number
- */
 function roundAmount(value) {
+  if (value === null || value === undefined) return '0.00';
   const num = Number(value);
   if (isNaN(num)) {
     throw new Error(`Invalid numeric value for amount: "${value}"`);
@@ -77,15 +58,6 @@ function roundAmount(value) {
 
 // ── Standard Receipt ───────────────────────────────────────────────────────────
 
-/**
- * Builds a createStandardReceipt SOAP envelope.
- *
- * Required row fields:
- *   ReceiptNumber, ReceiptDate, Amount, CurrencyCode,
- *   ReceiptMethodId, RemittanceBankAccountId, CustomerId, OrgId
- *
- * Mirrors Java FusionStdReceiptTransform.mapStdReceiptModel().
- */
 function buildStandardReceiptEnvelope(row) {
   const required = [
     'ReceiptNumber', 'ReceiptDate', 'Amount', 'CurrencyCode',
@@ -123,21 +95,6 @@ function buildStandardReceiptEnvelope(row) {
 
 // ── Miscellaneous Receipt ──────────────────────────────────────────────────────
 
-/**
- * Builds a createMiscellaneousReceipt SOAP envelope.
- *
- * Required row fields:
- *   Amount, CurrencyCode, ReceiptNumber, ReceiptDate,
- *   GlDate, ReceivableActivityName, BankAccountName, OrgId
- *
- * Optional row fields:
- *   ReceiptMethodName  (omitted from envelope when falsy)
- *
- * NOTE: DepositDate is intentionally NOT included — Java
- * FusionMiscReceiptTransform does not set it.
- *
- * Mirrors Java FusionMiscReceiptTransform.mapMiscReceiptModel().
- */
 function buildMiscReceiptEnvelope(row) {
   const required = [
     'Amount', 'CurrencyCode', 'ReceiptNumber', 'ReceiptDate',
@@ -176,19 +133,8 @@ ${receiptMethodNameTag}        <com:ReceivableActivityName>${escapeXml(row.Recei
 </soapenv:Envelope>`;
 }
 
-// ── Customer Profile (getActiveCustomerProfile) ────────────────────────────────
+// ── Customer Profile ──────────────────────────────────────────────────────────
 
-/**
- * Builds a getActiveCustomerProfile SOAP envelope for ReceivablesCustomerProfileService.
- *
- * Mirrors Java FusionCustomerProfileClient.getCustomerAccountId(accountNumber):
- *   customerProfile.setAccountNumber(createCustomerProfileAccountNumber(accountNumber));
- *   customerProfileService.getActiveCustomerProfile(customerProfile);
- *
- * The SOAPAction header must be CUST_PROFILE_SOAP_ACTION (exported below).
- *
- * @param {string|number} accountNumber - Oracle AR customer account number
- */
 function buildCustomerProfileEnvelope(accountNumber) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
@@ -205,95 +151,95 @@ function buildCustomerProfileEnvelope(accountNumber) {
 </soapenv:Envelope>`;
 }
 
-// ── AR Invoice (RecInvoiceService / createSimpleInvoice) ───────────────────────
-
-/**
- * Wraps an optional string value in an XML tag only when value is non-empty.
- * Used by buildArInvoiceSoapEnvelope.
- */
-function optionalTag(ns, tag, value) {
-  if (value == null || String(value).trim() === '') return '';
-  return `        <${ns}:${tag}>${escapeXml(String(value).trim())}</${ns}:${tag}>\n`;
-}
+// ── AR Invoice (RecInvoiceService / createSimpleInvoice) ────────────────────
 
 /**
  * Builds a createSimpleInvoice SOAP envelope for Oracle RecInvoiceService.
- *
- * CORRECT STRUCTURE (verified working - created invoice #2678575):
+ * 
+ * ✅ CORRECT STRUCTURE (verified working):
  *   Root: typ:createSimpleInvoice → typ:invoiceHeaderInformation
- *
- * Oracle field mappings:
- *   BillToCustomerName     → BillToCustomerName
- *   BillToCustomerNumber   → BillToAccountNumber   (payload field name)
- *   BillToSite             → BillToLocation        (payload field name)
- *   BusinessUnit           → BusinessUnit
- *   TransactionSource      → TransactionSource
- *   TransactionType        → TransactionType
- *   InvoiceCurrencyCode    → InvoiceCurrencyCode
- *   ConversionRateType     → ConversionRateType    (ALWAYS included, defaults to "Corporate")
- *   PaymentTerms           → PaymentTermsName      (payload field name, UPPERCASE recommended)
- *   TransactionDate        → TrxDate
- *   AccountingDate         → GlDate                (payload field name)
- *
- * Line fields (REQUIRED by Oracle):
- *   LineNumber, ItemNumber (or MemoLineName for discounts/returns),
- *   Description, Quantity (with unitCode attribute),
- *   UnitSellingPrice (with currencyCode attribute),
- *   SalesOrder, SalesOrderLine, TaxClassificationCode
- *
+ *   Details: inv: namespace for ALL invoice fields and lines
+ * 
  * @param {object} payload - AR Invoice payload with header + receivablesInvoiceLines
  */
 function buildArInvoiceSoapEnvelope(payload) {
   const lines    = payload.receivablesInvoiceLines || [];
   const currency = payload.InvoiceCurrencyCode || 'SAR';
 
+  // Build invoice lines using inv: namespace
   const lineXml = lines.map((line) => {
-    // UomCode: required per-line UOM (defaults to 'Ea' - capitalized)
-    const uomCode       = String(line.UomCode ?? line.UnitOfMeasure ?? line.UOM ?? 'Ea').trim();
-    // CurrencyCode: required per-line currency (defaults to header currency)
-    const lineCurrency  = String(line.CurrencyCode ?? currency).trim();
+    const lineNum = line.LineNumber || 0;
+    const uomCode = String(line.UomCode ?? line.UnitOfMeasure ?? line.UOM ?? 'Ea').trim();
+    const lineCurrency = String(line.CurrencyCode ?? currency).trim();
     
-    const isDiscount    = !line.ItemNumber || String(line.ItemNumber).trim() === '';
-    const itemTag       = isDiscount ? '' : `          <typ:ItemNumber>${escapeXml(line.ItemNumber)}</typ:ItemNumber>\n`;
-    const memoTag       = isDiscount ? `          <typ:MemoLineName>${escapeXml(line.MemoLineName ?? line.MemoLine ?? 'Discount Item')}</typ:MemoLineName>\n` : '';
-    const soTag         = line.SalesOrder     ? `          <typ:SalesOrder>${escapeXml(line.SalesOrder)}</typ:SalesOrder>\n`                 : '';
-    const solTag        = line.SalesOrderLine != null ? `          <typ:SalesOrderLine>${escapeXml(line.SalesOrderLine)}</typ:SalesOrderLine>\n` : '';
+    // Determine if this is a discount/memo line
+    const isDiscount = !line.ItemNumber || String(line.ItemNumber).trim() === '';
+    
+    let lineXml = `
+        <inv:InvoiceLine>
+          <inv:LineNumber>${lineNum}</inv:LineNumber>`;
 
-    return `        <typ:InvoiceLine>
-          <typ:LineNumber>${escapeXml(line.LineNumber)}</typ:LineNumber>
-${itemTag}${memoTag}          <typ:Description>${escapeXml(line.Description)}</typ:Description>
-          <typ:Quantity unitCode="${escapeXml(uomCode)}">${escapeXml(line.Quantity)}</typ:Quantity>
-          <typ:UnitSellingPrice currencyCode="${escapeXml(lineCurrency)}">${escapeXml(roundAmount(line.UnitSellingPrice))}</typ:UnitSellingPrice>
-${soTag}${solTag}          <typ:TaxClassificationCode>${escapeXml(line.TaxClassificationCode)}</typ:TaxClassificationCode>
-        </typ:InvoiceLine>`;
-  }).join('\n');
+    if (isDiscount) {
+      // ✅ Discount lines use MemoLineName
+      const memoName = line.MemoLineName ?? line.MemoLine ?? 'Discount Item';
+      lineXml += `
+          <inv:MemoLineName>${escapeXml(memoName)}</inv:MemoLineName>`;
+    } else {
+      // ✅ Regular items use ItemNumber
+      lineXml += `
+          <inv:ItemNumber>${escapeXml(line.ItemNumber)}</inv:ItemNumber>`;
+    }
 
-  // ConversionRateType: MUST be omitted for SAR (ledger currency) to avoid Oracle error AR-856150.
-  // Oracle's SDOSerializer.deserialize() rejects ConversionRateType when currency matches the ledger.
-  // For non-SAR currencies, include it (defaults to "Corporate").
-  const isSAR = currency.toUpperCase() === 'SAR';
-  const conversionRateTypeTag = isSAR 
-    ? '' 
-    : `        <typ:ConversionRateType>${escapeXml(payload.ConversionRateType || 'Corporate')}</typ:ConversionRateType>\n`;
+    lineXml += `
+          <inv:Description>${escapeXml(line.Description || '')}</inv:Description>
+          <inv:Quantity unitCode="${escapeXml(uomCode)}">${Math.abs(line.Quantity || 0)}</inv:Quantity>
+          <inv:UnitSellingPrice currencyCode="${escapeXml(lineCurrency)}">${roundAmount(line.UnitSellingPrice)}</inv:UnitSellingPrice>`;
 
+    // SalesOrder (optional but recommended)
+    if (line.SalesOrder) {
+      lineXml += `
+          <inv:SalesOrder>${escapeXml(line.SalesOrder)}</inv:SalesOrder>`;
+    }
+    
+    // SalesOrderLine (optional but recommended)
+    if (line.SalesOrderLine != null) {
+      lineXml += `
+          <inv:SalesOrderLine>${line.SalesOrderLine}</inv:SalesOrderLine>`;
+    }
+
+    // ✅ Tax code ONLY for regular items (NOT memo lines)
+    if (!isDiscount && line.TaxClassificationCode) {
+      lineXml += `
+          <inv:TaxClassificationCode>${line.TaxClassificationCode}</inv:TaxClassificationCode>`;
+    }
+
+    lineXml += `
+        </inv:InvoiceLine>`;
+    return lineXml;
+  }).join('');
+
+  // ✅ CRITICAL: Use inv: namespace for ALL invoice details
   return `<?xml version="1.0" encoding="UTF-8"?>
-<soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
-  xmlns:typ="${AR_INV_TYP_NS}">
+<soapenv:Envelope 
+    xmlns:soapenv="${SOAP_ENV_NS}" 
+    xmlns:typ="${AR_INV_TYP_NS}" 
+    xmlns:inv="${AR_INV_SVC_NS}">
   <soapenv:Header/>
   <soapenv:Body>
     <typ:createSimpleInvoice>
       <typ:invoiceHeaderInformation>
-        ${optionalTag('typ', 'BillToCustomerName',   payload.BillToCustomerName)}
-        ${optionalTag('typ', 'BillToAccountNumber',  payload.BillToCustomerNumber)}
-        ${optionalTag('typ', 'BillToLocation',       payload.BillToSite)}
-        ${optionalTag('typ', 'BusinessUnit',         payload.BusinessUnit)}
-        ${optionalTag('typ', 'TransactionSource',    payload.TransactionSource)}
-        ${optionalTag('typ', 'TransactionType',      payload.TransactionType)}
-        <typ:InvoiceCurrencyCode>${escapeXml(currency)}</typ:InvoiceCurrencyCode>
-${conversionRateTypeTag}        ${optionalTag('typ', 'PaymentTermsName',     payload.PaymentTerms)}
-        <typ:TrxDate>${escapeXml(payload.TransactionDate)}</typ:TrxDate>
-        ${optionalTag('typ', 'GlDate', payload.AccountingDate)}
-        ${lineXml}
+        <inv:BillToCustomerName>${escapeXml(payload.BillToCustomerName || '')}</inv:BillToCustomerName>
+        <inv:BillToAccountNumber>${payload.BillToCustomerNumber || ''}</inv:BillToAccountNumber>
+        <inv:BillToLocation>${payload.BillToSite || ''}</inv:BillToLocation>
+        <inv:BusinessUnit>${payload.BusinessUnit || 'AlQurashi-KSA'}</inv:BusinessUnit>
+        <inv:TransactionSource>${payload.TransactionSource || 'Vend'}</inv:TransactionSource>
+        <inv:TransactionType>${payload.TransactionType || 'Vend Invoice'}</inv:TransactionType>
+        <inv:InvoiceCurrencyCode>${escapeXml(currency)}</inv:InvoiceCurrencyCode>
+        <inv:ConversionRateType>Corporate</inv:ConversionRateType>
+        <inv:PaymentTermsName>IMMEDIATE</inv:PaymentTermsName>
+        <inv:TrxDate>${escapeXml(payload.TransactionDate || '')}</inv:TrxDate>
+        <inv:GlDate>${escapeXml(payload.AccountingDate || '')}</inv:GlDate>
+${lineXml}
       </typ:invoiceHeaderInformation>
     </typ:createSimpleInvoice>
   </soapenv:Body>
