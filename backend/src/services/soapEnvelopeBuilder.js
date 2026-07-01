@@ -268,9 +268,13 @@ ${soTag}${solTag}          <typ:TaxClassificationCode>${escapeXml(line.TaxClassi
         </typ:InvoiceLine>`;
   }).join('\n');
 
-  // ConversionRateType: Always include, defaults to "Corporate"
-  // (Previous implementation incorrectly omitted this for SAR)
-  const conversionRateType = payload.ConversionRateType || 'Corporate';
+  // ConversionRateType: MUST be omitted for SAR (ledger currency) to avoid Oracle error AR-856150.
+  // Oracle's SDOSerializer.deserialize() rejects ConversionRateType when currency matches the ledger.
+  // For non-SAR currencies, include it (defaults to "Corporate").
+  const isSAR = currency.toUpperCase() === 'SAR';
+  const conversionRateTypeTag = isSAR 
+    ? '' 
+    : `        <typ:ConversionRateType>${escapeXml(payload.ConversionRateType || 'Corporate')}</typ:ConversionRateType>\n`;
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
@@ -286,8 +290,7 @@ ${soTag}${solTag}          <typ:TaxClassificationCode>${escapeXml(line.TaxClassi
         ${optionalTag('typ', 'TransactionSource',    payload.TransactionSource)}
         ${optionalTag('typ', 'TransactionType',      payload.TransactionType)}
         <typ:InvoiceCurrencyCode>${escapeXml(currency)}</typ:InvoiceCurrencyCode>
-        <typ:ConversionRateType>${escapeXml(conversionRateType)}</typ:ConversionRateType>
-        ${optionalTag('typ', 'PaymentTermsName',     payload.PaymentTerms)}
+${conversionRateTypeTag}        ${optionalTag('typ', 'PaymentTermsName',     payload.PaymentTerms)}
         <typ:TrxDate>${escapeXml(payload.TransactionDate)}</typ:TrxDate>
         ${optionalTag('typ', 'GlDate', payload.AccountingDate)}
         ${lineXml}
