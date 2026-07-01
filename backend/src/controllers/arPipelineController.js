@@ -22,6 +22,7 @@ const pLimit = require('p-limit');
 const pRetry = require('p-retry');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
 const { buildArInvoiceSoapEnvelope, AR_INVOICE_SOAP_ACTION } = require('../services/soapEnvelopeBuilder');
+const { sendRawSoapRequest } = require('../services/rawSoapSender');
 const {
   getBatchConfig,
   isTransientError: isBatchTransientError,
@@ -195,6 +196,24 @@ function extractInvoiceDataFromSoap(parsed) {
     console.error('[AR Pipeline] Error extracting data from SOAP response:', error.message);
     return {};
   }
+}
+
+/** Extract Oracle error from response */
+function extractOracleError(data) {
+  if (!data) return null;
+  if (typeof data === 'string') {
+    const faultMatch = data.match(/<faultstring[^>]*>([^<]+)<\/faultstring>/i);
+    if (faultMatch) return faultMatch[1].slice(0, 300);
+    const errorMatch = data.match(/<[^:]+:message[^>]*>([^<]+)<\/[^:]+:message>/i);
+    if (errorMatch) return errorMatch[1].slice(0, 300);
+  }
+  if (data && typeof data === 'object') {
+    if (data.detail) return String(data.detail).slice(0, 300);
+    if (data.title) return String(data.title).slice(0, 300);
+    if (data.o_errorCode) return `${data.o_errorCode}: ${String(data.o_errorMessage || '').slice(0, 250)}`;
+    if (Array.isArray(data.items) && data.items[0]?.detail) return String(data.items[0].detail).slice(0, 300);
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -776,15 +795,8 @@ async function listMiscReceipts(req, res, next) {
 // ---------------------------------------------------------------------------
 // POST /api/ar-pipeline/create-invoice-batch
 // Creates multiple AR Invoice payloads in Oracle via SOAP API.
-// Strategy:
-//   Pass 1 – process all invoices concurrently (capped at ORACLE_INVOICE_CONCURRENCY,
-//            default 3) so Oracle is never overloaded while still cutting wall-clock time
-//            vs. purely sequential processing.
-//   Pass 2 – re-submit only invoices that failed with a transient network error in pass 1
-//            (timeout, ECONNRESET, ETIMEDOUT, EPIPE, etc.); done sequentially to be safe.
-//            Oracle business errors (4xx / SOAP Faults) are permanent failures — not retried.
-// Responds immediately with a batchId; processing continues in the background.
-// Poll GET /api/ar-pipeline/invoice-batch/:batchId/progress for status.
+// 
+// ✅ FIXED: Uses raw SOAP sender to avoid namespace issues from XML parser
 // ---------------------------------------------------------------------------
 async function createInvoiceBatch(req, res, next) {
   try {
@@ -854,44 +866,15 @@ async function createInvoiceBatch(req, res, next) {
 
       let successCount = 0;
       let failureCount = 0;
-      const transientItems = []; // queued for pass-2 retry
+      const transientItems = [];
 
       const oracleAuth = Buffer.from(`${username}:${password}`).toString('base64');
-      // AR invoice SOAP calls use ORACLE_SOAP_TIMEOUT (default 5 min).
       const invoiceTimeout = _batchCfg.invoiceTimeout;
-
-      /** Extract a short readable Oracle error from the SOAP response */
-      function extractOracleError(data) {
-        if (!data) return null;
-        // For SOAP responses, data is typically a string (XML)
-        if (typeof data === 'string') {
-          // Try to extract fault string or error message from XML
-          const faultMatch = data.match(/<faultstring[^>]*>([^<]+)<\/faultstring>/i);
-          if (faultMatch) return faultMatch[1].slice(0, 300);
-          
-          const errorMatch = data.match(/<[^:]+:message[^>]*>([^<]+)<\/[^:]+:message>/i);
-          if (errorMatch) return errorMatch[1].slice(0, 300);
-        }
-        // REST error shapes (fallback for compatibility)
-        if (data && typeof data === 'object') {
-          if (data.detail)  return String(data.detail).slice(0, 300);
-          if (data.title)   return String(data.title).slice(0, 300);
-          if (data.o_errorCode) return `${data.o_errorCode}: ${String(data.o_errorMessage || '').slice(0, 250)}`;
-          if (Array.isArray(data.items) && data.items[0]?.detail) return String(data.items[0].detail).slice(0, 300);
-        }
-        return null;
-      }
 
       /**
        * Submits one invoice to Oracle via SOAP and persists the result.
-       * @param {object}  payload      - Invoice payload (JSON)
-       * @param {object}  uploadRecord - Pre-created ArInvoiceUpload row (may be null)
-       * @param {boolean} isRetry      - true when called from pass 2 (transient-error retry)
-       * @param {number}  index        - 1-based position within the batch (for log readability)
-       * @returns {{ success: boolean, isTransient: boolean, uploadRecord: object|null }}
        */
       async function processOne(payload, uploadRecord, isRetry, index) {
-        // Fallback: create upload record if pre-creation failed
         if (!uploadRecord) {
           try {
             uploadRecord = await prisma.arInvoiceUpload.create({
@@ -912,22 +895,11 @@ async function createInvoiceBatch(req, res, next) {
         const lineCount  = (payload.receivablesInvoiceLines ?? []).length;
         const customer   = payload.BillToCustomerNumber ?? payload.BillToCustomerName ?? 'unknown';
         const txnDate    = payload.TransactionDate ?? 'unknown';
-        const crossRef   = payload.receivablesInvoiceLines?.[0]?.CrossReference ?? null;
 
-        // ── Per-invoice start ──────────────────────────────────────────────
         console.log(
           `${invoiceTag} ► SUBMITTING | customer=${customer} | date=${txnDate} | lines=${lineCount}` +
-          (crossRef ? ` | crossRef=${crossRef}` : '') +
           (isRetry ? ' | [RETRY]' : '')
         );
-        
-        // Log full payload if verbose logging is enabled (WARNING: may contain sensitive data)
-        if (process.env.AR_INVOICE_VERBOSE_LOGGING === 'true') {
-          console.log(`${invoiceTag} ═══ INVOICE PAYLOAD START ═══`);
-          console.log(JSON.stringify(payload, null, 2));
-          console.log(`${invoiceTag} ═══ INVOICE PAYLOAD END ═══`);
-        }
-        console.log(`${invoiceTag} API URL: ${endpoint}`);
 
         let responseStatus  = 'SUCCESS';
         let responseMessage = 'Invoice created successfully';
@@ -939,7 +911,6 @@ async function createInvoiceBatch(req, res, next) {
         // Build SOAP envelope
         const soapXml = buildArInvoiceSoapEnvelope(payload);
         
-        // Log SOAP envelope if verbose logging is enabled
         if (process.env.AR_INVOICE_VERBOSE_LOGGING === 'true') {
           console.log(`${invoiceTag} ═══ SOAP ENVELOPE START ═══`);
           console.log(soapXml);
@@ -947,39 +918,31 @@ async function createInvoiceBatch(req, res, next) {
         }
 
         try {
-          const soapClient = createOracleSoapClient(endpoint);
-          const response = await soapClient.callWithCustomEnvelope(soapXml, AR_INVOICE_SOAP_ACTION);
+          // ✅ FIX: Use raw SOAP sender instead of the OracleSoapClient
+          const response = await sendRawSoapRequest(
+            endpoint,
+            soapXml,
+            'createSimpleInvoice',
+            oracleAuth,
+            {
+              timeout: invoiceTimeout,
+              connectTimeout: 30000,
+            }
+          );
 
           const elapsed = Date.now() - t0;
           httpStatus = response.status;
           
-          // Log full API response if verbose logging is enabled (WARNING: may contain sensitive data)
           if (process.env.AR_INVOICE_VERBOSE_LOGGING === 'true') {
             console.log(`${invoiceTag} ═══ FULL API RESPONSE START ═══`);
             console.log(`${invoiceTag} Status: ${response.status}`);
             console.log(`${invoiceTag} Response Data (XML):`, response.data);
-            console.log(`${invoiceTag} Response Headers:`, JSON.stringify(response.headers, null, 2));
             console.log(`${invoiceTag} ═══ FULL API RESPONSE END ═══`);
           }
           
           // Parse SOAP response to extract invoice data
-          const parsed = response.parsed;
-          
-          // Log parsed response structure if verbose logging is enabled
-          if (process.env.AR_INVOICE_VERBOSE_LOGGING === 'true') {
-            console.log(`${invoiceTag} ═══ PARSED RESPONSE STRUCTURE START ═══`);
-            console.log(JSON.stringify(parsed, null, 2));
-            console.log(`${invoiceTag} ═══ PARSED RESPONSE STRUCTURE END ═══`);
-          }
-          
-          oracleData = extractInvoiceDataFromSoap(parsed);
-          
-          // Log extracted invoice data if verbose logging is enabled
-          if (process.env.AR_INVOICE_VERBOSE_LOGGING === 'true') {
-            console.log(`${invoiceTag} ═══ EXTRACTED INVOICE DATA START ═══`);
-            console.log(JSON.stringify(oracleData, null, 2));
-            console.log(`${invoiceTag} ═══ EXTRACTED INVOICE DATA END ═══`);
-          }
+          const parsed = parseSoapResponse(response.data);
+          oracleData = parsed.invoiceData || {};
 
           if (response.status >= 400) {
             responseStatus  = 'FAILED';
@@ -987,9 +950,6 @@ async function createInvoiceBatch(req, res, next) {
           }
 
           if (responseStatus === 'SUCCESS') {
-            // Guard: Oracle sometimes returns HTTP 200 without a TransactionNumber when it
-            // silently rejects the invoice (e.g. duplicate CrossReference, over-large payload).
-            // Treat this as a business failure so it is clearly visible in the pipeline UI.
             if (!oracleData?.TransactionNumber) {
               responseStatus  = 'FAILED';
               responseMessage = 'Oracle returned HTTP 200 but no TransactionNumber — possible duplicate CrossReference or oversized payload';
@@ -1018,20 +978,9 @@ async function createInvoiceBatch(req, res, next) {
           transient       = isTransientError(err);
           const label     = transient && !isRetry ? 'TRANSIENT (queued for retry)' : 'FAILED';
           console.error(`❌ ${invoiceTag} ${label} (${elapsed}ms) | error=${err.code ?? err.message}`);
-          if (err.code) console.error(`❌ ${invoiceTag} Error detail: code=${err.code} message=${err.message}`);
-          
-          // Log error response if verbose logging is enabled
-          if (process.env.AR_INVOICE_VERBOSE_LOGGING === 'true' && err.response) {
-            console.error(`${invoiceTag} Error Response:`, JSON.stringify({
-              status: err.response.status,
-              data: err.response.data,
-              message: err.message
-            }, null, 2));
-          }
         }
 
-        // For pass-1 transient failures, mark as queued-for-retry and skip DB storage
-        // so no duplicate FusionInvoiceHeader is created before the retry attempt.
+        // For pass-1 transient failures, mark as queued-for-retry
         if (transient && !isRetry) {
           await prisma.arInvoiceUpload.update({
             where: { id: uploadRecord.id },
@@ -1113,9 +1062,7 @@ async function createInvoiceBatch(req, res, next) {
         return { success: responseStatus === 'SUCCESS', isTransient: false, uploadRecord };
       }
 
-      // ── Pass 1: process all invoices concurrently (capped at INVOICE_CONCURRENCY) ─
-      // JavaScript's event loop is single-threaded so counter mutations are safe across
-      // concurrent async tasks — each task only advances at await boundaries.
+      // ── Pass 1: process all invoices concurrently ──────────────────────
       const pass1Start = Date.now();
       console.log(`${batchTag} ── Pass 1 START | ${workItems.length} invoice(s) | concurrency=${INVOICE_CONCURRENCY}`);
       const limitPass1 = pLimit(INVOICE_CONCURRENCY);
@@ -1138,7 +1085,7 @@ async function createInvoiceBatch(req, res, next) {
         `✅ ${successCount} succeeded | ❌ ${failureCount} failed | ⚠ ${transientItems.length} transient`
       );
 
-      // ── Pass 2: retry transient failures sequentially (conservative for Oracle) ─
+      // ── Pass 2: retry transient failures sequentially ──────────────────
       if (transientItems.length > 0) {
         const pass2Start = Date.now();
         console.log(`${batchTag} ── Pass 2 START | retrying ${transientItems.length} transient failure(s) sequentially`);
@@ -1183,6 +1130,42 @@ async function createInvoiceBatch(req, res, next) {
 }
 
 // ---------------------------------------------------------------------------
+// Helper: Parse SOAP response to extract invoice data
+// ---------------------------------------------------------------------------
+function parseSoapResponse(xmlData) {
+  try {
+    const result = { invoiceData: {} };
+    
+    // Extract TransactionNumber
+    const txnMatch = xmlData.match(/<ns2:TransactionNumber>([^<]+)<\/ns2:TransactionNumber>/i) ||
+                     xmlData.match(/<TransactionNumber>([^<]+)<\/TransactionNumber>/i) ||
+                     xmlData.match(/<TrxNumber>([^<]+)<\/TrxNumber>/i);
+    if (txnMatch) {
+      result.invoiceData.TransactionNumber = txnMatch[1];
+    }
+    
+    // Extract CustomerTrxId
+    const custMatch = xmlData.match(/<ns2:CustomerTrxId>([^<]+)<\/ns2:CustomerTrxId>/i) ||
+                      xmlData.match(/<CustomerTrxId>([^<]+)<\/CustomerTrxId>/i);
+    if (custMatch) {
+      result.invoiceData.CustomerTrxId = custMatch[1];
+    }
+    
+    // Check ServiceStatus
+    const statusMatch = xmlData.match(/<ns2:ServiceStatus>([^<]+)<\/ns2:ServiceStatus>/i) ||
+                        xmlData.match(/<ServiceStatus>([^<]+)<\/ServiceStatus>/i);
+    if (statusMatch) {
+      result.invoiceData.ServiceStatus = statusMatch[1];
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('[AR Pipeline] Error parsing SOAP response:', error.message);
+    return { invoiceData: {} };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/ar-pipeline/invoice-batch/:batchId/progress
 // Poll for batch invoice creation status
 // ---------------------------------------------------------------------------
@@ -1207,8 +1190,6 @@ async function getInvoiceBatchProgress(req, res, next) {
 
     const processed = batch.successCount + batch.failureCount;
 
-    // When the batch has finished (not still PROCESSING), include per-invoice
-    // details so the frontend can display individual success/failure rows.
     let invoiceResults = null;
     if (batch.status !== 'PROCESSING') {
       const uploads = await prisma.arInvoiceUpload.findMany({
@@ -1223,8 +1204,6 @@ async function getInvoiceBatchProgress(req, res, next) {
         orderBy: { id: 'asc' },
       });
 
-      // Fetch FusionInvoiceHeader records for these uploads so we can return
-      // the headerId — needed by the frontend for the "Set Txn #" endpoint.
       const uploadIds = uploads.map((u) => u.id);
       const headers = await prisma.fusionInvoiceHeader.findMany({
         where: { requestId: { in: uploadIds } },
@@ -1248,8 +1227,6 @@ async function getInvoiceBatchProgress(req, res, next) {
         } catch { /* ignore */ }
         try {
           const body = JSON.parse(u.responseBody || '{}');
-          // Support both TransactionNumber (parsed JSON key) and TrxNumber
-          // (Oracle RecInvoiceService response field stored before the parser fix)
           const raw = body.TransactionNumber ?? body.TrxNumber ?? null;
           txnNumber = raw != null ? String(raw) : null;
         } catch { /* ignore */ }
@@ -1283,10 +1260,7 @@ async function getInvoiceBatchProgress(req, res, next) {
 
 // ---------------------------------------------------------------------------
 // PATCH /api/ar-pipeline/invoices/:headerId/txn-number
-// Manually set the txnNumber for a FusionInvoiceHeader record when Oracle did
-// not return it in the SOAP response (e.g. the TrxNumber field was missing).
-// Also back-fills the ArInvoiceUpload.responseBody so getInvoiceBatchProgress
-// returns the correct txnNumber without re-fetching from Oracle.
+// Manually set the txnNumber for a FusionInvoiceHeader record
 // ---------------------------------------------------------------------------
 async function setInvoiceTxnNumber(req, res, next) {
   try {
@@ -1310,14 +1284,11 @@ async function setInvoiceTxnNumber(req, res, next) {
       return res.status(404).json({ error: 'Invoice header not found.' });
     }
 
-    // Update FusionInvoiceHeader
     const updated = await prisma.fusionInvoiceHeader.update({
       where: { id: headerId },
       data: { txnNumber: txnNum },
     });
 
-    // Back-fill ArInvoiceUpload.responseBody so getInvoiceBatchProgress reflects the change.
-    // Preserve existing CustomerTrxId / ServiceStatus if present.
     if (header.requestId) {
       const existing = await prisma.arInvoiceUpload.findUnique({
         where: { id: header.requestId },
@@ -1331,7 +1302,6 @@ async function setInvoiceTxnNumber(req, res, next) {
           responseBody: JSON.stringify({ ...existingData, TransactionNumber: txnNum }),
         },
       }).catch((err) => {
-        // Non-fatal: log but don't fail the request
         console.warn(`[Pipeline:setTxnNumber] Could not update ArInvoiceUpload ${header.requestId}: ${err.message}`);
       });
     }
