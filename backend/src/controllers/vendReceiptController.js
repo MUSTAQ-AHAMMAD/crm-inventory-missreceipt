@@ -309,8 +309,8 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
   // required by StandardReceipt SOAP — billToAccount is the AR account NUMBER
   // (e.g. 57014), not the internal CUST_ACCOUNT_ID (e.g. 300000158776674).
   if (txnNumber) {
-    const txnNum = parseInt(String(txnNumber).replace(/\D/g, ''), 10);
-    if (!isNaN(txnNum) && txnNum > 0) {
+    const txnNum = BigInt(String(txnNumber).replace(/\D/g, ''));
+    if (txnNum && txnNum > 0) {
       const inv = await prisma.fusionInvoiceHeader.findFirst({
         where: { txnNumber: txnNum },
         select: { billToLocation: true, billToAccNumber: true },

@@ -498,7 +498,7 @@ async function submitApply(req, res, next) {
       const [invoiceHeaders, standardReceipts] = await Promise.all([
         prisma.fusionInvoiceHeader.findMany({
           where: {
-            txnNumber: { in: txnNumbers.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n)) },
+            txnNumber: { in: txnNumbers.map((n) => BigInt(n)).filter((n) => n !== null && n !== undefined) },
             status: { in: ['Success', 'SUCCESS'] },
           },
           select: { txnNumber: true, txnSource: true, txnDate: true, glDate: true },
@@ -537,7 +537,7 @@ async function submitApply(req, res, next) {
         limit(async () => {
           const { txnNumber, receiptNumber } = pair;
 
-          const inv = invoiceByTxn[parseInt(txnNumber, 10)];
+          const inv = invoiceByTxn[BigInt(txnNumber)];
           const rec = receiptByNum[receiptNumber];
 
           if (!inv) {
@@ -1149,7 +1149,7 @@ async function createInvoiceBatch(req, res, next) {
               requestDate:      new Date(),
               billToCustName:   payload.BillToCustomerName   ?? null,
               billToLocation:   payload.BillToSite            ?? null,
-              billToAccNumber:  billToAccRaw ? parseInt(billToAccRaw, 10) : null,
+              billToAccNumber:  billToAccRaw ? BigInt(billToAccRaw) : null,
               businessUnit:     payload.BusinessUnit          ?? null,
               paymentTermsName: payload.PaymentTerms          ?? null,
               txnSource:        payload.TransactionSource     ?? null,
@@ -1157,8 +1157,8 @@ async function createInvoiceBatch(req, res, next) {
               txnDate:          parseOracleDateToUTCMidnight(payload.TransactionDate),
               glDate:           parseOracleDateToUTCMidnight(payload.AccountingDate),
               currencyCode:     payload.InvoiceCurrencyCode   ?? null,
-              txnNumber:        txnNumberRaw ? parseInt(txnNumberRaw, 10) : null,
-              customerTxnId:    custTxnIdRaw ? parseInt(custTxnIdRaw, 10) : null,
+              txnNumber:        txnNumberRaw ? BigInt(txnNumberRaw) : null,
+              customerTxnId:    custTxnIdRaw ? BigInt(custTxnIdRaw) : null,
               region:           'SA',
             },
           });
@@ -1401,8 +1401,8 @@ async function setInvoiceTxnNumber(req, res, next) {
     }
 
     const { txnNumber } = req.body;
-    const txnNum = parseInt(String(txnNumber ?? ''), 10);
-    if (isNaN(txnNum) || txnNum <= 0) {
+    const txnNum = BigInt(String(txnNumber ?? ''));
+    if (!txnNum || txnNum <= 0) {
       return res.status(400).json({ error: 'txnNumber must be a positive integer.' });
     }
 

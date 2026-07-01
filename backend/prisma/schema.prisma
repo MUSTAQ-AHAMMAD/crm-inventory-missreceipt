@@ -232,7 +232,7 @@ model FusionSalesMetadata {
   id                   Int     @id @default(autoincrement())
   rowId                Int     @unique
   billToName           String
-  billToAccount        Int
+  billToAccount        BigInt  // Changed to BigInt for large Oracle account numbers
   siteNumber           String
   businessUnit         String
   txnSource            String
@@ -309,7 +309,7 @@ model FusionInvoiceHeader {
   requestDate         DateTime? // REQUEST_DATE from Oracle
   billToCustName      String?  // BILL_TO_CUST_NAME
   billToLocation      String?  // BILL_TO_LOCATION
-  billToAccNumber     Int?     // BILL_TO_ACC_NUMBER
+  billToAccNumber     BigInt?  // BILL_TO_ACC_NUMBER - Changed to BigInt for large Oracle IDs
   businessUnit        String?  // BUSINESS_UNIT
   paymentTermsName    String?  // PAYMENT_TERMS_NAME
   txnSource           String?  // TXN_SOURCE
@@ -317,8 +317,8 @@ model FusionInvoiceHeader {
   txnDate             DateTime? // TXN_DATE
   glDate              DateTime? // GL_DATE
   currencyCode        String?  // CURRENCY_CODE
-  txnNumber           Int?     // TXN_NUMBER
-  customerTxnId       Int?     // CUSTOMER_TXN_ID
+  txnNumber           BigInt?  // TXN_NUMBER - Changed to BigInt for large Oracle transaction numbers
+  customerTxnId       BigInt?  // CUSTOMER_TXN_ID - Changed to BigInt to handle values >2,147,483,647
   region              String?  // REGION
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
