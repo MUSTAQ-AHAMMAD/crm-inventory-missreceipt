@@ -8,15 +8,15 @@
 // Standard UOM mapping from common descriptions to Oracle codes
 const UOM_MAPPING = {
   // Each variations
-  'each': 'EA',
-  'ea': 'EA',
-  'eaches': 'EA',
-  'unit': 'EA',
-  'units': 'EA',
-  'piece': 'EA',
-  'pieces': 'EA',
-  'pcs': 'EA',
-  'pc': 'EA',
+  'each': 'Ea',
+  'ea': 'Ea',
+  'eaches': 'Ea',
+  'unit': 'Ea',
+  'units': 'Ea',
+  'piece': 'Ea',
+  'pieces': 'Ea',
+  'pcs': 'Ea',
+  'pc': 'Ea',
   
   // Dozen variations
   'dozen': 'DOZ',
@@ -161,10 +161,10 @@ const UOM_MAPPING = {
 /**
  * Maps a UOM description to an Oracle standard UOM code
  * @param {string} uomDescription - The UOM description (e.g., "Each", "Dozen")
- * @param {string} [defaultCode='EA'] - Default code if no mapping found
- * @returns {string} - Oracle standard UOM code (uppercase)
+ * @param {string} [defaultCode='Ea'] - Default code if no mapping found
+ * @returns {string} - Oracle standard UOM code
  */
-function mapUomCode(uomDescription, defaultCode = 'EA') {
+function mapUomCode(uomDescription, defaultCode = 'Ea') {
   if (!uomDescription) {
     return defaultCode;
   }
@@ -172,16 +172,17 @@ function mapUomCode(uomDescription, defaultCode = 'EA') {
   // Convert to string and normalize
   const normalized = String(uomDescription).toLowerCase().trim();
   
-  // Check if it's already a valid UOM code (2-3 uppercase letters)
-  if (/^[A-Z]{2,4}$/.test(uomDescription.trim())) {
-    return uomDescription.trim().toUpperCase();
-  }
-  
-  // Look up in mapping
+  // First, check the mapping table (priority over treating as valid code)
   const mapped = UOM_MAPPING[normalized];
   
   if (mapped) {
     return mapped;
+  }
+  
+  // Check if it's already a valid UOM code (2-3 uppercase letters)
+  // This comes after mapping to ensure "EACH" → "Ea" instead of "EACH"
+  if (/^[A-Z]{2,4}$/.test(uomDescription.trim())) {
+    return uomDescription.trim().toUpperCase();
   }
   
   // If not found, try to extract potential code
