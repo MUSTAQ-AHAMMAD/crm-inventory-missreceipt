@@ -12,6 +12,8 @@
 
 'use strict';
 
+const { mapUomCode } = require('../utils/uomMapper');
+
 // ── Shared namespace constants ─────────────────────────────────────────────────
 const SOAP_ENV_NS = 'http://schemas.xmlsoap.org/soap/envelope/';
 
@@ -169,7 +171,9 @@ function buildArInvoiceSoapEnvelope(payload) {
   // Build invoice lines using inv: namespace
   const lineXml = lines.map((line) => {
     const lineNum = line.LineNumber || 0;
-    const uomCode = String(line.UomCode ?? line.UnitOfMeasure ?? line.UOM ?? 'Ea').trim().toUpperCase();
+    // Use mapUomCode to properly map UoM values like "Each" → "Ea", "Gram" → "G"
+    const rawUom = line.UomCode ?? line.UnitOfMeasure ?? line.UOM;
+    const uomCode = mapUomCode(rawUom, 'Ea');
     const lineCurrency = String(line.CurrencyCode ?? currency).trim();
     
     // Determine if this is a discount/memo line
