@@ -309,13 +309,16 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
   // required by StandardReceipt SOAP — billToAccount is the AR account NUMBER
   // (e.g. 57014), not the internal CUST_ACCOUNT_ID (e.g. 300000158776674).
   if (txnNumber) {
-    const txnNum = BigInt(String(txnNumber).replace(/\D/g, ''));
-    if (txnNum && txnNum > 0) {
-      const inv = await prisma.fusionInvoiceHeader.findFirst({
-        where: { txnNumber: txnNum },
-        select: { billToLocation: true, billToAccNumber: true },
-        orderBy: { createdAt: 'desc' },
-      });
+    const cleanedNum = String(txnNumber).replace(/\D/g, '');
+    if (cleanedNum) {
+      try {
+        const txnNum = BigInt(cleanedNum);
+        if (txnNum > 0) {
+          const inv = await prisma.fusionInvoiceHeader.findFirst({
+            where: { txnNumber: txnNum },
+            select: { billToLocation: true, billToAccNumber: true },
+            orderBy: { createdAt: 'desc' },
+          });
       if (inv) {
         let meta = null;
         if (inv.billToLocation) {
@@ -338,6 +341,9 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
           }
         // Oracle REST unavailable – fall through to Strategy 2 (bank-account-ID lookup)
         }
+      }
+      } catch (err) {
+        console.warn(`[vendReceipt] Strategy 1b: Failed to parse txnNumber=${txnNumber}: ${err.message}`);
       }
     }
   }

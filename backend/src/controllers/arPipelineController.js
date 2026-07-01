@@ -495,10 +495,22 @@ async function submitApply(req, res, next) {
       const txnNumbers    = [...new Set(pairs.map((p) => p.txnNumber).filter(Boolean))];
       const receiptNumbers = [...new Set(pairs.map((p) => p.receiptNumber).filter(Boolean))];
 
+      // Convert txnNumbers to BigInt, filtering out invalid values
+      const txnNumbersBigInt = txnNumbers
+        .map((n) => {
+          try {
+            const num = BigInt(n);
+            return num > 0 ? num : null;
+          } catch {
+            return null;
+          }
+        })
+        .filter((n) => n !== null);
+
       const [invoiceHeaders, standardReceipts] = await Promise.all([
         prisma.fusionInvoiceHeader.findMany({
           where: {
-            txnNumber: { in: txnNumbers.map((n) => BigInt(n)).filter((n) => n !== null && n !== undefined) },
+            txnNumber: { in: txnNumbersBigInt },
             status: { in: ['Success', 'SUCCESS'] },
           },
           select: { txnNumber: true, txnSource: true, txnDate: true, glDate: true },
@@ -537,7 +549,27 @@ async function submitApply(req, res, next) {
         limit(async () => {
           const { txnNumber, receiptNumber } = pair;
 
-          const inv = invoiceByTxn[BigInt(txnNumber)];
+          // Safely convert txnNumber to BigInt for lookup
+          let txnNumBigInt;
+          try {
+            txnNumBigInt = BigInt(txnNumber);
+          } catch (err) {
+            failureCount++;
+            await prisma.applyReceiptFailure.create({
+              data: {
+                uploadId:      uploadRecord.id,
+                rowNumber:     idx + 1,
+                invoiceNumber: String(txnNumber),
+                receiptNumber: String(receiptNumber),
+                errorMessage:  `Invalid txnNumber format: ${err.message}`,
+                errorStep:     'INVOICE_LOOKUP',
+              },
+            });
+            logs.push(`FAILED Invalid txnNumber ${txnNumber}: ${err.message}`);
+            return;
+          }
+
+          const inv = invoiceByTxn[txnNumBigInt];
           const rec = receiptByNum[receiptNumber];
 
           if (!inv) {
@@ -1401,9 +1433,21 @@ async function setInvoiceTxnNumber(req, res, next) {
     }
 
     const { txnNumber } = req.body;
-    const txnNum = BigInt(String(txnNumber ?? ''));
-    if (!txnNum || txnNum <= 0) {
-      return res.status(400).json({ error: 'txnNumber must be a positive integer.' });
+    
+    // Validate txnNumber
+    const txnNumStr = String(txnNumber ?? '').trim();
+    if (!txnNumStr) {
+      return res.status(400).json({ error: 'txnNumber is required and must be a positive integer.' });
+    }
+    
+    let txnNum;
+    try {
+      txnNum = BigInt(txnNumStr);
+      if (txnNum <= 0) {
+        return res.status(400).json({ error: 'txnNumber must be a positive integer.' });
+      }
+    } catch (err) {
+      return res.status(400).json({ error: `Invalid txnNumber: ${err.message}` });
     }
 
     const header = await prisma.fusionInvoiceHeader.findUnique({

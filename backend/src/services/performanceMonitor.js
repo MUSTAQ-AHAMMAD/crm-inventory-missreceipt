@@ -263,24 +263,34 @@ class PerformanceMonitor {
         query: req.query,
       });
       
+      let timerEnded = false;
+      
+      // Helper to ensure timer is only ended once
+      const endTimer = () => {
+        if (!timerEnded) {
+          timerEnded = true;
+          timer.end(res.statusCode);
+        }
+      };
+      
       // Override res.json and res.send to capture response
       const originalJson = res.json.bind(res);
       const originalSend = res.send.bind(res);
       
       res.json = function (data) {
-        timer.end(res.statusCode);
+        endTimer();
         return originalJson(data);
       };
       
       res.send = function (data) {
-        timer.end(res.statusCode);
+        endTimer();
         return originalSend(data);
       };
       
       // Handle early exit (errors, redirects, etc.)
+      // The 'finish' event fires after the response is fully sent
       res.on('finish', () => {
-        if (!res.headersSent) return;
-        timer.end(res.statusCode);
+        endTimer();
       });
       
       next();
