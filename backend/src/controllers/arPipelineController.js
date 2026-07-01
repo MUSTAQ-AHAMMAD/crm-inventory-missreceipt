@@ -550,9 +550,9 @@ async function submitApply(req, res, next) {
           const { txnNumber, receiptNumber } = pair;
 
           // Safely convert txnNumber to BigInt for lookup
-          let txnNumBigInt;
+          let txnNum;
           try {
-            txnNumBigInt = BigInt(txnNumber);
+            txnNum = BigInt(txnNumber);
           } catch (err) {
             failureCount++;
             await prisma.applyReceiptFailure.create({
@@ -569,7 +569,7 @@ async function submitApply(req, res, next) {
             return;
           }
 
-          const inv = invoiceByTxn[txnNumBigInt];
+          const inv = invoiceByTxn[txnNum];
           const rec = receiptByNum[receiptNumber];
 
           if (!inv) {

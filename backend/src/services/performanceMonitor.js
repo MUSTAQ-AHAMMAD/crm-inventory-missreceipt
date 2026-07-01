@@ -145,7 +145,7 @@ class PerformanceMonitor {
   startMemoryMonitoring() {
     const interval = parseInt(process.env.MEMORY_CHECK_INTERVAL_MS || '60000', 10);
     
-    setInterval(() => {
+    this.memoryCheckInterval = setInterval(() => {
       const memoryUsage = this.getMemoryUsage();
       this.metrics.memorySnapshots.push(memoryUsage);
       
@@ -163,6 +163,16 @@ class PerformanceMonitor {
         this.metrics.memorySnapshots.shift();
       }
     }, interval);
+  }
+
+  /**
+   * Stop memory monitoring (cleanup)
+   */
+  stopMemoryMonitoring() {
+    if (this.memoryCheckInterval) {
+      clearInterval(this.memoryCheckInterval);
+      this.memoryCheckInterval = null;
+    }
   }
 
   /**
@@ -263,34 +273,23 @@ class PerformanceMonitor {
         query: req.query,
       });
       
-      let timerEnded = false;
-      
-      // Helper to ensure timer is only ended once
-      const endTimer = () => {
-        if (!timerEnded) {
-          timerEnded = true;
-          timer.end(res.statusCode);
-        }
-      };
-      
       // Override res.json and res.send to capture response
       const originalJson = res.json.bind(res);
       const originalSend = res.send.bind(res);
       
       res.json = function (data) {
-        endTimer();
+        timer.end(res.statusCode);
         return originalJson(data);
       };
       
       res.send = function (data) {
-        endTimer();
+        timer.end(res.statusCode);
         return originalSend(data);
       };
       
-      // Handle early exit (errors, redirects, etc.)
-      // The 'finish' event fires after the response is fully sent
-      res.on('finish', () => {
-        endTimer();
+      // Handle early exit (errors, redirects, etc.) using 'once' to ensure single execution
+      res.once('finish', () => {
+        timer.end(res.statusCode);
       });
       
       next();
