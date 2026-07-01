@@ -169,7 +169,7 @@ function buildArInvoiceSoapEnvelope(payload) {
   // Build invoice lines using inv: namespace
   const lineXml = lines.map((line) => {
     const lineNum = line.LineNumber || 0;
-    const uomCode = String(line.UomCode ?? line.UnitOfMeasure ?? line.UOM ?? 'EA').trim().toUpperCase();
+    const uomCode = String(line.UomCode ?? line.UnitOfMeasure ?? line.UOM ?? 'Ea').trim().toUpperCase();
     const lineCurrency = String(line.CurrencyCode ?? currency).trim();
     
     // Determine if this is a discount/memo line
