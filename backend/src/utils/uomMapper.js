@@ -172,16 +172,17 @@ function mapUomCode(uomDescription, defaultCode = 'Ea') {
   // Convert to string and normalize
   const normalized = String(uomDescription).toLowerCase().trim();
   
-  // Check if it's already a valid UOM code (2-3 uppercase letters)
-  if (/^[A-Z]{2,4}$/.test(uomDescription.trim())) {
-    return uomDescription.trim().toUpperCase();
-  }
-  
-  // Look up in mapping
+  // First, check the mapping table (priority over treating as valid code)
   const mapped = UOM_MAPPING[normalized];
   
   if (mapped) {
     return mapped;
+  }
+  
+  // Check if it's already a valid UOM code (2-3 uppercase letters)
+  // This comes after mapping to ensure "EACH" → "Ea" instead of "EACH"
+  if (/^[A-Z]{2,4}$/.test(uomDescription.trim())) {
+    return uomDescription.trim().toUpperCase();
   }
   
   // If not found, try to extract potential code
