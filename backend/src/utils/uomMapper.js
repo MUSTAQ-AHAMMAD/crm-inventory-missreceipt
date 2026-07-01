@@ -204,8 +204,9 @@ function mapUomCode(uomDescription, defaultCode = 'EA') {
 function isValidUomCode(uomCode) {
   if (!uomCode) return false;
   const code = String(uomCode).trim();
-  // Oracle UOM codes are typically 2-4 uppercase letters
-  return /^[A-Z]{2,4}$/.test(code);
+  // Oracle UOM codes are typically 1-4 uppercase letters or numbers
+  // Common codes: EA, DOZ, KG, G, L, ML, M, CM, etc.
+  return /^[A-Z0-9]{1,4}$/.test(code);
 }
 
 /**
