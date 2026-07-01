@@ -22,7 +22,8 @@
         "discover:methods": "node scripts/discover-methods.js",
         "discover:methods:verbose": "node scripts/discover-methods.js --verbose",
         "db:verify": "node scripts/verify-database-integrity.js",
-        "db:verify:fix": "node scripts/verify-database-integrity.js --fix"
+        "db:verify:fix": "node scripts/verify-database-integrity.js --fix",
+        "process:sales-lines": "node scripts/processSalesLines.js"
     },
     "dependencies": {
         "@prisma/client": "^5.7.0",
