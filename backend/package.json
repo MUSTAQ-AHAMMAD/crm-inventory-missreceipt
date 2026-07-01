@@ -9,6 +9,8 @@
         "postinstall": "prisma generate",
         "prisma:generate": "prisma generate",
         "prisma:migrate": "prisma migrate dev",
+        "prisma:migrate:deploy": "prisma migrate deploy",
+        "prisma:migrate:bigint": "prisma migrate deploy && prisma generate",
         "prisma:seed": "node prisma/seed.js",
         "seed:fusion-metadata": "node prisma/seedFusionMetadata.js",
         "seed:receipt-methods": "node prisma/seedFusionReceiptMethod.js",
@@ -23,6 +25,7 @@
         "discover:methods:verbose": "node scripts/discover-methods.js --verbose",
         "db:verify": "node scripts/verify-database-integrity.js",
         "db:verify:fix": "node scripts/verify-database-integrity.js --fix",
+        "db:performance-test": "node scripts/performance-test.js",
         "process:sales-lines": "node scripts/processSalesLines.js"
     },
     "dependencies": {

@@ -495,10 +495,22 @@ async function submitApply(req, res, next) {
       const txnNumbers    = [...new Set(pairs.map((p) => p.txnNumber).filter(Boolean))];
       const receiptNumbers = [...new Set(pairs.map((p) => p.receiptNumber).filter(Boolean))];
 
+      // Convert txnNumbers to BigInt, filtering out invalid values
+      const txnNumbersBigInt = txnNumbers
+        .map((n) => {
+          try {
+            const num = BigInt(n);
+            return num > 0 ? num : null;
+          } catch {
+            return null;
+          }
+        })
+        .filter((n) => n !== null);
+
       const [invoiceHeaders, standardReceipts] = await Promise.all([
         prisma.fusionInvoiceHeader.findMany({
           where: {
-            txnNumber: { in: txnNumbers.map((n) => parseInt(n, 10)).filter((n) => !isNaN(n)) },
+            txnNumber: { in: txnNumbersBigInt },
             status: { in: ['Success', 'SUCCESS'] },
           },
           select: { txnNumber: true, txnSource: true, txnDate: true, glDate: true },
@@ -537,7 +549,27 @@ async function submitApply(req, res, next) {
         limit(async () => {
           const { txnNumber, receiptNumber } = pair;
 
-          const inv = invoiceByTxn[parseInt(txnNumber, 10)];
+          // Safely convert txnNumber to BigInt for lookup
+          let txnNum;
+          try {
+            txnNum = BigInt(txnNumber);
+          } catch (err) {
+            failureCount++;
+            await prisma.applyReceiptFailure.create({
+              data: {
+                uploadId:      uploadRecord.id,
+                rowNumber:     idx + 1,
+                invoiceNumber: String(txnNumber),
+                receiptNumber: String(receiptNumber),
+                errorMessage:  `Invalid txnNumber format: ${err.message}`,
+                errorStep:     'INVOICE_LOOKUP',
+              },
+            });
+            logs.push(`FAILED Invalid txnNumber ${txnNumber}: ${err.message}`);
+            return;
+          }
+
+          const inv = invoiceByTxn[txnNum];
           const rec = receiptByNum[receiptNumber];
 
           if (!inv) {
@@ -1149,7 +1181,7 @@ async function createInvoiceBatch(req, res, next) {
               requestDate:      new Date(),
               billToCustName:   payload.BillToCustomerName   ?? null,
               billToLocation:   payload.BillToSite            ?? null,
-              billToAccNumber:  billToAccRaw ? parseInt(billToAccRaw, 10) : null,
+              billToAccNumber:  billToAccRaw ? BigInt(billToAccRaw) : null,
               businessUnit:     payload.BusinessUnit          ?? null,
               paymentTermsName: payload.PaymentTerms          ?? null,
               txnSource:        payload.TransactionSource     ?? null,
@@ -1157,8 +1189,8 @@ async function createInvoiceBatch(req, res, next) {
               txnDate:          parseOracleDateToUTCMidnight(payload.TransactionDate),
               glDate:           parseOracleDateToUTCMidnight(payload.AccountingDate),
               currencyCode:     payload.InvoiceCurrencyCode   ?? null,
-              txnNumber:        txnNumberRaw ? parseInt(txnNumberRaw, 10) : null,
-              customerTxnId:    custTxnIdRaw ? parseInt(custTxnIdRaw, 10) : null,
+              txnNumber:        txnNumberRaw ? BigInt(txnNumberRaw) : null,
+              customerTxnId:    custTxnIdRaw ? BigInt(custTxnIdRaw) : null,
               region:           'SA',
             },
           });
@@ -1401,9 +1433,21 @@ async function setInvoiceTxnNumber(req, res, next) {
     }
 
     const { txnNumber } = req.body;
-    const txnNum = parseInt(String(txnNumber ?? ''), 10);
-    if (isNaN(txnNum) || txnNum <= 0) {
-      return res.status(400).json({ error: 'txnNumber must be a positive integer.' });
+    
+    // Validate txnNumber
+    const txnNumStr = String(txnNumber ?? '').trim();
+    if (!txnNumStr) {
+      return res.status(400).json({ error: 'txnNumber is required and must be a positive integer.' });
+    }
+    
+    let txnNum;
+    try {
+      txnNum = BigInt(txnNumStr);
+      if (txnNum <= 0) {
+        return res.status(400).json({ error: 'txnNumber must be a positive integer.' });
+      }
+    } catch (err) {
+      return res.status(400).json({ error: `Invalid txnNumber: ${err.message}` });
     }
 
     const header = await prisma.fusionInvoiceHeader.findUnique({
