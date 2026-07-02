@@ -10,6 +10,13 @@ const rateLimit = require('express-rate-limit');
 const swaggerUi = require('swagger-ui-express');
 const swaggerSpec = require('./swagger');
 
+// ─── BigInt JSON Serialization Fix ───────────────────────────────────────────
+// Fix for BigInt values being serialized as "9n" instead of "9" in JSON payloads
+// This affects FusionSalesMetadata.billToAccount and FusionInvoiceHeader.billToAccNumber
+BigInt.prototype.toJSON = function() {
+  return this.toString();
+};
+
 const authRoutes = require('./routes/auth');
 const inventoryRoutes = require('./routes/inventory');
 const inventoryTemplateRoutes = require('./routes/inventoryTemplate');
