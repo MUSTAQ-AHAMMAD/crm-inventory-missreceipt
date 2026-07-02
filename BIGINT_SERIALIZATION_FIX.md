@@ -111,7 +111,7 @@ If you add new BigInt fields to the Prisma schema in the future:
 ## References
 
 - **Prisma Schema**: `backend/prisma/schema.prisma` (lines 235, 244)
-- **Global Fix**: `backend/src/index.js` (lines 9-12)
+- **Global Fix**: `backend/src/index.js` (lines 16-18)
 - **Service Layer**: `backend/src/services/fusionSalesMetadataService.js` (line 78)
 - **Controller Usage**: 
   - `backend/src/controllers/arPipelineController.js` (line 1184)
