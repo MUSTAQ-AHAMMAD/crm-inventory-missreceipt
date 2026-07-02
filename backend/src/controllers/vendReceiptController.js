@@ -308,171 +308,72 @@ async function lookupCustomerPartyId(customerAccNumber, bankAccountId = null, su
   // Uses Oracle REST to convert the account number into the real CUST_ACCOUNT_ID
   // required by StandardReceipt SOAP — billToAccount is the AR account NUMBER
   // (e.g. 57014), not the internal CUST_ACCOUNT_ID (e.g. 300000158776674).
-  if (txnNumber) {
-    const cleanedNum = String(txnNumber).replace(/\D/g, '');
-    if (cleanedNum) {
-      try {
-        const txnNum = BigInt(cleanedNum);
-        if (txnNum > 0) {
-          const inv = await prisma.fusionInvoiceHeader.findFirst({
-            where: { txnNumber: txnNum },
-            select: { billToLocation: true, billToAccNumber: true },
-            orderBy: { createdAt: 'desc' },
-          });
-      if (inv) {
-        let meta = null;
-        if (inv.billToLocation) {
-          meta = await prisma.fusionSalesMetadata.findFirst({
-            where: { siteNumber: inv.billToLocation },
-            select: { billToAccount: true },
-          });
-        }
-        if (!meta && inv.billToAccNumber) {
-          meta = await prisma.fusionSalesMetadata.findFirst({
-            where: { billToAccount: inv.billToAccNumber },
-            select: { billToAccount: true },
-          });
-        }
-        if (meta?.billToAccount) {
-          const realId = await lookupCustomerAccountIdFromOracle(meta.billToAccount);
-          if (realId) {
-            console.log(`[vendReceipt] Strategy 1b: resolved CustomerId=${realId} from Oracle REST via txnNumber=${txnNum}`);
-            return realId;
-          }
-        // Oracle REST unavailable – fall through to Strategy 2 (bank-account-ID lookup)
-        }
-      }
-      } catch (err) {
-        console.warn(`[vendReceipt] Strategy 1b: Failed to parse txnNumber=${txnNumber}: ${err.message}`);
-      }
-    }
-  }
+ if (txnNumber) {
+  const cleanedNum = String(txnNumber).replace(/\D/g, '');
 
-  // ── Strategy 2: bank account ID fallback (seeded historical data) ─────────
-  // Each store has a unique Oracle bank account ID stored in VendhqRegister.
-  // Historical (seeded) FusionStandardReceipt rows carry the same bank account
-  // ID in remittanceBankAccId, so we can retrieve the party ID per store
-  // without needing a matching FusionInvoiceHeader entry.
-  if (bankAccountId) {
-    const receipt = await prisma.fusionStandardReceipt.findFirst({
-      where: {
-        remittanceBankAccId: String(bankAccountId),
-        customerId:          { not: null },
-        status:              'Success',
-      },
-      orderBy: { createdAt: 'desc' },
-      select: { customerId: true },
-    });
-    if (receipt?.customerId) return receipt.customerId;
-  }
-
-  // ── Strategy 3: subinventory → VendhqRegister → all account IDs ──────────
-  // When the payload's RemittanceBankAccountNumber is empty (register not found
-  // during generation) OR only one account type was tried in strategy 2, try all
-  // Oracle account IDs (bankAccountId + cashAccountId) from VendhqRegister for
-  // this store.  This covers the case where the seeded FusionStandardReceipt has
-  // records for a different account type than the current payment method.
-  let cachedReg = null; // reused by Strategy 3a below
-  if (subinventory) {
-    let reg = await prisma.vendhqRegister.findFirst({
-      where: { registerName: { equals: subinventory } },
-      select: { id: true, bankAccountId: true, cashAccountId: true, customerAccountId: true },
-    });
-    if (!reg && subinventory.length >= 4) {
-      reg = await prisma.vendhqRegister.findFirst({
-        where: { registerName: { startsWith: subinventory.slice(0, 4) } },
-        select: { id: true, bankAccountId: true, cashAccountId: true, customerAccountId: true },
-      });
-    }
-
-    if (reg) {
-      cachedReg = reg;
-
-      // ── Strategy 3a: VendhqRegister.customerAccountId (pre-configured or cached) ──
-      // Admins can manually set customerAccountId on VendhqRegister.  It is also
-      // auto-populated whenever Oracle REST successfully resolves the CUST_ACCOUNT_ID
-      // for this store (see Strategy 3b / 4 below).  This makes the system work
-      // without Oracle REST after the first successful resolution.
-      if (reg.customerAccountId) {
-        console.log(`[vendReceipt] Strategy 3a: resolved CustomerId=${reg.customerAccountId} from VendhqRegister.customerAccountId for subinventory=${subinventory}`);
-        return String(reg.customerAccountId);
-      }
-
-      // Collect all account IDs from the register, excluding the one already
-      // tried in strategy 2 to avoid a redundant database round-trip.
-      const triedId = bankAccountId ? String(bankAccountId) : null;
-      const candidates = [reg.bankAccountId, reg.cashAccountId]
-        .filter(Boolean)
-        .map(String)
-        .filter((id) => id !== triedId);
-
-      if (candidates.length > 0) {
-        const receipt = await prisma.fusionStandardReceipt.findFirst({
-          where: {
-            remittanceBankAccId: { in: candidates },
-            customerId:          { not: null },
-            status:              'Success',
-          },
-          orderBy: { createdAt: 'desc' },
-          select: { customerId: true },
-        });
-        if (receipt?.customerId) return receipt.customerId;
-      }
-    }
-  }
-
-  // Helper: persist a resolved CUST_ACCOUNT_ID to VendhqRegister so Strategy 3a
-  // can short-circuit future lookups without hitting Oracle REST again.
-  async function cacheCustomerAccountId(resolvedId) {
-    if (typeof resolvedId !== 'string' || !resolvedId || !cachedReg?.id) return;
+  if (cleanedNum) {
     try {
-      await prisma.vendhqRegister.update({
-        where: { id: cachedReg.id },
-        data:  { customerAccountId: resolvedId },
-      });
-      console.log(`[vendReceipt] Cached CustomerId=${resolvedId} to VendhqRegister id=${cachedReg.id} (subinventory=${subinventory})`);
-    } catch (cacheErr) {
-      console.warn(`[vendReceipt] Could not cache CustomerId for VendhqRegister id=${cachedReg?.id}: ${cacheErr.message}`);
-    }
-  }
+      const txnNum = BigInt(cleanedNum);
 
-  // ── Strategy 3b: subinventory → FusionSalesMetadata → Oracle REST ────────
-  // Direct fallback when no prior FusionStandardReceipt records exist for this
-  // store.  Looks up FusionSalesMetadata by normalized subinventory, then uses
-  // Oracle REST to convert billToAccount (AR account NUMBER) into the real
-  // CUST_ACCOUNT_ID required by StandardReceipt SOAP.
-  if (subinventory) {
-    const normalizedSubinventory = String(subinventory)
-      .replace(/[\u200B-\u200D\uFEFF]/g, '')
-      .trim()
-      .toUpperCase();
-    const meta = await prisma.fusionSalesMetadata.findFirst({
-      where: { subinventory: normalizedSubinventory },
-      select: { billToAccount: true },
-      orderBy: { id: 'asc' },
-    });
-    if (meta?.billToAccount) {
-      const realId = await lookupCustomerAccountIdFromOracle(meta.billToAccount);
-      if (realId) {
-        console.log(`[vendReceipt] Strategy 3b: resolved CustomerId=${realId} from Oracle REST via subinventory=${normalizedSubinventory}`);
-        await cacheCustomerAccountId(realId);
-        return realId;
-      }
-      // Oracle REST unavailable – fall through to Strategy 4
-    }
-  }
+      if (txnNum > 0) {
+        const inv = await prisma.fusionInvoiceHeader.findFirst({
+          where: { txnNumber: txnNum },
+          select: {
+            billToLocation: true,
+            billToAccNumber: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+        });
 
-  // ── Strategy 4: Oracle REST customer lookup ───────────────────────────────
-  // Used when DB strategies 1-3 all fail (e.g. first-run, no seeded data).
-  // Mirrors Java FusionCustomerProfileClient.getCustomerAccountId(accountNumber)
-  // and oracle-crm oracleClient.getCustomer(accountNumber).
-  if (customerAccNumber) {
-    const oracleCustomerId = await lookupCustomerAccountIdFromOracle(customerAccNumber);
-    if (oracleCustomerId) {
-      await cacheCustomerAccountId(oracleCustomerId);
-      return oracleCustomerId;
+        if (inv) {
+          let meta = null;
+
+          if (inv.billToLocation) {
+            meta = await prisma.fusionSalesMetadata.findFirst({
+              where: {
+                siteNumber: inv.billToLocation,
+              },
+              select: {
+                billToAccount: true,
+              },
+            });
+          }
+
+          if (!meta && inv.billToAccNumber) {
+            meta = await prisma.fusionSalesMetadata.findFirst({
+              where: {
+                billToAccount: inv.billToAccNumber,
+              },
+              select: {
+                billToAccount: true,
+              },
+            });
+          }
+
+          if (meta?.billToAccount) {
+            const realId = await lookupCustomerAccountIdFromOracle(
+              meta.billToAccount
+            );
+
+            if (realId) {
+              console.log(
+                `[vendReceipt] Strategy 1b: resolved CustomerId=${realId} from Oracle SOAP via txnNumber=${txnNum}`
+              );
+
+              return realId;
+            }
+          }
+        }
+      }   // <-- THIS BRACE WAS MISSING
+    } catch (err) {
+      console.warn(
+        `[vendReceipt] Strategy 1b: Failed to parse txnNumber=${txnNumber}: ${err.message}`
+      );
     }
   }
+}
 
   return null;
 }
