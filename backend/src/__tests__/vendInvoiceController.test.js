@@ -22,6 +22,9 @@ jest.mock('../services/prisma', () => ({
   arInvoiceUpload: {
     findMany: jest.fn(),
   },
+  fusionInvoiceLine: {
+    findMany: jest.fn(),
+  },
 }));
 
 jest.mock('../services/fusionSalesMetadataService', () => ({
@@ -35,6 +38,7 @@ describe('vendInvoiceController', () => {
 
     prisma.fusionInvoiceHeader.findFirst.mockResolvedValue({ requestId: 100 });
     prisma.arInvoiceUpload.findMany.mockResolvedValue([]);
+    prisma.fusionInvoiceLine.findMany.mockResolvedValue([]);
 
     XLSX.read.mockReturnValue({
       SheetNames: ['Sheet1'],
@@ -305,5 +309,80 @@ describe('vendInvoiceController', () => {
 
     // Line 2: Tax Excl. = 278.26, Qty = 2 → UnitSellingPrice = 139.13
     expect(lines[1]).toMatchObject({ Quantity: 2, UnitSellingPrice: 139.13 });
+  });
+
+  test('VEND_INVOICE_SKIP_EXISTING_LINES skips sales lines already invoiced in Fusion', async () => {
+    process.env.VEND_INVOICE_SKIP_EXISTING_LINES = 'true';
+
+    XLSX.utils.sheet_to_json
+      .mockImplementationOnce(() => ([
+        { 'Order Ref': 'YASMEEN/90001', Branch: 'YASMEEN', 'Payments/Payment Method': 'Cash' },
+      ]))
+      .mockImplementationOnce(() => ([
+        { 'Order Lines/Order Ref': 'YASMEEN/90001', 'Order Lines/Order Ref/Date': '2026-05-18', 'Order Lines/Product Barcode': '111', 'Order Lines/Product': 'Product 1', 'Order Lines/Base Quantity': 1, 'Order Lines/Tax Incl': 100 },
+        { 'Order Lines/Order Ref': 'YASMEEN/90001', 'Order Lines/Order Ref/Date': '2026-05-18', 'Order Lines/Product Barcode': '222', 'Order Lines/Product': 'Product 2', 'Order Lines/Base Quantity': 1, 'Order Lines/Tax Incl': 200 },
+        { 'Order Lines/Order Ref': 'YASMEEN/90001', 'Order Lines/Order Ref/Date': '2026-05-18', 'Order Lines/Product Barcode': '333', 'Order Lines/Product': 'Product 3', 'Order Lines/Base Quantity': 1, 'Order Lines/Tax Incl': 300 },
+      ]));
+
+    // Barcode 222 was already invoiced in a prior run → must be skipped.
+    prisma.fusionInvoiceLine.findMany.mockResolvedValue([
+      { salesOrder: 'YASMEEN/90001', itemNumber: '222', description: 'Product 2' },
+    ]);
+
+    fusionMetadataService.findByCustomerType.mockResolvedValue({ billToName: 'Cash Customer', billToAccount: 14, siteNumber: '14' });
+    fusionMetadataService.mapToArInvoiceHeader.mockReturnValue({ BillToCustomerName: 'Cash Customer', BillToCustomerNumber: '14', BillToSite: '14' });
+
+    const req = {
+      files: {
+        paymentLines: { name: 'payment.xlsx', data: Buffer.from('payment') },
+        salesLines: { name: 'sales.xlsx', data: Buffer.from('sales') },
+      },
+    };
+    const res = { json: jest.fn(), status: jest.fn().mockReturnThis() };
+    const next = jest.fn();
+
+    try {
+      await uploadVendInvoice(req, res, next);
+    } finally {
+      delete process.env.VEND_INVOICE_SKIP_EXISTING_LINES;
+    }
+
+    expect(next).not.toHaveBeenCalled();
+    const response = res.json.mock.calls[0][0];
+
+    // Only barcodes 111 and 333 survive; 222 is skipped.
+    const allPayloads = [...(response.positivePayloads || []), ...(response.negativePayloads || [])];
+    expect(allPayloads).toHaveLength(1);
+    const items = allPayloads[0].receivablesInvoiceLines.map((l) => l.ItemNumber).sort();
+    expect(items).toEqual(['111', '333']);
+    expect(response.stats.skippedExistingLines).toBe(1);
+
+    // The dedup lookup queried by the distinct sales order ref.
+    expect(prisma.fusionInvoiceLine.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ salesOrder: { in: ['YASMEEN/90001'] } }),
+      })
+    );
+  });
+
+  test('does not query FusionInvoiceLine when dedup is disabled (default)', async () => {
+    XLSX.utils.sheet_to_json
+      .mockImplementationOnce(() => ([
+        { 'Order Ref': 'YASMEEN/90001', Branch: 'YASMEEN', 'Payments/Payment Method': 'Cash' },
+      ]))
+      .mockImplementationOnce(() => ([
+        { 'Order Lines/Order Ref': 'YASMEEN/90001', 'Order Lines/Order Ref/Date': '2026-05-18', 'Order Lines/Product Barcode': '111', 'Order Lines/Product': 'Product 1', 'Order Lines/Base Quantity': 1, 'Order Lines/Tax Incl': 100 },
+      ]));
+
+    fusionMetadataService.findByCustomerType.mockResolvedValue({ billToName: 'Cash Customer', billToAccount: 14, siteNumber: '14' });
+    fusionMetadataService.mapToArInvoiceHeader.mockReturnValue({ BillToCustomerName: 'Cash Customer', BillToCustomerNumber: '14', BillToSite: '14' });
+
+    const req = { files: { paymentLines: { name: 'p.xlsx', data: Buffer.from('p') }, salesLines: { name: 's.xlsx', data: Buffer.from('s') } } };
+    const res = { json: jest.fn(), status: jest.fn().mockReturnThis() };
+    await uploadVendInvoice(req, res, jest.fn());
+
+    expect(prisma.fusionInvoiceLine.findMany).not.toHaveBeenCalled();
+    const response = res.json.mock.calls[0][0];
+    expect(response.stats.skippedExistingLines).toBe(0);
   });
 });

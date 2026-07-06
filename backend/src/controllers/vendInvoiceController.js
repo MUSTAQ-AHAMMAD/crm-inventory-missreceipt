@@ -267,6 +267,50 @@ async function uploadVendInvoice(req, res, next) {
     console.log(`[Vend Invoice] Built payment method map with ${Object.keys(storePaymentMap).length} stores`);
     console.log(`[Vend Invoice] Store codes in payment map:`, Object.keys(storePaymentMap).join(', '));
 
+    // ── Optional dedup: skip sales lines already invoiced in Fusion ──────────
+    // Mirrors the Java client's dedup-and-skip-existing-lines: a sales line that
+    // already has a SUCCESS FusionInvoiceLine (from a prior run) is not re-added
+    // to the payload. This prevents duplicate lines and shrinks the payload on
+    // re-runs. Opt-in via VEND_INVOICE_SKIP_EXISTING_LINES so default behaviour
+    // is unchanged.
+    const skipExisting = process.env.VEND_INVOICE_SKIP_EXISTING_LINES === 'true';
+    let skippedExistingCount = 0;
+    const existingLineKeys = new Set();
+    // Stable per-line identity: sales order ref + item barcode (or, for memo/
+    // discount lines with no item, + description). FusionInvoiceLine.salesOrder
+    // is indexed, so the lookup is cheap even for large uploads.
+    const lineDedupKey = (salesOrder, itemNumber, description) => {
+      const so = String(salesOrder ?? '').trim().toUpperCase();
+      const item = String(itemNumber ?? '').trim().toUpperCase();
+      return item
+        ? `${so}||I||${item}`
+        : `${so}||M||${String(description ?? '').trim().toUpperCase()}`;
+    };
+
+    if (skipExisting) {
+      const distinctSalesOrders = [...new Set(
+        salesLines
+          .map((r) => getFirstNonEmpty(r, ['Order Lines/Order Ref', 'Order Ref', 'Order Reference']))
+          .filter(Boolean)
+      )];
+      if (distinctSalesOrders.length > 0) {
+        const existing = await prisma.fusionInvoiceLine.findMany({
+          where: {
+            salesOrder: { in: distinctSalesOrders },
+            status:     { in: ['SUCCESS', 'Success'] },
+          },
+          select: { salesOrder: true, itemNumber: true, description: true },
+        });
+        for (const l of existing) {
+          existingLineKeys.add(lineDedupKey(l.salesOrder, l.itemNumber, l.description));
+        }
+        console.log(
+          `[Vend Invoice] Dedup enabled: ${existingLineKeys.size} sales line(s) already in Fusion ` +
+          `across ${distinctSalesOrders.length} order(s) — these will be skipped.`
+        );
+      }
+    }
+
     // Process sales lines and group by store + date + payment type
     const invoiceGroups = {}; // Key: `${subinventory}_${date}_${paymentType}`
     const errors = [];
@@ -376,6 +420,13 @@ async function uploadVendInvoice(req, res, next) {
 
         if (linePaymentMethod) {
           linePaymentType = getPaymentType(linePaymentMethod);
+        }
+
+        // Skip this sales line entirely if it was already invoiced in Fusion
+        // (opt-in dedup). Keeps re-run payloads small and avoids duplicate lines.
+        if (skipExisting && existingLineKeys.has(lineDedupKey(salesOrderRef, itemNumber, description))) {
+          skippedExistingCount++;
+          continue;
         }
 
         // If line has a specific payment method, only add it to that invoice
@@ -564,13 +615,18 @@ async function uploadVendInvoice(req, res, next) {
       totalPayloads: payloads.length,
       positivePayloadsCount: positivePayloads.length,
       negativePayloadsCount: negativePayloads.length,
+      skippedExistingLines: skippedExistingCount,
       payloadStats,
       overallTotalAmount: Math.round((positiveTotalAmount + negativeTotalAmount) * 100) / 100,
       positiveTotalAmount,
       negativeTotalAmount,
     };
 
-    console.log(`✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines (${positivePayloads.length} positive, ${negativePayloads.length} negative)`);
+    console.log(
+      `✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines ` +
+      `(${positivePayloads.length} positive, ${negativePayloads.length} negative` +
+      (skipExisting ? `, ${skippedExistingCount} line(s) skipped as already in Fusion` : '') + `)`
+    );
 
     return res.json({
       success: true,
