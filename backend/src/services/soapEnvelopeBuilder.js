@@ -56,6 +56,20 @@ function roundAmount(value) {
   return (Math.round(num * 100) / 100).toFixed(2);
 }
 
+/**
+ * Coerce a customer/account number to a clean digit-only string.
+ *
+ * Oracle account numbers are pure integers.  This strips any non-digit noise —
+ * most importantly a trailing "n" BigInt-literal artifact (e.g. "300000158776674n"
+ * from a BigInt that was stringified via console/inspect tooling) — that would
+ * otherwise be sent verbatim to Oracle and rejected, or crash a later BigInt()
+ * conversion.  Returns '' when there are no digits.
+ */
+function sanitizeAccountNumber(value) {
+  if (value == null) return '';
+  return String(value).replace(/\D/g, '');
+}
+
 // ── Standard Receipt ───────────────────────────────────────────────────────────
 
 function buildStandardReceiptEnvelope(row) {
@@ -230,7 +244,7 @@ function buildArInvoiceSoapEnvelope(payload) {
     <typ:createSimpleInvoice>
       <typ:invoiceHeaderInformation>
         <inv:BillToCustomerName>${escapeXml(payload.BillToCustomerName || '')}</inv:BillToCustomerName>
-        <inv:BillToAccountNumber>${payload.BillToCustomerNumber || ''}</inv:BillToAccountNumber>
+        <inv:BillToAccountNumber>${sanitizeAccountNumber(payload.BillToCustomerNumber)}</inv:BillToAccountNumber>
         <inv:BillToLocation>${payload.BillToSite || ''}</inv:BillToLocation>
         <inv:BusinessUnit>${payload.BusinessUnit || 'AlQurashi-KSA'}</inv:BusinessUnit>
         <inv:TransactionSource>${payload.TransactionSource || 'Vend'}</inv:TransactionSource>
@@ -252,6 +266,7 @@ module.exports = {
   buildMiscReceiptEnvelope,
   buildCustomerProfileEnvelope,
   buildArInvoiceSoapEnvelope,
+  sanitizeAccountNumber,
   CUST_PROFILE_SOAP_ACTION,
   AR_INVOICE_SOAP_ACTION,
 };

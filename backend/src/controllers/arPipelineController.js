@@ -21,7 +21,7 @@ const prisma = require('../services/prisma');
 const pLimit = require('p-limit');
 const pRetry = require('p-retry');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
-const { buildArInvoiceSoapEnvelope, AR_INVOICE_SOAP_ACTION } = require('../services/soapEnvelopeBuilder');
+const { buildArInvoiceSoapEnvelope, AR_INVOICE_SOAP_ACTION, sanitizeAccountNumber } = require('../services/soapEnvelopeBuilder');
 const { sendRawSoapRequest } = require('../services/rawSoapSender');
 const {
   getBatchConfig,
@@ -1191,7 +1191,8 @@ async function createInvoiceBatch(req, res, next) {
         try {
           const txnNumberRaw = oracleData?.TransactionNumber ?? null;
           const custTxnIdRaw = oracleData?.CustomerTrxId ?? oracleData?.CustomerTxnId ?? null;
-          const billToAccRaw = payload.BillToCustomerNumber;
+          // Digits-only so a stray BigInt-literal "n" (e.g. "300000158776674n") can't crash BigInt().
+          const billToAccRaw = sanitizeAccountNumber(payload.BillToCustomerNumber);
 
           const fusionHeader = await prisma.fusionInvoiceHeader.create({
             data: {
