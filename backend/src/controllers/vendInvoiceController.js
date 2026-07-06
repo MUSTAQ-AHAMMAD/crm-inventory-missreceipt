@@ -311,6 +311,12 @@ async function uploadVendInvoice(req, res, next) {
       }
     }
 
+    // Refund/return lines (item lines with a negative price) are pulled OUT of the
+    // invoice — Oracle's createSimpleInvoice rejects a negative-price standard item
+    // line (oracle.jbo.JboException). We collect them here with full detail so they
+    // can be reviewed/downloaded and handled separately (credit memo / refund flow).
+    const refunds = [];
+
     // Process sales lines and group by store + date + payment type
     const invoiceGroups = {}; // Key: `${subinventory}_${date}_${paymentType}`
     const errors = [];
@@ -420,6 +426,27 @@ async function uploadVendInvoice(req, res, next) {
 
         if (linePaymentMethod) {
           linePaymentType = getPaymentType(linePaymentMethod);
+        }
+
+        // Separate refund/return lines: a real product line (has an item barcode)
+        // priced negative is a return. Divert it to the refunds file instead of the
+        // invoice so the remaining (positive) data still produces a valid invoice.
+        if (itemNumber && Number(unitSellingPrice) < 0) {
+          const qtyAbs = Math.abs(Number(quantity) || 0);
+          const lineTotal = Math.round(qtyAbs * Number(unitSellingPrice) * 100) / 100;
+          refunds.push({
+            store: subinventoryCode,
+            branch: branch || '',
+            date: saleDate,
+            orderRef: salesOrderRef,
+            paymentMethod: linePaymentMethod || '',
+            itemNumber,
+            description,
+            quantity: qtyAbs,
+            unitSellingPrice: Number(unitSellingPrice),
+            lineTotal,
+          });
+          continue;
         }
 
         // Skip this sales line entirely if it was already invoiced in Fusion
@@ -610,12 +637,16 @@ async function uploadVendInvoice(req, res, next) {
     positiveTotalAmount = Math.round(positiveTotalAmount * 100) / 100;
     negativeTotalAmount = Math.round(negativeTotalAmount * 100) / 100;
 
+    const refundTotal = Math.round(refunds.reduce((sum, r) => sum + (r.lineTotal || 0), 0) * 100) / 100;
+
     const stats = {
       totalSalesLines: salesLines.length,
       totalPayloads: payloads.length,
       positivePayloadsCount: positivePayloads.length,
       negativePayloadsCount: negativePayloads.length,
       skippedExistingLines: skippedExistingCount,
+      refundLinesCount: refunds.length,
+      refundTotalAmount: refundTotal,
       payloadStats,
       overallTotalAmount: Math.round((positiveTotalAmount + negativeTotalAmount) * 100) / 100,
       positiveTotalAmount,
@@ -625,14 +656,18 @@ async function uploadVendInvoice(req, res, next) {
     console.log(
       `✅ [Vend Invoice] Generated ${payloads.length} invoice payloads from ${salesLines.length} sales lines ` +
       `(${positivePayloads.length} positive, ${negativePayloads.length} negative` +
+      (refunds.length ? `, ${refunds.length} refund line(s) separated (SAR ${refundTotal})` : '') +
       (skipExisting ? `, ${skippedExistingCount} line(s) skipped as already in Fusion` : '') + `)`
     );
 
     return res.json({
       success: true,
-      message: `Generated ${payloads.length} invoice(s) from ${salesLines.length} sales line(s) — ${positivePayloads.length} positive, ${negativePayloads.length} negative`,
+      message: `Generated ${payloads.length} invoice(s) from ${salesLines.length} sales line(s) — ` +
+        `${positivePayloads.length} positive, ${negativePayloads.length} negative` +
+        (refunds.length ? `, ${refunds.length} refund line(s) separated` : ''),
       positivePayloads,
       negativePayloads,
+      refunds,
       stats,
     });
 
@@ -752,9 +787,47 @@ async function downloadPayloadsAsCsv(req, res, next) {
   }
 }
 
+/**
+ * POST /api/vend-invoice/download-refunds-csv
+ * Download the separated refund/return lines as a CSV file with full details.
+ */
+async function downloadRefundsAsCsv(req, res, next) {
+  try {
+    const { refunds } = req.body;
+
+    if (!refunds || !Array.isArray(refunds)) {
+      return res.status(400).json({ error: 'refunds array is required' });
+    }
+
+    const csv = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const headers = [
+      'Store', 'Branch', 'Date', 'OrderRef', 'PaymentMethod',
+      'ItemNumber', 'Description', 'Quantity', 'UnitSellingPrice', 'LineTotal',
+    ];
+    const rows = [headers.join(',')];
+
+    for (const r of refunds) {
+      rows.push([
+        csv(r.store), csv(r.branch), csv(r.date), csv(r.orderRef), csv(r.paymentMethod),
+        csv(r.itemNumber), csv(r.description), r.quantity ?? '', r.unitSellingPrice ?? '', r.lineTotal ?? '',
+      ].join(','));
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+    const filename = `vend-refunds-${timestamp}.csv`;
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(rows.join('\n'));
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   uploadVendInvoice,
   previewVendInvoice,
   downloadPayloadsAsJson,
   downloadPayloadsAsCsv,
+  downloadRefundsAsCsv,
 };

@@ -823,6 +823,26 @@ export default function ArPipelinePage() {
     }
   }
 
+  // Download the separated refund/return lines as a CSV.
+  const handleDownloadRefunds = async () => {
+    const refunds = s1.payloads?.refunds || []
+    if (!refunds.length) return
+    try {
+      const res = await api.post('/vend-invoice/download-refunds-csv', { refunds }, { responseType: 'blob' })
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
+      const link = document.createElement('a')
+      link.href = url
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)
+      link.download = `vend-refunds-${timestamp}.csv`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+    } catch {
+      setS1(prev => ({ ...prev, error: 'Failed to download refunds CSV.' }))
+    }
+  }
+
   const handleCreateInvoices = async () => {
     if (!allInvoicePayloads.length) return
 
@@ -1126,6 +1146,7 @@ export default function ArPipelinePage() {
                 { label: 'Total Payloads',     value: allInvoicePayloads.length,                       color: 'blue'  },
                 { label: 'Positive',           value: s1.payloads.positivePayloads?.length ?? 0,       color: 'green' },
                 { label: 'Negative (Returns)', value: s1.payloads.negativePayloads?.length ?? 0,       color: 'red'   },
+                { label: 'Refund Lines',       value: s1.payloads.stats?.refundLinesCount ?? 0,        color: 'purple' },
                 { label: 'Sales Lines',        value: s1.payloads.stats?.totalSalesLines ?? 0,         color: 'gray'  },
               ]} />
 
@@ -1133,6 +1154,21 @@ export default function ArPipelinePage() {
               {s1.payloads.stats?.payloadStats?.some(p => !p.billToCustomerName) && (
                 <div className="text-xs bg-yellow-50 border border-yellow-100 rounded-lg p-3 text-yellow-700">
                   ⚠️ Some payloads have missing customer names. Check the Sales Metadata mappings.
+                </div>
+              )}
+
+              {/* Refunds separated out of the invoice */}
+              {s1.payloads.refunds?.length > 0 && (
+                <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800 flex flex-wrap items-center justify-between gap-3">
+                  <span>
+                    ↩️ <strong>{s1.payloads.refunds.length}</strong> refund/return line(s) were separated from the invoices
+                    {s1.payloads.stats?.refundTotalAmount != null && (
+                      <> (total <strong>SAR {s1.payloads.stats.refundTotalAmount}</strong>)</>
+                    )}. These are excluded from the AR invoices and need separate handling.
+                  </span>
+                  <ActionBtn onClick={handleDownloadRefunds} color="orange" size="sm">
+                    ⬇️ Download Refunds (CSV)
+                  </ActionBtn>
                 </div>
               )}
 

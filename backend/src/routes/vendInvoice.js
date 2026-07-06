@@ -13,6 +13,7 @@ const {
   previewVendInvoice,
   downloadPayloadsAsJson,
   downloadPayloadsAsCsv,
+  downloadRefundsAsCsv,
 } = require('../controllers/vendInvoiceController');
 
 const router = express.Router();
@@ -114,5 +115,20 @@ router.post('/download-json', downloadPayloadsAsJson);
  *         description: Invalid request
  */
 router.post('/download-csv', downloadPayloadsAsCsv);
+
+/**
+ * @swagger
+ * /vend-invoice/download-refunds-csv:
+ *   post:
+ *     tags: [VendInvoice]
+ *     summary: Download separated refund/return lines as CSV
+ *     description: Takes the refunds array from an upload response and returns a CSV of the refund lines with full detail
+ *     responses:
+ *       200:
+ *         description: CSV file with refund lines
+ *       400:
+ *         description: Invalid request
+ */
+router.post('/download-refunds-csv', downloadRefundsAsCsv);
 
 module.exports = router;
