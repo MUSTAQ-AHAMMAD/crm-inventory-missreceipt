@@ -54,6 +54,13 @@ jest.mock('../services/OracleSoapClient', () => ({
   createOracleSoapClient: jest.fn(),
 }));
 
+// createInvoiceBatch submits AR invoices through the raw SOAP sender
+// (createSimpleInvoice), not a REST/axios path. Mock it directly so tests
+// control the Oracle response without real HTTP.
+jest.mock('../services/rawSoapSender', () => ({
+  sendRawSoapRequest: jest.fn(),
+}));
+
 jest.mock('axios');
 
 const request = require('supertest');
@@ -61,6 +68,12 @@ const express = require('express');
 const axios = require('axios');
 const prisma = require('../services/prisma');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
+const { sendRawSoapRequest } = require('../services/rawSoapSender');
+
+// A minimal Oracle createSimpleInvoice SOAP response body. parseSoapResponse in
+// the controller extracts TransactionNumber / CustomerTrxId from this XML string.
+const soapOk = (txnNumber = '100001', customerTrxId = '9999') =>
+  `<TransactionNumber>${txnNumber}</TransactionNumber><CustomerTrxId>${customerTrxId}</CustomerTrxId>`;
 
 const {
   createInvoiceBatch,
@@ -114,9 +127,10 @@ describe('AR Pipeline Controller', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    process.env.ORACLE_AR_INVOICE_URL = 'http://oracle.example.com/ar-invoice-rest';
-    process.env.ORACLE_USERNAME       = 'testuser';
-    process.env.ORACLE_PASSWORD       = 'testpass';
+    process.env.ORACLE_AR_INVOICE_SOAP_URL = 'http://oracle.example.com/ar-invoice-soap';
+    process.env.ORACLE_USERNAME            = 'testuser';
+    process.env.ORACLE_PASSWORD            = 'testpass';
+    delete process.env.ORACLE_BULK_INVOICE_ENABLED; // ensure the SOAP path (not the opt-in bulk path) runs
 
     // Default empty responses for summary/pending endpoints
     prisma.fusionInvoiceHeader.findMany.mockResolvedValue([]);
@@ -131,11 +145,9 @@ describe('AR Pipeline Controller', () => {
     prisma.fusionInvoiceHeader.create.mockResolvedValue({ id: 1 });
     prisma.fusionInvoiceLine.createMany.mockResolvedValue({ count: 1 });
 
-    // Default REST (axios) mock for AR Invoice batch creation — tests can override per-call behaviour
-    axios.post.mockResolvedValue({
-      status: 200,
-      data: { TransactionNumber: '100001', CustomerTrxId: '9999' },
-    });
+    // Default SOAP sender mock for AR Invoice batch creation — tests can override per-call behaviour.
+    // Returns an XML string (as the real raw SOAP sender does) that parseSoapResponse can read.
+    sendRawSoapRequest.mockResolvedValue({ status: 200, data: soapOk() });
 
     // Default SOAP client mock — used by submitApply; tests can override per-call behaviour
     createOracleSoapClient.mockReturnValue({
@@ -170,11 +182,11 @@ describe('AR Pipeline Controller', () => {
       expect(res.status).toBe(400);
     });
 
-    test('returns 500 when ORACLE_AR_INVOICE_URL is not configured', async () => {
-      delete process.env.ORACLE_AR_INVOICE_URL;
+    test('returns 500 when ORACLE_AR_INVOICE_SOAP_URL is not configured', async () => {
+      delete process.env.ORACLE_AR_INVOICE_SOAP_URL;
       const res = await request(app).post('/').send({ payloads: [samplePayload] });
       expect(res.status).toBe(500);
-      expect(res.body.error).toMatch(/ORACLE_AR_INVOICE_URL/);
+      expect(res.body.error).toMatch(/ORACLE_AR_INVOICE_SOAP_URL/);
     });
 
     test('returns 500 when Oracle credentials are missing', async () => {
@@ -187,7 +199,7 @@ describe('AR Pipeline Controller', () => {
     test('responds immediately with batchId without blocking on Oracle calls', async () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42, totalRecords: 1 });
       // Oracle never resolves → confirms we don't wait for it
-      axios.post.mockImplementation(() => new Promise(() => {}));
+      sendRawSoapRequest.mockImplementation(() => new Promise(() => {}));
 
       const start = Date.now();
       const res = await request(app).post('/').send({ payloads: [samplePayload] });
@@ -203,7 +215,7 @@ describe('AR Pipeline Controller', () => {
 
     test('creates ArInvoiceBatch record with correct totalRecords', async () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42, totalRecords: 2 });
-      axios.post.mockImplementation(() => new Promise(() => {}));
+      sendRawSoapRequest.mockImplementation(() => new Promise(() => {}));
 
       const payloads = [samplePayload, { ...samplePayload, BillToCustomerName: 'JEDDAH STORE' }];
       await request(app).post('/').send({ payloads });
@@ -271,11 +283,11 @@ describe('AR Pipeline Controller', () => {
       );
     });
 
-    test('background: marks batch FAILED when Oracle REST throws', async () => {
+    test('background: marks batch FAILED when Oracle SOAP throws', async () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42 });
       prisma.arInvoiceBatch.update.mockResolvedValue({});
 
-      axios.post.mockRejectedValue(new Error('Connection refused'));
+      sendRawSoapRequest.mockRejectedValue(new Error('Connection refused'));
 
       await request(app).post('/').send({ payloads: [samplePayload] });
       await new Promise((r) => setImmediate(r));
@@ -292,8 +304,8 @@ describe('AR Pipeline Controller', () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42, totalRecords: 2 });
       prisma.arInvoiceBatch.update.mockResolvedValue({});
 
-      axios.post
-        .mockResolvedValueOnce({ status: 200, data: { TransactionNumber: '100001', CustomerTrxId: '9999' } })
+      sendRawSoapRequest
+        .mockResolvedValueOnce({ status: 200, data: soapOk() })
         .mockRejectedValueOnce(new Error('bad invoice'));
 
       const payloads = [samplePayload, { ...samplePayload, BillToCustomerName: 'OTHER' }];
@@ -312,18 +324,18 @@ describe('AR Pipeline Controller', () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42 });
       prisma.arInvoiceBatch.update.mockResolvedValue({});
 
-      axios.post
+      sendRawSoapRequest
         // Pass 1: timeout
         .mockRejectedValueOnce(Object.assign(new Error('Request timeout after 120000ms'), { code: 'ETIMEDOUT' }))
         // Pass 2: success
-        .mockResolvedValueOnce({ status: 200, data: { TransactionNumber: '100001', CustomerTrxId: '9999' } });
+        .mockResolvedValueOnce({ status: 200, data: soapOk() });
 
       await request(app).post('/').send({ payloads: [samplePayload] });
       await new Promise((r) => setImmediate(r));
       await new Promise((r) => setTimeout(r, 300));
 
       // Should have been called twice (pass 1 + retry)
-      expect(axios.post).toHaveBeenCalledTimes(2);
+      expect(sendRawSoapRequest).toHaveBeenCalledTimes(2);
       expect(prisma.arInvoiceBatch.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ status: 'SUCCESS', successCount: 1, failureCount: 0 }),
@@ -335,14 +347,14 @@ describe('AR Pipeline Controller', () => {
       prisma.arInvoiceBatch.create.mockResolvedValue({ id: 42 });
       prisma.arInvoiceBatch.update.mockResolvedValue({});
 
-      axios.post.mockRejectedValue(new Error('ORA-00001 duplicate key'));
+      sendRawSoapRequest.mockRejectedValue(new Error('ORA-00001 duplicate key'));
 
       await request(app).post('/').send({ payloads: [samplePayload] });
       await new Promise((r) => setImmediate(r));
       await new Promise((r) => setTimeout(r, 200));
 
       // Called exactly once — no retry for business errors
-      expect(axios.post).toHaveBeenCalledTimes(1);
+      expect(sendRawSoapRequest).toHaveBeenCalledTimes(1);
       expect(prisma.arInvoiceBatch.update).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ status: 'FAILED', successCount: 0, failureCount: 1 }),

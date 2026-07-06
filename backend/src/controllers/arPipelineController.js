@@ -42,6 +42,12 @@ const RETRY_MAX_TIMEOUT = _batchCfg.retry.maxTimeout;
 // Configurable via ORACLE_INVOICE_CONCURRENCY env var (default from batchCfg).
 const INVOICE_CONCURRENCY = _batchCfg.concurrency;
 
+// Huge-invoice timeout scaling. A single createSimpleInvoice SOAP call carrying
+// thousands of lines takes Oracle far longer than the flat invoiceTimeout, so
+// the per-request timeout grows with the line count (bounded by AR_INVOICE_MAX_TIMEOUT).
+const AR_INVOICE_MS_PER_LINE = parseInt(process.env.ORACLE_AR_INVOICE_MS_PER_LINE, 10) || 100;
+const AR_INVOICE_MAX_TIMEOUT = parseInt(process.env.ORACLE_AR_INVOICE_MAX_TIMEOUT, 10) || 1800000; // 30 min hard cap
+
 /** Classify an error as transient (worth retrying).
  *  Delegates to the centralised batchOracleService.isTransientError()
  *  which mirrors the identical guard in oracle-crm/src/oracleDbClient.js. */
@@ -842,12 +848,19 @@ async function createInvoiceBatch(req, res, next) {
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // ULTRA-FAST BULK PROCESSING AUTO-DETECTION
+    // ULTRA-FAST BULK PROCESSING AUTO-DETECTION (opt-in only)
     // ══════════════════════════════════════════════════════════════════════
-    // Check if any invoice exceeds the bulk processing threshold
+    // The chunk/merge bulk path depends on a custom Oracle "/bulk/process"
+    // merge endpoint that is NOT part of standard Oracle Fusion. Until that
+    // backend actually exists, huge invoices must go through the proven SOAP
+    // `createSimpleInvoice` path (which sends header + all lines in a single
+    // envelope). The bulk detour therefore only runs when explicitly enabled.
+    const bulkEnabled   = process.env.ORACLE_BULK_INVOICE_ENABLED === 'true';
     const bulkThreshold = parseInt(process.env.ORACLE_BULK_INVOICE_THRESHOLD || '500', 10);
-    const largeInvoices = payloads.filter(p => ultraFastBulkInvoiceService.shouldUseBulkProcessing(p));
-    
+    const largeInvoices = bulkEnabled
+      ? payloads.filter((p) => ultraFastBulkInvoiceService.shouldUseBulkProcessing(p))
+      : [];
+
     if (largeInvoices.length > 0) {
       console.log(`[Pipeline] Detected ${largeInvoices.length} large invoice(s) (>${bulkThreshold} lines) - switching to Ultra-Fast Bulk processing`);
       
@@ -1059,8 +1072,15 @@ async function createInvoiceBatch(req, res, next) {
         const customer   = payload.BillToCustomerNumber ?? payload.BillToCustomerName ?? 'unknown';
         const txnDate    = payload.TransactionDate ?? 'unknown';
 
+        // Scale the request timeout with the line count so huge invoices don't
+        // abort mid-flight while Oracle is still processing them.
+        const perInvoiceTimeout = Math.min(
+          AR_INVOICE_MAX_TIMEOUT,
+          Math.max(invoiceTimeout, lineCount * AR_INVOICE_MS_PER_LINE)
+        );
+
         console.log(
-          `${invoiceTag} ► SUBMITTING | customer=${customer} | date=${txnDate} | lines=${lineCount}` +
+          `${invoiceTag} ► SUBMITTING | customer=${customer} | date=${txnDate} | lines=${lineCount} | timeout=${perInvoiceTimeout}ms` +
           (isRetry ? ' | [RETRY]' : '')
         );
 
@@ -1088,7 +1108,7 @@ async function createInvoiceBatch(req, res, next) {
             'createSimpleInvoice',
             oracleAuth,
             {
-              timeout: invoiceTimeout,
+              timeout: perInvoiceTimeout,
               connectTimeout: 30000,
             }
           );

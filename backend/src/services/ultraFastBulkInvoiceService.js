@@ -16,7 +16,6 @@
 const pLimit = require('p-limit');
 const zlib = require('zlib');
 const { promisify } = require('util');
-const { v4: uuidv4 } = require('uuid');
 const oracleBulkApiClient = require('./oracleBulkApiClient');
 
 const gzipAsync = promisify(zlib.gzip);
@@ -355,6 +354,10 @@ function calculateOptimalChunkSize(totalLines, baseSize) {
  * @returns {string} Unique group ID
  */
 function generateGroupId(payload) {
+  // Lazy-require: uuid@14 is ESM-only, so importing it at module load breaks
+  // CommonJS consumers (e.g. Jest without a Babel ESM transform). Only the bulk
+  // path needs it, and that path is opt-in via ORACLE_BULK_INVOICE_ENABLED.
+  const { v4: uuidv4 } = require('uuid');
   const date = payload.TransactionDate || new Date().toISOString().slice(0, 10);
   const customer = payload.BillToCustomerNumber || 'UNKNOWN';
   const uuid = uuidv4().split('-')[0];
