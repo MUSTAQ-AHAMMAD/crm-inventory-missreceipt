@@ -70,6 +70,19 @@ function sanitizeAccountNumber(value) {
   return String(value).replace(/\D/g, '');
 }
 
+/**
+ * Coerce a sales-order reference to a clean ASCII token (e.g. "REDSEA/60713").
+ *
+ * Refund/return rows sometimes arrive with non-ASCII noise merged into the
+ * order ref (observed: "REDSEA/60713استرداد الأموال" — the Arabic word for
+ * "refund" appended). Oracle rejects the malformed reference, so strip any
+ * non-printable-ASCII characters and trim.
+ */
+function sanitizeSalesOrder(value) {
+  if (value == null) return '';
+  return String(value).replace(/[^\x20-\x7E]/g, '').trim();
+}
+
 // ── Standard Receipt ───────────────────────────────────────────────────────────
 
 function buildStandardReceiptEnvelope(row) {
@@ -189,7 +202,7 @@ function buildArInvoiceSoapEnvelope(payload) {
     
     // Determine if this is a discount/memo line
     const isDiscount = !line.ItemNumber || String(line.ItemNumber).trim() === '';
-    
+
     let lineXml = `
         <inv:InvoiceLine>
           <inv:LineNumber>${lineNum}</inv:LineNumber>`;
@@ -210,10 +223,12 @@ function buildArInvoiceSoapEnvelope(payload) {
           <inv:Quantity unitCode="${escapeXml(uomCode)}">${Math.abs(line.Quantity || 0)}</inv:Quantity>
           <inv:UnitSellingPrice currencyCode="${escapeXml(lineCurrency)}">${roundAmount(line.UnitSellingPrice)}</inv:UnitSellingPrice>`;
 
-    // SalesOrder (optional but recommended)
-    if (line.SalesOrder) {
+    // SalesOrder (optional but recommended) — sanitised to strip non-ASCII noise
+    // (e.g. Arabic "refund" text merged into a return line's order ref).
+    const salesOrder = sanitizeSalesOrder(line.SalesOrder);
+    if (salesOrder) {
       lineXml += `
-          <inv:SalesOrder>${escapeXml(line.SalesOrder)}</inv:SalesOrder>`;
+          <inv:SalesOrder>${escapeXml(salesOrder)}</inv:SalesOrder>`;
     }
     
     // SalesOrderLine (optional but recommended)
@@ -267,6 +282,7 @@ module.exports = {
   buildCustomerProfileEnvelope,
   buildArInvoiceSoapEnvelope,
   sanitizeAccountNumber,
+  sanitizeSalesOrder,
   CUST_PROFILE_SOAP_ACTION,
   AR_INVOICE_SOAP_ACTION,
 };

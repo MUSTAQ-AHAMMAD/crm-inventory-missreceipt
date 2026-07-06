@@ -365,6 +365,43 @@ describe('vendInvoiceController', () => {
     );
   });
 
+  test('separates refund lines (negative-price items) out of the invoice into refunds', async () => {
+    XLSX.utils.sheet_to_json
+      .mockImplementationOnce(() => ([
+        { 'Order Ref': 'REDSEA/60775', Branch: 'REDSEA', 'Payments/Payment Method': 'Cash' },
+      ]))
+      .mockImplementationOnce(() => ([
+        // Normal positive sale
+        { 'Order Lines/Order Ref': 'REDSEA/60775', 'Order Lines/Order Ref/Date': '2026-05-18', 'Order Lines/Product Barcode': '111', 'Order Lines/Product': 'Product 1', 'Order Lines/Base Quantity': 1, 'Order Lines/Tax Incl': 100 },
+        // Refund: real item, negative price, order ref polluted with Arabic "refund"
+        { 'Order Lines/Order Ref': 'REDSEA/60713استرداد الأموال', 'Order Lines/Order Ref/Date': '2026-05-18', 'Order Lines/Product Barcode': '6281074733764', 'Order Lines/Product': 'MUSK SPECIAL', 'Order Lines/Base Quantity': 1, 'Order Lines/Tax Incl': -100 },
+      ]));
+
+    fusionMetadataService.findByCustomerType.mockResolvedValue({ billToName: 'Cash Customer', billToAccount: 87036, siteNumber: '14' });
+    fusionMetadataService.mapToArInvoiceHeader.mockReturnValue({ BillToCustomerName: 'Cash Customer', BillToCustomerNumber: '87036', BillToSite: '14' });
+
+    const req = { files: { paymentLines: { name: 'p.xlsx', data: Buffer.from('p') }, salesLines: { name: 's.xlsx', data: Buffer.from('s') } } };
+    const res = { json: jest.fn(), status: jest.fn().mockReturnThis() };
+    await uploadVendInvoice(req, res, jest.fn());
+
+    const response = res.json.mock.calls[0][0];
+
+    // The refund is NOT in the invoice payload — only the positive item remains.
+    const allPayloads = [...(response.positivePayloads || []), ...(response.negativePayloads || [])];
+    const allItems = allPayloads.flatMap(p => p.receivablesInvoiceLines.map(l => l.ItemNumber)).filter(Boolean);
+    expect(allItems).toEqual(['111']);
+
+    // The refund is captured with full detail.
+    expect(response.stats.refundLinesCount).toBe(1);
+    expect(response.refunds).toHaveLength(1);
+    expect(response.refunds[0]).toMatchObject({
+      itemNumber: '6281074733764',
+      description: 'MUSK SPECIAL',
+      unitSellingPrice: -100,
+      orderRef: 'REDSEA/60713استرداد الأموال',
+    });
+  });
+
   test('does not query FusionInvoiceLine when dedup is disabled (default)', async () => {
     XLSX.utils.sheet_to_json
       .mockImplementationOnce(() => ([
