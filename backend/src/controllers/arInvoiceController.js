@@ -7,7 +7,7 @@
 const prisma = require('../services/prisma');
 const fusionMetadataService = require('../services/fusionSalesMetadataService');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
-const { buildArInvoiceSoapEnvelope, AR_INVOICE_SOAP_ACTION } = require('../services/soapEnvelopeBuilder');
+const { buildArInvoiceSoapEnvelope, AR_INVOICE_SOAP_ACTION, sanitizeAccountNumber } = require('../services/soapEnvelopeBuilder');
 
 /**
  * POST /api/ar-invoice/preview
@@ -200,7 +200,8 @@ async function storeInvoiceResponse({ uploadId, status, message, oracleData, pay
   const src = oracleData || payload || {};
   const fallback = payload || {};
 
-  const billToAccRaw = src.BillToCustomerNumber ?? fallback.BillToCustomerNumber;
+  // Digits-only so a stray BigInt-literal "n" (e.g. "300000158776674n") can't crash BigInt().
+  const billToAccRaw = sanitizeAccountNumber(src.BillToCustomerNumber ?? fallback.BillToCustomerNumber);
   const txnNumberRaw = src.TransactionNumber ?? null;
   const customerTxnIdRaw = src.CustomerTrxId ?? src.CustomerTxnId ?? null;
 

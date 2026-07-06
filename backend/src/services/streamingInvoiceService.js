@@ -16,7 +16,6 @@
 
 const WebSocket = require('ws');
 const EventEmitter = require('events');
-const { v4: uuidv4 } = require('uuid');
 
 /**
  * Streaming Invoice Manager
@@ -68,6 +67,8 @@ class StreamingInvoiceManager extends EventEmitter {
    * @param {Object} req - HTTP request
    */
   handleConnection(ws, req) {
+    // Lazy-require: uuid@14 is ESM-only and breaks CommonJS/Jest at load time.
+    const { v4: uuidv4 } = require('uuid');
     const sessionId = uuidv4();
     const clientIp = req.socket.remoteAddress;
     

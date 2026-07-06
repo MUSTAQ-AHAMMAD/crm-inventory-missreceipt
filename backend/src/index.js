@@ -49,9 +49,12 @@ app.use(
   })
 );
 
-// Parse JSON & URL-encoded bodies (50 MB limit for large CSV uploads)
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// Parse JSON & URL-encoded bodies. Limit is configurable (MAX_REQUEST_BODY_SIZE)
+// with a generous default so huge AR-invoice payloads (thousands of lines) aren't
+// rejected with HTTP 413 before they ever reach the controller.
+const REQUEST_BODY_LIMIT = process.env.MAX_REQUEST_BODY_SIZE || '250mb';
+app.use(express.json({ limit: REQUEST_BODY_LIMIT }));
+app.use(express.urlencoded({ extended: true, limit: REQUEST_BODY_LIMIT }));
 
 // Request / response logging
 app.use(requestLogger);

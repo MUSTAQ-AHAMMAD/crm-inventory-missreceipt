@@ -309,9 +309,10 @@ describe('submitStandardReceipts – lookupCustomerPartyId', () => {
     expect(soapXml).toContain('300000158776674');
     expect(soapXml).not.toContain('>55012<');
 
-    // Strategy 1b lookup: FusionInvoiceHeader.findFirst called with the correct txnNumber
+    // Strategy 1b lookup: FusionInvoiceHeader.findFirst called with the correct txnNumber.
+    // txnNumber is a BigInt column, so the query uses a BigInt (2672577n), not a Number.
     const findFirstCalls = prisma.fusionInvoiceHeader.findFirst.mock.calls;
-    const txnLookup = findFirstCalls.find(([args]) => args?.where?.txnNumber === 2672577);
+    const txnLookup = findFirstCalls.find(([args]) => args?.where?.txnNumber === 2672577n);
     expect(txnLookup).toBeDefined();
   });
 

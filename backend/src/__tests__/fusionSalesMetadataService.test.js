@@ -55,6 +55,22 @@ describe('fusionSalesMetadataService', () => {
       BillToCustomerName: 'Yasmeen Mall',
       BillToCustomerNumber: '14',
       BillToSite: '14',
+      // Defaults to 'User' when rateIsCorporate is not '1'
+      ConversionRateType: 'User',
     });
+  });
+
+  test('mapToArInvoiceHeader sets ConversionRateType to Corporate when rateIsCorporate is "1"', () => {
+    const mapped = service.mapToArInvoiceHeader({
+      businessUnit: 'AlQurashi-KSA',
+      txnSource: 'Vend',
+      txnType: 'Vend Invoice',
+      billToName: 'Yasmeen Mall',
+      billToAccount: 14,
+      siteNumber: '14',
+      rateIsCorporate: '1',
+    });
+
+    expect(mapped.ConversionRateType).toBe('Corporate');
   });
 });

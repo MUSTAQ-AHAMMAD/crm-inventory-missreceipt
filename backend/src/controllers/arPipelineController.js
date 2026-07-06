@@ -21,7 +21,7 @@ const prisma = require('../services/prisma');
 const pLimit = require('p-limit');
 const pRetry = require('p-retry');
 const { createOracleSoapClient } = require('../services/OracleSoapClient');
-const { buildArInvoiceSoapEnvelope, AR_INVOICE_SOAP_ACTION } = require('../services/soapEnvelopeBuilder');
+const { buildArInvoiceSoapEnvelope, AR_INVOICE_SOAP_ACTION, sanitizeAccountNumber } = require('../services/soapEnvelopeBuilder');
 const { sendRawSoapRequest } = require('../services/rawSoapSender');
 const {
   getBatchConfig,
@@ -41,6 +41,12 @@ const RETRY_MAX_TIMEOUT = _batchCfg.retry.maxTimeout;
 // Concurrency for AR Invoice batch creation (Pass 1).
 // Configurable via ORACLE_INVOICE_CONCURRENCY env var (default from batchCfg).
 const INVOICE_CONCURRENCY = _batchCfg.concurrency;
+
+// Huge-invoice timeout scaling. A single createSimpleInvoice SOAP call carrying
+// thousands of lines takes Oracle far longer than the flat invoiceTimeout, so
+// the per-request timeout grows with the line count (bounded by AR_INVOICE_MAX_TIMEOUT).
+const AR_INVOICE_MS_PER_LINE = parseInt(process.env.ORACLE_AR_INVOICE_MS_PER_LINE, 10) || 100;
+const AR_INVOICE_MAX_TIMEOUT = parseInt(process.env.ORACLE_AR_INVOICE_MAX_TIMEOUT, 10) || 1800000; // 30 min hard cap
 
 /** Classify an error as transient (worth retrying).
  *  Delegates to the centralised batchOracleService.isTransientError()
@@ -842,12 +848,19 @@ async function createInvoiceBatch(req, res, next) {
     }
 
     // ══════════════════════════════════════════════════════════════════════
-    // ULTRA-FAST BULK PROCESSING AUTO-DETECTION
+    // ULTRA-FAST BULK PROCESSING AUTO-DETECTION (opt-in only)
     // ══════════════════════════════════════════════════════════════════════
-    // Check if any invoice exceeds the bulk processing threshold
+    // The chunk/merge bulk path depends on a custom Oracle "/bulk/process"
+    // merge endpoint that is NOT part of standard Oracle Fusion. Until that
+    // backend actually exists, huge invoices must go through the proven SOAP
+    // `createSimpleInvoice` path (which sends header + all lines in a single
+    // envelope). The bulk detour therefore only runs when explicitly enabled.
+    const bulkEnabled   = process.env.ORACLE_BULK_INVOICE_ENABLED === 'true';
     const bulkThreshold = parseInt(process.env.ORACLE_BULK_INVOICE_THRESHOLD || '500', 10);
-    const largeInvoices = payloads.filter(p => ultraFastBulkInvoiceService.shouldUseBulkProcessing(p));
-    
+    const largeInvoices = bulkEnabled
+      ? payloads.filter((p) => ultraFastBulkInvoiceService.shouldUseBulkProcessing(p))
+      : [];
+
     if (largeInvoices.length > 0) {
       console.log(`[Pipeline] Detected ${largeInvoices.length} large invoice(s) (>${bulkThreshold} lines) - switching to Ultra-Fast Bulk processing`);
       
@@ -1059,8 +1072,15 @@ async function createInvoiceBatch(req, res, next) {
         const customer   = payload.BillToCustomerNumber ?? payload.BillToCustomerName ?? 'unknown';
         const txnDate    = payload.TransactionDate ?? 'unknown';
 
+        // Scale the request timeout with the line count so huge invoices don't
+        // abort mid-flight while Oracle is still processing them.
+        const perInvoiceTimeout = Math.min(
+          AR_INVOICE_MAX_TIMEOUT,
+          Math.max(invoiceTimeout, lineCount * AR_INVOICE_MS_PER_LINE)
+        );
+
         console.log(
-          `${invoiceTag} ► SUBMITTING | customer=${customer} | date=${txnDate} | lines=${lineCount}` +
+          `${invoiceTag} ► SUBMITTING | customer=${customer} | date=${txnDate} | lines=${lineCount} | timeout=${perInvoiceTimeout}ms` +
           (isRetry ? ' | [RETRY]' : '')
         );
 
@@ -1069,6 +1089,7 @@ async function createInvoiceBatch(req, res, next) {
         let oracleData      = null;
         let httpStatus      = null;
         let transient       = false;
+        let rawOracleResponse = null;   // raw Oracle body, kept so failures are diagnosable
         const t0            = Date.now();
 
         // Build SOAP envelope
@@ -1088,7 +1109,7 @@ async function createInvoiceBatch(req, res, next) {
             'createSimpleInvoice',
             oracleAuth,
             {
-              timeout: invoiceTimeout,
+              timeout: perInvoiceTimeout,
               connectTimeout: 30000,
             }
           );
@@ -1103,20 +1124,31 @@ async function createInvoiceBatch(req, res, next) {
             console.log(`${invoiceTag} ═══ FULL API RESPONSE END ═══`);
           }
           
+          // Keep the raw Oracle body (truncated) so a FAILED invoice is diagnosable
+          // from the DB, not only from the server console.
+          rawOracleResponse = typeof response.data === 'string'
+            ? response.data.slice(0, 4000)
+            : JSON.stringify(response.data).slice(0, 4000);
+
           // Parse SOAP response to extract invoice data
           const parsed = parseSoapResponse(response.data);
           oracleData = parsed.invoiceData || {};
 
           if (response.status >= 400) {
             responseStatus  = 'FAILED';
-            responseMessage = `Oracle returned HTTP ${httpStatus}`;
+            const oracleErr = extractOracleError(response.data);
+            responseMessage = oracleErr
+              ? `Oracle returned HTTP ${httpStatus}: ${oracleErr}`
+              : `Oracle returned HTTP ${httpStatus}`;
           }
 
           if (responseStatus === 'SUCCESS') {
             if (!oracleData?.TransactionNumber) {
               responseStatus  = 'FAILED';
-              responseMessage = 'Oracle returned HTTP 200 but no TransactionNumber — possible duplicate CrossReference or oversized payload';
               const oracleErr = extractOracleError(response.data);
+              responseMessage = oracleErr
+                ? `Oracle returned HTTP 200 but no TransactionNumber: ${oracleErr}`
+                : 'Oracle returned HTTP 200 but no TransactionNumber — possible duplicate CrossReference or oversized payload';
               console.error(`❌ ${invoiceTag} FAILED (${elapsed}ms) HTTP ${httpStatus} - ${responseMessage}`);
               if (oracleErr) console.error(`❌ ${invoiceTag} Oracle error: ${oracleErr}`);
               console.error(`❌ ${invoiceTag} ═══ FULL ORACLE RESPONSE START ═══`);
@@ -1162,7 +1194,11 @@ async function createInvoiceBatch(req, res, next) {
           data: {
             responseStatus,
             responseMessage,
-            responseBody: oracleData ? JSON.stringify(oracleData) : responseMessage,
+            // On failure keep the raw Oracle body so the fault is diagnosable from the DB;
+            // on success keep the parsed invoice data.
+            responseBody: responseStatus === 'SUCCESS'
+              ? (oracleData ? JSON.stringify(oracleData) : responseMessage)
+              : (rawOracleResponse || responseMessage),
             httpStatus,
           },
         }).catch(() => {});
@@ -1171,7 +1207,8 @@ async function createInvoiceBatch(req, res, next) {
         try {
           const txnNumberRaw = oracleData?.TransactionNumber ?? null;
           const custTxnIdRaw = oracleData?.CustomerTrxId ?? oracleData?.CustomerTxnId ?? null;
-          const billToAccRaw = payload.BillToCustomerNumber;
+          // Digits-only so a stray BigInt-literal "n" (e.g. "300000158776674n") can't crash BigInt().
+          const billToAccRaw = sanitizeAccountNumber(payload.BillToCustomerNumber);
 
           const fusionHeader = await prisma.fusionInvoiceHeader.create({
             data: {
