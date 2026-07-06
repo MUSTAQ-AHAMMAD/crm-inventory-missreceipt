@@ -12,6 +12,9 @@ backend/prisma/**/*.db
 backend/prisma/**/*.db-shm
 backend/prisma/**/*.db-wal
 backend/prisma/**/*.db-journal
+# Manual DB backups (e.g. crm.db.bak-20260707013332 created before a migration)
+backend/prisma/*.db.bak-*
+backend/prisma/**/*.db.bak-*
 
 # Build artifacts
 frontend/dist/
