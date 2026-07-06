@@ -83,6 +83,21 @@ function sanitizeSalesOrder(value) {
   return String(value).replace(/[^\x20-\x7E]/g, '').trim();
 }
 
+/**
+ * Map a source unit-of-measure to the Oracle UOM code the AR invoice service accepts.
+ *
+ * Oracle rejects an unknown UOM with AR-856356 ("You must enter a valid unit of
+ * measure") and fails the whole transaction. Per the Oracle setup:
+ *   Each / EA        → "Ea"
+ *   Gram / G / GR    → "G"
+ * Anything unknown/blank falls back to "Ea" (the safe default for countable goods).
+ */
+function mapUomCode(value) {
+  const v = String(value ?? '').trim().toUpperCase();
+  if (v === 'G' || v === 'GR' || v === 'GRAM' || v === 'GRAMS' || v === 'GM') return 'G';
+  return 'Ea';
+}
+
 // ── Standard Receipt ───────────────────────────────────────────────────────────
 
 function buildStandardReceiptEnvelope(row) {
@@ -196,8 +211,9 @@ function buildArInvoiceSoapEnvelope(payload) {
   // Build invoice lines using inv: namespace
   const lineXml = lines.map((line) => {
     const lineNum = line.LineNumber || 0;
-    // ✅ FORCE UOM to "Ea" - the only working value
-    const uomCode = 'Ea';
+    // Map the line's unit of measure to a valid Oracle UOM code (Each→Ea, Gram→G).
+    // Forcing "Ea" for every line previously failed gram-measured items with AR-856356.
+    const uomCode = mapUomCode(line.UomCode);
     const lineCurrency = String(line.CurrencyCode ?? currency).trim();
     
     // Determine if this is a discount/memo line
@@ -283,6 +299,7 @@ module.exports = {
   buildArInvoiceSoapEnvelope,
   sanitizeAccountNumber,
   sanitizeSalesOrder,
+  mapUomCode,
   CUST_PROFILE_SOAP_ACTION,
   AR_INVOICE_SOAP_ACTION,
 };

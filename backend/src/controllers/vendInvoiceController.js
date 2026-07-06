@@ -71,6 +71,38 @@ function parseNumericField(row, keys, defaultValue = 0) {
   return Number.isFinite(parsed) ? parsed : defaultValue;
 }
 
+/**
+ * Determine a line's unit of measure from the sales row.
+ *
+ * Priority: an explicit UOM column (various Vend/export header spellings), then the
+ * product-name suffix — Vend names gram-measured products "…/ Gram" (e.g.
+ * "MUSK-ALQURASHI/ Gram"). Returns the raw token (e.g. "Each", "Gram", "G"); the SOAP
+ * builder's mapUomCode() translates it to the Oracle code (Ea / G). Returns '' when
+ * nothing is found so callers can default to Each.
+ */
+function extractUom(row, description) {
+  const col = getFirstNonEmpty(row, [
+    'Order Lines/Product/Unit',
+    'Order Lines/Product/UOM',
+    'Order Lines/UOM',
+    'Order Lines/Unit',
+    'Order Lines/Unit of Measure',
+    'UOM',
+    'Unit',
+    'Unit of Measure',
+    'Uom',
+  ]);
+  if (col) return String(col).trim();
+
+  // Derive from the product-name suffix after the last "/", e.g. "…/ Gram" → "Gram".
+  const s = String(description ?? '');
+  const idx = s.lastIndexOf('/');
+  if (idx >= 0 && idx < s.length - 1) {
+    return s.slice(idx + 1).trim();
+  }
+  return '';
+}
+
 function getPaymentType(paymentMethod) {
   const normalizedMethod = normalizeUpper(paymentMethod);
   if (normalizedMethod.includes('TABBY')) return 'TABBY';
@@ -368,6 +400,12 @@ async function uploadVendInvoice(req, res, next) {
         const description = getFirstNonEmpty(row, ['Order Lines/Product/Name', 'Order Lines/Product', 'Product', 'Description']);
         const quantity = parseNumericField(row, ['Order Lines/Base Quantity', 'Base Quantity', 'Order Lines/Quantity', 'Quantity', 'Qty']);
 
+        // Unit of measure: prefer an explicit UOM column, else derive from the product
+        // name suffix (Vend names gram-measured products "…/ Gram"). Oracle rejects the
+        // wrong UOM with AR-856356, so we pass the real one through (mapped to Ea / G in
+        // the SOAP builder) instead of forcing "Ea" on every line.
+        const lineUom = extractUom(row, description);
+
         // Compute UnitSellingPrice as: Subtotal w/o Tax ÷ Base Quantity
         // 'Order Lines/Subtotal w/o Tax' (standard Vend) and 'Order Lines/Tax Excl.'
         // (YASMEEN export) both represent the per-line total excluding tax. Dividing
@@ -536,7 +574,7 @@ async function uploadVendInvoice(req, res, next) {
               Description: description,
               Quantity: quantity,
               UnitSellingPrice: unitSellingPrice,
-              UomCode: 'EA',
+              UomCode: lineUom || 'EA',
               CurrencyCode: 'SAR',
               TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
               SalesOrder: salesOrderRef,

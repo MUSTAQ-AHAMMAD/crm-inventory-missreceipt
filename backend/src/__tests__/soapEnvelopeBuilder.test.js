@@ -2,6 +2,7 @@ const {
   buildArInvoiceSoapEnvelope,
   sanitizeAccountNumber,
   sanitizeSalesOrder,
+  mapUomCode,
 } = require('../services/soapEnvelopeBuilder');
 
 describe('sanitizeAccountNumber', () => {
@@ -55,6 +56,43 @@ describe('sanitizeSalesOrder', () => {
 
   test('returns empty string for null', () => {
     expect(sanitizeSalesOrder(null)).toBe('');
+  });
+});
+
+describe('mapUomCode', () => {
+  test('maps Each variants to Oracle "Ea"', () => {
+    expect(mapUomCode('Each')).toBe('Ea');
+    expect(mapUomCode('EA')).toBe('Ea');
+    expect(mapUomCode('ea')).toBe('Ea');
+  });
+
+  test('maps Gram variants to Oracle "G"', () => {
+    expect(mapUomCode('Gram')).toBe('G');
+    expect(mapUomCode('grams')).toBe('G');
+    expect(mapUomCode('G')).toBe('G');
+    expect(mapUomCode('GR')).toBe('G');
+  });
+
+  test('falls back to "Ea" for blank/unknown units', () => {
+    expect(mapUomCode('')).toBe('Ea');
+    expect(mapUomCode(null)).toBe('Ea');
+    expect(mapUomCode(undefined)).toBe('Ea');
+    expect(mapUomCode('Litre')).toBe('Ea');
+  });
+});
+
+describe('buildArInvoiceSoapEnvelope – per-line UOM', () => {
+  test('emits the mapped Oracle UOM code (Gram → G) on the Quantity element', () => {
+    const xml = buildArInvoiceSoapEnvelope({
+      BillToCustomerName: 'RED SEA MALL',
+      BillToCustomerNumber: '87036',
+      receivablesInvoiceLines: [
+        { LineNumber: 1, ItemNumber: '1024391783', Description: 'MUSK-ALQURASHI/ Gram', Quantity: 5, UnitSellingPrice: 10, UomCode: 'Gram', SalesOrder: 'REDSEA/60713', TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%' },
+        { LineNumber: 2, ItemNumber: '6281074733764', Description: 'MUSK/ Each', Quantity: 1, UnitSellingPrice: 100, UomCode: 'Each', SalesOrder: 'REDSEA/60713', TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%' },
+      ],
+    });
+    expect(xml).toContain('<inv:Quantity unitCode="G">5</inv:Quantity>');
+    expect(xml).toContain('<inv:Quantity unitCode="Ea">1</inv:Quantity>');
   });
 });
 
