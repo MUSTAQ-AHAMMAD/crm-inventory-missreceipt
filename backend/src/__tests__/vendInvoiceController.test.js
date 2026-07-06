@@ -108,6 +108,49 @@ describe('vendInvoiceController', () => {
     }
   });
 
+  test('reads the per-line UOM from the "Order Lines/Base UoM" column (G stays G, Each stays Each)', async () => {
+    XLSX.utils.sheet_to_json
+      .mockImplementationOnce(() => ([
+        { Store: 'REDSEA', 'Subinventory code': 'redsea', Branch: 'Red Sea Mall', 'Payment Method': 'Cash' },
+      ]))
+      .mockImplementationOnce(() => ([
+        {
+          'Order Lines/Order Ref': 'REDSEA/60761',
+          'Order Lines/Order Ref/Date': '2026-06-01',
+          'Order Lines/Product Barcode': '6287020281181',
+          'Order Lines/Product': 'BAKHOOR-OLD HINDI',
+          'Order Lines/Base UoM': 'G',
+          'Order Lines/Base Quantity': 14,
+          'Order Lines/Subtotal w/o Tax': 746.76,
+        },
+        {
+          'Order Lines/Order Ref': 'REDSEA/60761',
+          'Order Lines/Order Ref/Date': '2026-06-01',
+          'Order Lines/Product Barcode': '1030071270',
+          'Order Lines/Product': 'BAKHOOR-MABSOUS BALAS ROSE',
+          'Order Lines/Base UoM': 'Each',
+          'Order Lines/Base Quantity': 2,
+          'Order Lines/Subtotal w/o Tax': 197.40,
+        },
+      ]));
+
+    fusionMetadataService.findByCustomerType.mockResolvedValue({ billToName: 'Cash Customer', billToAccount: 14, siteNumber: '14' });
+    fusionMetadataService.mapToArInvoiceHeader.mockImplementation((m) => ({
+      BillToCustomerName: m.billToName, BillToCustomerNumber: String(m.billToAccount), BillToSite: m.siteNumber,
+    }));
+
+    const req = { files: { paymentLines: { name: 'p.xlsx', data: Buffer.from('p') }, salesLines: { name: 's.xlsx', data: Buffer.from('s') } } };
+    const res = { json: jest.fn(), status: jest.fn().mockReturnThis() };
+    await uploadVendInvoice(req, res, jest.fn());
+
+    const response = res.json.mock.calls[0][0];
+    const allPayloads = [...(response.positivePayloads || []), ...(response.negativePayloads || [])];
+    const lines = allPayloads.flatMap((p) => p.receivablesInvoiceLines);
+    const byItem = Object.fromEntries(lines.map((l) => [l.ItemNumber, l.UomCode]));
+    expect(byItem['6287020281181']).toBe('G');       // gram-measured bakhoor
+    expect(byItem['1030071270']).toBe('Each');        // each-measured bakhoor
+  });
+
   test('supports payment-lines exports with Payments/Payment Method and maps order-level payment types', async () => {
     XLSX.utils.sheet_to_json
       .mockImplementationOnce(() => ([
