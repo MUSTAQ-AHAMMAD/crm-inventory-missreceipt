@@ -82,13 +82,20 @@ function parseNumericField(row, keys, defaultValue = 0) {
  */
 function extractUom(row, description) {
   const col = getFirstNonEmpty(row, [
+    // Authoritative per-line UOM in the Vend sales export (values: "Each", "G", ...)
+    'Order Lines/Base UoM',
+    'Order Lines/Base UOM',
+    'Order Lines/Base Uom',
+    'Base UoM',
+    'Base UOM',
+    'Base Uom',
+    // Other spellings seen across exports
     'Order Lines/Product/Unit',
     'Order Lines/Product/UOM',
     'Order Lines/UOM',
     'Order Lines/Unit',
     'Order Lines/Unit of Measure',
     'UOM',
-    'Unit',
     'Unit of Measure',
     'Uom',
   ]);
