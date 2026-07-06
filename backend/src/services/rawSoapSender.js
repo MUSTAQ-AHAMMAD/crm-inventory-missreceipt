@@ -54,18 +54,25 @@ async function sendRawSoapRequest(url, xml, soapAction, authHeader, options = {}
   });
   
   const timeout = options.timeout || 300000;
-  
+
+  // Send the envelope as a UTF-8 Buffer (not a JS string) so the request always
+  // carries an exact Content-Length and is framed as a single fixed-length body.
+  // Large, multi-byte (e.g. Arabic) payloads sent as a string can end up
+  // chunk-transfer-encoded, which Oracle's SOAP gateway rejects with HTTP 500 —
+  // this mirrors how the Java JAX-WS client transmits bytes.
+  const bodyBuffer = Buffer.from(xml, 'utf-8');
+
   try {
     const response = await axios({
       method: 'post',
       url: url,
-      data: xml,
+      data: bodyBuffer,
       headers: {
         'Content-Type': 'text/xml; charset=utf-8',
         'Accept': 'text/xml, application/xml, multipart/related',
         'SOAPAction': `"${soapAction}"`,
         'Authorization': `Basic ${authHeader}`,
-        'Content-Length': Buffer.byteLength(xml, 'utf-8'),
+        'Content-Length': bodyBuffer.length,
       },
       timeout: timeout,
       httpAgent: agent,
