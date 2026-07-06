@@ -1089,6 +1089,7 @@ async function createInvoiceBatch(req, res, next) {
         let oracleData      = null;
         let httpStatus      = null;
         let transient       = false;
+        let rawOracleResponse = null;   // raw Oracle body, kept so failures are diagnosable
         const t0            = Date.now();
 
         // Build SOAP envelope
@@ -1123,20 +1124,31 @@ async function createInvoiceBatch(req, res, next) {
             console.log(`${invoiceTag} ═══ FULL API RESPONSE END ═══`);
           }
           
+          // Keep the raw Oracle body (truncated) so a FAILED invoice is diagnosable
+          // from the DB, not only from the server console.
+          rawOracleResponse = typeof response.data === 'string'
+            ? response.data.slice(0, 4000)
+            : JSON.stringify(response.data).slice(0, 4000);
+
           // Parse SOAP response to extract invoice data
           const parsed = parseSoapResponse(response.data);
           oracleData = parsed.invoiceData || {};
 
           if (response.status >= 400) {
             responseStatus  = 'FAILED';
-            responseMessage = `Oracle returned HTTP ${httpStatus}`;
+            const oracleErr = extractOracleError(response.data);
+            responseMessage = oracleErr
+              ? `Oracle returned HTTP ${httpStatus}: ${oracleErr}`
+              : `Oracle returned HTTP ${httpStatus}`;
           }
 
           if (responseStatus === 'SUCCESS') {
             if (!oracleData?.TransactionNumber) {
               responseStatus  = 'FAILED';
-              responseMessage = 'Oracle returned HTTP 200 but no TransactionNumber — possible duplicate CrossReference or oversized payload';
               const oracleErr = extractOracleError(response.data);
+              responseMessage = oracleErr
+                ? `Oracle returned HTTP 200 but no TransactionNumber: ${oracleErr}`
+                : 'Oracle returned HTTP 200 but no TransactionNumber — possible duplicate CrossReference or oversized payload';
               console.error(`❌ ${invoiceTag} FAILED (${elapsed}ms) HTTP ${httpStatus} - ${responseMessage}`);
               if (oracleErr) console.error(`❌ ${invoiceTag} Oracle error: ${oracleErr}`);
               console.error(`❌ ${invoiceTag} ═══ FULL ORACLE RESPONSE START ═══`);
@@ -1182,7 +1194,11 @@ async function createInvoiceBatch(req, res, next) {
           data: {
             responseStatus,
             responseMessage,
-            responseBody: oracleData ? JSON.stringify(oracleData) : responseMessage,
+            // On failure keep the raw Oracle body so the fault is diagnosable from the DB;
+            // on success keep the parsed invoice data.
+            responseBody: responseStatus === 'SUCCESS'
+              ? (oracleData ? JSON.stringify(oracleData) : responseMessage)
+              : (rawOracleResponse || responseMessage),
             httpStatus,
           },
         }).catch(() => {});
