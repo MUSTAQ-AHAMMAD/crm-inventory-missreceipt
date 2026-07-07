@@ -11,6 +11,9 @@ import api from '../hooks/useApi'
 import FileDropzone from '../components/common/FileDropzone'
 import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
+import HistoryFilterBar from '../components/common/HistoryFilterBar'
+import ExpandableText from '../components/common/ExpandableText'
+import { toDisplayText, filterUploads } from '../utils/format'
 
 const REQUIRED_COLUMNS = [
   'TransactionNumber',
@@ -37,9 +40,19 @@ export default function ApplyReceiptPage() {
   const [activeUploadId, setActiveUploadId] = useState(null)
   const [uploadProgress, setUploadProgress] = useState(0)
 
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+
   const { data: uploadsData, isLoading } = useQuery({
     queryKey: ['applyReceiptUploads'],
     queryFn: () => api.get('/apply-receipt/uploads').then((r) => r.data),
+  })
+
+  const allUploads = uploadsData?.uploads || []
+  const filteredUploads = filterUploads(allUploads, {
+    search, status: statusFilter, from: fromDate, to: toDate,
   })
 
   // Poll for progress when there is an active upload
@@ -428,6 +441,12 @@ export default function ApplyReceiptPage() {
           <Spinner className="py-8" />
         ) : (
           <div className="overflow-x-auto">
+            <HistoryFilterBar
+              search={search} onSearch={setSearch}
+              status={statusFilter} onStatus={setStatusFilter}
+              from={fromDate} to={toDate} onFrom={setFromDate} onTo={setToDate}
+              count={filteredUploads.length} total={allUploads.length}
+            />
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 text-gray-500 text-xs uppercase">
@@ -442,10 +461,12 @@ export default function ApplyReceiptPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {(!uploadsData?.uploads || uploadsData.uploads.length === 0) && (
-                  <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No uploads yet</td></tr>
+                {filteredUploads.length === 0 && (
+                  <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                    {allUploads.length === 0 ? 'No uploads yet' : 'No uploads match your filters'}
+                  </td></tr>
                 )}
-                {uploadsData?.uploads?.map((u) => (
+                {filteredUploads.map((u) => (
                   <tr key={u.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-gray-500">#{u.id}</td>
                     <td className="px-4 py-3 text-gray-700 font-mono text-xs">{u.filename}</td>
@@ -461,11 +482,8 @@ export default function ApplyReceiptPage() {
                         <span className="text-red-600">✗ {u.failureCount || 0}</span>
                       </div>
                     </td>
-                    <td
-                      className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate"
-                      title={u.responseLog || (typeof u.responseMessage === 'object' ? JSON.stringify(u.responseMessage) : u.responseMessage)}
-                    >
-                      {typeof u.responseMessage === 'object' ? JSON.stringify(u.responseMessage) : (u.responseMessage || '—')}
+                    <td className="px-4 py-3 text-gray-500 text-xs">
+                      <ExpandableText text={toDisplayText(u.responseMessage) || toDisplayText(u.responseLog)} />
                     </td>
                     <td className="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">
                       {new Date(u.createdAt).toLocaleString()}

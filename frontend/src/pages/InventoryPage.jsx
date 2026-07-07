@@ -11,6 +11,8 @@ import api from '../hooks/useApi'
 import FileDropzone from '../components/common/FileDropzone'
 import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
+import HistoryFilterBar from '../components/common/HistoryFilterBar'
+import { filterUploads } from '../utils/format'
 
 // Required CSV columns for inventory uploads (OrganizationName is a separate form field)
 const REQUIRED_COLUMNS = [
@@ -31,9 +33,19 @@ export default function InventoryPage() {
   const [activeUploadId, setActiveUploadId] = useState(null)
 
   // Fetch recent uploads
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+
   const { data: uploadsData, isLoading } = useQuery({
     queryKey: ['inventoryUploads'],
     queryFn: () => api.get('/inventory/uploads').then((r) => r.data),
+  })
+
+  const allUploads = uploadsData?.uploads || []
+  const filteredUploads = filterUploads(allUploads, {
+    search, status: statusFilter, from: fromDate, to: toDate,
   })
 
   // Poll for progress when there is an active upload
@@ -264,6 +276,12 @@ export default function InventoryPage() {
           <Spinner className="py-8" />
         ) : (
           <div className="overflow-x-auto">
+            <HistoryFilterBar
+              search={search} onSearch={setSearch}
+              status={statusFilter} onStatus={setStatusFilter}
+              from={fromDate} to={toDate} onFrom={setFromDate} onTo={setToDate}
+              count={filteredUploads.length} total={allUploads.length}
+            />
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 text-gray-500 text-xs uppercase">
@@ -279,10 +297,12 @@ export default function InventoryPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {(!uploadsData?.uploads || uploadsData.uploads.length === 0) && (
-                  <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">No uploads yet</td></tr>
+                {filteredUploads.length === 0 && (
+                  <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">
+                    {allUploads.length === 0 ? 'No uploads yet' : 'No uploads match your filters'}
+                  </td></tr>
                 )}
-                {uploadsData?.uploads?.map((u) => (
+                {filteredUploads.map((u) => (
                   <tr key={u.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-gray-500">#{u.id}</td>
                     <td className="px-4 py-3 text-gray-700 font-mono text-xs">{u.filename}</td>

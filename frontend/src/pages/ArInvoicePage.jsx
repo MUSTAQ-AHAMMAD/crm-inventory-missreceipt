@@ -10,6 +10,8 @@ import { Link, useLocation } from 'react-router-dom'
 import api from '../hooks/useApi'
 import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
+import HistoryFilterBar from '../components/common/HistoryFilterBar'
+import { filterUploads } from '../utils/format'
 
 const SAMPLE_PAYLOAD = {
   BusinessUnit: 'AlQurashi-KSA',
@@ -77,9 +79,19 @@ export default function ArInvoicePage() {
     }
   }, [location.state])
 
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
+
   const { data: uploadsData, isLoading } = useQuery({
     queryKey: ['arInvoiceUploads'],
     queryFn: () => api.get('/ar-invoice/uploads').then((r) => r.data),
+  })
+
+  const allUploads = uploadsData?.uploads || []
+  const filteredUploads = filterUploads(allUploads, {
+    search, status: statusFilter, from: fromDate, to: toDate,
   })
 
   const handleSubmit = async () => {
@@ -336,10 +348,16 @@ export default function ArInvoicePage() {
           <div className="flex items-center justify-center py-8">
             <Spinner />
           </div>
-        ) : uploadsData?.uploads?.length === 0 ? (
+        ) : allUploads.length === 0 ? (
           <p className="text-sm text-gray-500 text-center py-4">No invoices created yet.</p>
         ) : (
           <div className="overflow-x-auto">
+            <HistoryFilterBar
+              search={search} onSearch={setSearch}
+              status={statusFilter} onStatus={setStatusFilter}
+              from={fromDate} to={toDate} onFrom={setFromDate} onTo={setToDate}
+              count={filteredUploads.length} total={allUploads.length}
+            />
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
@@ -352,7 +370,10 @@ export default function ArInvoicePage() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {uploadsData?.uploads?.map((upload) => (
+                {filteredUploads.length === 0 && (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No invoices match your filters</td></tr>
+                )}
+                {filteredUploads.map((upload) => (
                   <tr key={upload.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-gray-700">#{upload.id}</td>
                     <td className="px-4 py-3 text-gray-700">

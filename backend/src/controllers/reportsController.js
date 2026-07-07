@@ -535,12 +535,36 @@ async function getAllUploads(req, res, next) {
     ]);
 
     // Combine and add type field to each upload
-    const allUploads = [
+    let allUploads = [
       ...inventoryUploads.map(u => ({ ...u, uploadType: 'inventory' })),
       ...standardUploads.map(u => ({ ...u, uploadType: 'standard' })),
       ...miscUploads.map(u => ({ ...u, uploadType: 'misc' })),
       ...applyUploads.map(u => ({ ...u, uploadType: 'apply' })),
     ];
+
+    // ── Filters (from / to / type / search) applied before pagination ──
+    const { from, to, type, search } = req.query;
+    if (type) {
+      allUploads = allUploads.filter(u => u.uploadType === String(type));
+    }
+    if (from) {
+      const fromTs = new Date(`${from}T00:00:00`).getTime();
+      if (!Number.isNaN(fromTs)) allUploads = allUploads.filter(u => new Date(u.createdAt).getTime() >= fromTs);
+    }
+    if (to) {
+      const toTs = new Date(`${to}T23:59:59`).getTime();
+      if (!Number.isNaN(toTs)) allUploads = allUploads.filter(u => new Date(u.createdAt).getTime() <= toTs);
+    }
+    if (search && String(search).trim()) {
+      const q = String(search).trim().toLowerCase();
+      allUploads = allUploads.filter(u => {
+        const hay = [
+          u.id, u.uploadType, u.filename, u.status, u.responseStatus,
+          u.successCount, u.failureCount, u.responseMessage, u.user && u.user.email,
+        ].map(v => (v == null ? '' : String(v))).join(' ').toLowerCase();
+        return hay.includes(q);
+      });
+    }
 
     // Sort by createdAt descending
     allUploads.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));

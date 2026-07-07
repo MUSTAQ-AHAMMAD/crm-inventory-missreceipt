@@ -3,7 +3,7 @@
  * Tabbed interface with dashboard charts, failure tables, activity logs, and CSV export.
  */
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import api from '../hooks/useApi'
@@ -122,14 +122,21 @@ function DashboardTab() {
 
 function UploadHistoryTab({ filters }) {
   const [page, setPage] = useState(1)
+  const [search, setSearch] = useState('')
+  const [type, setType] = useState('')
   const limit = 20
 
+  // Reset to page 1 whenever a filter or the search term changes.
+  useEffect(() => { setPage(1) }, [filters.from, filters.to, search, type])
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ['allUploads', filters, page],
-    queryFn: () => api.get('/reports/all-uploads', { params: { page, limit } }).then((r) => r.data),
+    queryKey: ['allUploads', filters.from, filters.to, type, search, page],
+    queryFn: () => api.get('/reports/all-uploads', {
+      params: { page, limit, from: filters.from, to: filters.to, type, search },
+    }).then((r) => r.data),
+    keepPreviousData: true,
   })
 
-  if (isLoading) return <Spinner className="py-12" />
   if (error) return <ErrorAlert message="Failed to load upload history." />
 
   const uploads = data?.uploads || []
@@ -139,6 +146,42 @@ function UploadHistoryTab({ filters }) {
   return (
     <div className="bg-white rounded-xl shadow-sm p-6">
       <h2 className="font-semibold text-gray-700 mb-4">Upload History ({total} uploads)</h2>
+      <div className="flex flex-wrap items-end gap-3 mb-4">
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-xs text-gray-500 mb-1">Search</label>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search file, uploader, status, response…"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1">Type</label>
+          <select
+            value={type}
+            onChange={(e) => setType(e.target.value)}
+            className="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+          >
+            <option value="">All</option>
+            <option value="inventory">Inventory</option>
+            <option value="standard">Standard Receipt</option>
+            <option value="misc">Misc Receipt</option>
+            <option value="apply">Apply Receipt</option>
+          </select>
+        </div>
+        {(search || type) && (
+          <button
+            type="button"
+            onClick={() => { setSearch(''); setType('') }}
+            className="text-xs text-gray-500 hover:text-gray-700 underline pb-2.5"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+      {isLoading ? <Spinner className="py-12" /> : (
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead>
@@ -221,6 +264,7 @@ function UploadHistoryTab({ filters }) {
           </tbody>
         </table>
       </div>
+      )}
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
