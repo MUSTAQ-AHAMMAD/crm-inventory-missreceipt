@@ -11,6 +11,9 @@ import api from '../hooks/useApi'
 import FileDropzone from '../components/common/FileDropzone'
 import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
+import HistoryFilterBar from '../components/common/HistoryFilterBar'
+import ExpandableText from '../components/common/ExpandableText'
+import { toDisplayText, filterUploads } from '../utils/format'
 
 const REQUIRED_COLUMNS = [
   'ReceiptNumber',
@@ -36,10 +39,19 @@ export default function StandardReceiptPage() {
   const [error, setError] = useState('')
   const [activeUploadId, setActiveUploadId] = useState(null)
   const [uploadProgress, setUploadProgress] = useState(0)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [fromDate, setFromDate] = useState('')
+  const [toDate, setToDate] = useState('')
 
   const { data: uploadsData, isLoading } = useQuery({
     queryKey: ['standardUploads'],
     queryFn: () => api.get('/standard-receipt/uploads').then((r) => r.data),
+  })
+
+  const allUploads = uploadsData?.uploads || []
+  const filteredUploads = filterUploads(allUploads, {
+    search, status: statusFilter, from: fromDate, to: toDate,
   })
 
   // Poll for progress when there is an active upload
@@ -284,9 +296,11 @@ export default function StandardReceiptPage() {
           <div className="space-y-4 max-h-96 overflow-y-auto">
             {payloadPreviews.map((p) => (
               <div key={p.rowNumber}>
-                <p className="text-xs text-gray-500 mb-1">Row {p.rowNumber}</p>
+                <p className="text-xs text-gray-500 mb-1">
+                  Row {p.rowNumber}{p.receiptNumber ? ` — ${p.receiptNumber}` : ''}
+                </p>
                 <pre className="bg-gray-900 text-green-400 text-xs p-4 rounded-lg overflow-x-auto whitespace-pre-wrap">
-                  {JSON.stringify(p.payload, null, 2)}
+                  {p.payload ? JSON.stringify(p.payload, null, 2) : p.xml}
                 </pre>
               </div>
             ))}
@@ -301,6 +315,12 @@ export default function StandardReceiptPage() {
           <Spinner className="py-8" />
         ) : (
           <div className="overflow-x-auto">
+            <HistoryFilterBar
+              search={search} onSearch={setSearch}
+              status={statusFilter} onStatus={setStatusFilter}
+              from={fromDate} to={toDate} onFrom={setFromDate} onTo={setToDate}
+              count={filteredUploads.length} total={allUploads.length}
+            />
             <table className="min-w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 text-gray-500 text-xs uppercase">
@@ -314,10 +334,12 @@ export default function StandardReceiptPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {(!uploadsData?.uploads || uploadsData.uploads.length === 0) && (
-                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No uploads yet</td></tr>
+                {filteredUploads.length === 0 && (
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">
+                    {allUploads.length === 0 ? 'No uploads yet' : 'No uploads match your filters'}
+                  </td></tr>
                 )}
-                {uploadsData?.uploads?.map((u) => (
+                {filteredUploads.map((u) => (
                   <tr key={u.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-gray-500">#{u.id}</td>
                     <td className="px-4 py-3 text-gray-700 font-mono text-xs">{u.filename}</td>
@@ -330,11 +352,8 @@ export default function StandardReceiptPage() {
                         <span className="text-red-600">✗ {u.failureCount || 0}</span>
                       </div>
                     </td>
-                    <td
-                      className="px-4 py-3 text-gray-500 text-xs max-w-xs truncate"
-                      title={u.responseLog || (typeof u.responseMessage === 'object' ? JSON.stringify(u.responseMessage) : u.responseMessage)}
-                    >
-                      {typeof u.responseMessage === 'object' ? JSON.stringify(u.responseMessage) : (u.responseMessage || '—')}
+                    <td className="px-4 py-3 text-gray-500 text-xs">
+                      <ExpandableText text={toDisplayText(u.responseMessage) || toDisplayText(u.responseLog)} />
                     </td>
                     <td className="px-4 py-3 text-gray-400 whitespace-nowrap text-xs">
                       {new Date(u.createdAt).toLocaleString()}
