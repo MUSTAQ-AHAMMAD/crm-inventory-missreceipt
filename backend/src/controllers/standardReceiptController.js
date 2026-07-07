@@ -619,10 +619,15 @@ async function getUploadProgress(req, res, next) {
 
 function downloadTemplate(_req, res) {
   const header = TEMPLATE_FIELDS.join(',');
-  // Sample row: RegisterName replaces RemittanceBankAccountId – use your store's register name
-  // (matches VendhqRegister.registerName, e.g. AZIZMALL, WADILABAN, RASHIDABHA …)
+  // Sample rows use REAL, verified Oracle IDs so the template posts successfully as-is.
+  // Replace RegisterName / CustomerId / OrgId with your store's own values for real uploads:
+  //   ReceiptMethodId – Cash 300000001518638, Visa 300000001518646, Mada 300000001518641,
+  //                     Master 300000001518644, AMEX 300000001518642
+  //   RegisterName    – must match VendhqRegister.registerName (e.g. WADILABAN, RASHIDABHA …)
+  //   ReceiptDate     – MUST fall in an OPEN Oracle AR period, else Oracle rejects it (AR-855032)
   const sample =
-    'Visa-BLK-ALAR-00000008,2026-03-05,422.00,SAR,300000001518646,AZIZMALL,300000001234567,300000001421038';
+    'Cash-0000000001,2026-06-30,1500.00,SAR,300000001518638,WADILABAN,300000051631674,300000001421038\n' +
+    'Visa-0000000001,2026-06-30,2300.50,SAR,300000001518646,WADILABAN,300000051631674,300000001421038';
   // Add UTF-8 BOM (Byte Order Mark) to ensure proper encoding of Arabic and other Unicode characters
   const BOM = '\uFEFF';
   const csv = `${BOM}${header}\n${sample}\n`;

@@ -72,9 +72,10 @@ describe('Standard Receipt Controller', () => {
       expect(response.text).not.toContain('RemittanceBankAccountNumber');
       expect(response.text).not.toContain('AccountingDate');
 
-      // Check sample data
-      expect(response.text).toContain('Visa-BLK-ALAR-00000008');
-      expect(response.text).toContain('2026-03-05');
+      // Check sample data uses real, verified IDs (not the old placeholder CustomerId)
+      expect(response.text).toContain('Cash-0000000001');
+      expect(response.text).toContain('300000051631674'); // real CustomerId
+      expect(response.text).not.toContain('300000001234567'); // old placeholder must be gone
 
       // Verify it can be parsed back
       const records = parse(response.text, {
@@ -84,8 +85,9 @@ describe('Standard Receipt Controller', () => {
         bom: true,
       });
 
-      expect(records).toHaveLength(1);
-      expect(records[0].ReceiptNumber).toBe('Visa-BLK-ALAR-00000008');
+      expect(records).toHaveLength(2);
+      expect(records[0].ReceiptNumber).toBe('Cash-0000000001');
+      expect(records[0].CustomerId).toBe('300000051631674');
     });
   });
 

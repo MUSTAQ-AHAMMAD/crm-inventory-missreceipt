@@ -111,6 +111,11 @@ function buildStandardReceiptEnvelope(row) {
     }
   }
 
+  // GL (accounting) date is decoupled from the receipt date: Oracle rejects a GlDate
+  // that falls in a closed AR period (AR-855032) even when the receipt date is fine.
+  // Callers can pass row.GlDate (a date in an open period) without moving ReceiptDate.
+  const glDate = row.GlDate || row.ReceiptDate;
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="${SOAP_ENV_NS}"
   xmlns:typ="${STD_TYPES_NS}"
@@ -122,7 +127,7 @@ function buildStandardReceiptEnvelope(row) {
         <com:Amount currencyCode="${escapeXml(row.CurrencyCode)}">${escapeXml(roundAmount(row.Amount))}</com:Amount>
         <com:CurrencyCode>${escapeXml(row.CurrencyCode)}</com:CurrencyCode>
         <com:ReceiptDate>${escapeXml(row.ReceiptDate)}</com:ReceiptDate>
-        <com:GlDate>${escapeXml(row.ReceiptDate)}</com:GlDate>
+        <com:GlDate>${escapeXml(glDate)}</com:GlDate>
         <com:DepositDate>${escapeXml(row.ReceiptDate)}</com:DepositDate>
         <com:ReceiptMethodId>${escapeXml(row.ReceiptMethodId)}</com:ReceiptMethodId>
         <com:ReceiptNumber>${escapeXml(row.ReceiptNumber)}</com:ReceiptNumber>
