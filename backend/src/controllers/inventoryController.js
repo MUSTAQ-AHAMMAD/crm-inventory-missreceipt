@@ -7,7 +7,6 @@ const { parse } = require('csv-parse/sync');
 const axios = require('axios');
 const prisma = require('../services/prisma');
 const { csvEscape } = require('../utils/csv');
-const { mapUomCode } = require('../utils/uomMapper');
 
 // Prefix used to tag validation failure messages so retry logic can identify them
 const VALIDATION_ERROR_PREFIX = 'Validation: ';
@@ -305,10 +304,8 @@ function mapRowToPayload(row, organizationName) {
   // Convert TransactionDate to ISO 8601 format required by Oracle
   const txDate = row.__formattedTransactionDate || formatDateToISO(row.TransactionDate).value || '';
 
-  // Map TransactionUnitOfMeasure through uomMapper to ensure correct Oracle format
-  // (e.g., "Each" → "Ea", "G" → "G", "Gram" → "G")
-  const rawUom = row.TransactionUnitOfMeasure?.trim();
-  const uom = mapUomCode(rawUom);
+  // Read TransactionUnitOfMeasure directly from CSV (validated in validateRow)
+  const uom = row.TransactionUnitOfMeasure?.trim();
 
   // TransactionQuantity is already validated (non-NaN, non-zero) in validateRow.
   // Preserve the original CSV string value (e.g. "-1.00") instead of parsing and
