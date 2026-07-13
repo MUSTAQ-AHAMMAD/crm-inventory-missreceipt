@@ -222,12 +222,12 @@ function formatDateToISO(dateStr) {
   const sep = datePart.includes('/') ? '/' : '-';
   const parts = datePart.split(sep);
   if (parts.length !== 3) {
-    return { error: `Transaction date must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or DD/MM/YYYY format` };
+    return { error: `Transaction date must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or MM/DD/YYYY format` };
   }
 
   const nums = parts.map((p) => Number(p));
   if (nums.some((n) => !Number.isFinite(n))) {
-    return { error: `Transaction date must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or DD/MM/YYYY format` };
+    return { error: `Transaction date must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or MM/DD/YYYY format` };
   }
 
   let [a, b, c] = nums;
@@ -245,8 +245,19 @@ function formatDateToISO(dateStr) {
       month = b;
       day = c;
     }
+  } else if (sep === '/') {
+    // Slash-separated dates (e.g. Vend/POS exports) are month-first: MM/DD/YYYY
+    year = c;
+    if (a > 12 && b <= 12) {
+      // First value can't be a month → fall back to day-first (DD/MM/YYYY)
+      day = a;
+      month = b;
+    } else {
+      month = a;
+      day = b;
+    }
   } else {
-    // Day-first formats (DD-MM-YYYY) with fallback for MM-DD-YYYY
+    // Dash-separated dates are day-first: DD-MM-YYYY (with fallback for MM-DD-YYYY)
     year = c;
     if (b > 12 && a <= 12) {
       month = a;
@@ -258,7 +269,7 @@ function formatDateToISO(dateStr) {
   }
 
   if (!year || !month || !day) {
-    return { error: `Transaction date must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or DD/MM/YYYY format` };
+    return { error: `Transaction date must be in YYYY-MM-DD, DD-MM-YYYY, YYYY/MM/DD, or MM/DD/YYYY format` };
   }
 
   const isoYear = year.toString().padStart(4, '0');

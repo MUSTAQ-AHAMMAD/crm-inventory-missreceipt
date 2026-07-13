@@ -13,6 +13,7 @@ import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
 import HistoryFilterBar from '../components/common/HistoryFilterBar'
 import { filterUploads } from '../utils/format'
+import { buildDatePreview } from '../utils/inventoryPreview'
 
 // Required CSV columns for inventory uploads (OrganizationName is a separate form field)
 const REQUIRED_COLUMNS = [
@@ -31,6 +32,25 @@ export default function InventoryPage() {
   const [uploadProgress, setUploadProgress] = useState(0)
   // Tracks the active upload being processed in the background
   const [activeUploadId, setActiveUploadId] = useState(null)
+  // Client-side per-date breakdown of the selected file (visual confirmation)
+  const [preview, setPreview] = useState(null)
+
+  // Parse the selected CSV in the browser and build a per-date record count.
+  const handleFile = useCallback((f) => {
+    setFile(f)
+    setPreview(null)
+    if (!f) return
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      try {
+        setPreview(buildDatePreview(String(e.target.result || '')))
+      } catch {
+        setPreview({ error: 'Could not read this file for preview.', byDate: [] })
+      }
+    }
+    reader.onerror = () => setPreview({ error: 'Could not read this file for preview.', byDate: [] })
+    reader.readAsText(f)
+  }, [])
 
   // Fetch recent uploads
   const [search, setSearch] = useState('')
@@ -147,7 +167,10 @@ export default function InventoryPage() {
           />
         </div>
 
-        <FileDropzone onFile={setFile} label="inventory CSV" />
+        <FileDropzone onFile={handleFile} label="inventory CSV" />
+
+        {/* Per-date preview — visual confirmation before processing */}
+        {preview && <DatePreview preview={preview} />}
 
         {/* Column mapping reference */}
         <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
@@ -341,6 +364,101 @@ export default function InventoryPage() {
           </div>
         )}
       </div>
+    </div>
+  )
+}
+
+function DatePreview({ preview }) {
+  if (preview.error) {
+    return (
+      <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-sm text-yellow-800">
+        ⚠️ {preview.error}
+      </div>
+    )
+  }
+
+  const { byDate = [], byBranch = [], uploadable = 0, skipped = 0, invalidDates = 0 } = preview
+  const maxDate = byDate.reduce((m, d) => Math.max(m, d.count), 0)
+  const maxBranch = byBranch.reduce((m, b) => Math.max(m, b.count), 0)
+
+  return (
+    <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-5 space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <span className="font-semibold text-indigo-800 flex items-center gap-2">
+          🔎 Upload Preview
+        </span>
+        <div className="flex items-center gap-2 text-xs">
+          <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded font-medium">
+            {uploadable} to upload
+          </span>
+          <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded font-medium">
+            {byDate.length} {byDate.length === 1 ? 'date' : 'dates'}
+          </span>
+          <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded font-medium">
+            {byBranch.length} {byBranch.length === 1 ? 'branch' : 'branches'}
+          </span>
+          {invalidDates > 0 && (
+            <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded font-medium">
+              {invalidDates} bad date{invalidDates === 1 ? '' : 's'}
+            </span>
+          )}
+          {skipped > 0 && (
+            <span className="px-2 py-0.5 bg-gray-100 text-gray-600 rounded font-medium">
+              {skipped} skipped
+            </span>
+          )}
+        </div>
+      </div>
+
+      {byDate.length === 0 ? (
+        <p className="text-sm text-indigo-700">No uploadable records found in this file.</p>
+      ) : (
+        <div className="grid md:grid-cols-2 gap-x-8 gap-y-4">
+          {/* By transaction date */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">By Transaction Date</p>
+            <div className="space-y-1.5">
+              {byDate.map((d) => (
+                <PreviewBar key={d.iso} label={d.label} count={d.count} max={maxDate} labelWidth="w-24" />
+              ))}
+            </div>
+          </div>
+
+          {/* By branch / subinventory */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-indigo-700 uppercase tracking-wide">By Branch / Subinventory</p>
+            <div className="space-y-1.5">
+              {byBranch.map((b) => (
+                <PreviewBar key={b.branch} label={b.branch} count={b.count} max={maxBranch} labelWidth="w-28" mono />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <p className="text-xs text-indigo-600">
+        Please confirm these match your file before uploading. Slash dates (e.g. <span className="font-mono">7/1/2026</span>) are read as <strong>month/day/year</strong> → July 1.
+      </p>
+    </div>
+  )
+}
+
+function PreviewBar({ label, count, max, labelWidth, mono }) {
+  return (
+    <div className="flex items-center gap-3">
+      <span
+        className={`${labelWidth} shrink-0 text-sm font-medium text-gray-700 whitespace-nowrap truncate ${mono ? 'font-mono text-xs' : ''}`}
+        title={label}
+      >
+        {label}
+      </span>
+      <div className="flex-1 bg-indigo-100 rounded-full h-5 overflow-hidden">
+        <div
+          className="h-5 rounded-full bg-indigo-500 transition-all duration-300"
+          style={{ width: `${max > 0 ? Math.max((count / max) * 100, 6) : 0}%` }}
+        />
+      </div>
+      <span className="w-10 shrink-0 text-sm font-bold text-indigo-800 text-right">{count}</span>
     </div>
   )
 }
