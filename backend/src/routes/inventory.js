@@ -24,6 +24,7 @@ const {
   getSuccessRecords,
   getDebugLog,
   exportFailures,
+  cancelUpload,
 } = require('../controllers/inventoryController');
 
 const router = express.Router();
@@ -126,6 +127,26 @@ router.get('/uploads', listUploads);
  *         description: Upload progress with totalRecords, successCount, failureCount, status
  */
 router.get('/uploads/:id/progress', getUploadProgress);
+
+/**
+ * @swagger
+ * /inventory/uploads/{id}/cancel:
+ *   post:
+ *     tags: [Inventory]
+ *     summary: Request cancellation of an in-progress upload
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Cancellation requested; processing will stop shortly
+ *       409:
+ *         description: Upload already finished and cannot be cancelled
+ */
+router.post('/uploads/:id/cancel', cancelUpload);
 
 /**
  * @swagger

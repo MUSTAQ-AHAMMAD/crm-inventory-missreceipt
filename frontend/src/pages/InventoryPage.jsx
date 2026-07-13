@@ -4,7 +4,7 @@
  * and a table of recent uploads with links to failure details.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import api from '../hooks/useApi'
@@ -32,6 +32,11 @@ export default function InventoryPage() {
   const [uploadProgress, setUploadProgress] = useState(0)
   // Tracks the active upload being processed in the background
   const [activeUploadId, setActiveUploadId] = useState(null)
+  // True while a cancellation request is in flight / pending
+  const [cancelling, setCancelling] = useState(false)
+  // AbortController for the in-flight file POST (used to cancel before the
+  // backend job starts)
+  const abortRef = useRef(null)
   // Client-side per-date breakdown of the selected file (visual confirmation)
   const [preview, setPreview] = useState(null)
 
@@ -80,11 +85,12 @@ export default function InventoryPage() {
   useEffect(() => {
     if (!progressData || !activeUploadId) return
     const { status } = progressData
-    if (status === 'COMPLETED' || status === 'FAILED' || status === 'PARTIAL') {
+    if (status === 'COMPLETED' || status === 'FAILED' || status === 'PARTIAL' || status === 'CANCELLED') {
       setResult(progressData)
       setActiveUploadId(null)
       setUploading(false)
       setUploadProgress(0)
+      setCancelling(false)
       queryClient.invalidateQueries({ queryKey: ['inventoryUploads'] })
     }
   }, [progressData, activeUploadId, queryClient])
@@ -95,6 +101,7 @@ export default function InventoryPage() {
     setError('')
     setResult(null)
     setUploading(true)
+    setCancelling(false)
     setUploadProgress(10)
     setActiveUploadId(null)
 
@@ -102,8 +109,12 @@ export default function InventoryPage() {
     formData.append('file', file)
     formData.append('organizationName', organizationName.trim())
 
+    const controller = new AbortController()
+    abortRef.current = controller
+
     try {
       const res = await api.post('/inventory/bulk-upload', formData, {
+        signal: controller.signal,
         onUploadProgress: (e) => {
           setUploadProgress(Math.round((e.loaded / e.total) * 80))
         },
@@ -121,11 +132,43 @@ export default function InventoryPage() {
         queryClient.invalidateQueries({ queryKey: ['inventoryUploads'] })
       }
     } catch (err) {
+      // Request aborted by the user (cancelled before the backend job began)
+      if (err.code === 'ERR_CANCELED' || err.name === 'CanceledError') {
+        setUploading(false)
+        setUploadProgress(0)
+        setCancelling(false)
+        return
+      }
       setError(err.response?.data?.error || 'Upload failed.')
       setUploading(false)
       setUploadProgress(0)
+    } finally {
+      abortRef.current = null
     }
   }, [file, organizationName, queryClient])
+
+  // Cancel the upload: abort the in-flight POST if still uploading, otherwise
+  // tell the backend to stop the in-progress job.
+  const handleCancel = useCallback(async () => {
+    setCancelling(true)
+    if (abortRef.current) {
+      abortRef.current.abort()
+      return
+    }
+    if (activeUploadId) {
+      try {
+        await api.post(`/inventory/uploads/${activeUploadId}/cancel`)
+        // Polling will pick up the CANCELLED status and finalize the UI.
+      } catch (err) {
+        setError(err.response?.data?.error || 'Could not cancel the upload.')
+        setCancelling(false)
+      }
+    } else {
+      setUploading(false)
+      setUploadProgress(0)
+      setCancelling(false)
+    }
+  }, [activeUploadId])
 
   const handleDownloadTemplate = () => {
     window.open(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api'}/inventory/template`, '_blank')
@@ -207,7 +250,7 @@ export default function InventoryPage() {
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-5 space-y-4">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-blue-800 flex items-center gap-2">
-                <Spinner size="sm" /> Processing Records…
+                <Spinner size="sm" /> {cancelling ? 'Cancelling…' : 'Processing Records…'}
               </span>
               <span className="text-sm font-bold text-blue-700">{percentComplete}%</span>
             </div>
@@ -251,29 +294,49 @@ export default function InventoryPage() {
           </div>
         )}
 
-        <button
-          onClick={handleUpload}
-          disabled={uploading || !file || !organizationName.trim()}
-          className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center gap-2"
-        >
-          {uploading ? <Spinner size="sm" /> : '📤'}
-          {uploading ? 'Processing…' : 'Upload & Process'}
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={handleUpload}
+            disabled={uploading || !file || !organizationName.trim()}
+            className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center gap-2"
+          >
+            {uploading ? <Spinner size="sm" /> : '📤'}
+            {uploading ? 'Processing…' : 'Upload & Process'}
+          </button>
+
+          {uploading && (
+            <button
+              onClick={handleCancel}
+              disabled={cancelling}
+              className="px-6 py-2.5 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 disabled:opacity-60 transition-colors flex items-center gap-2"
+            >
+              {cancelling ? <Spinner size="sm" /> : '✖'}
+              {cancelling ? 'Cancelling…' : 'Cancel'}
+            </button>
+          )}
+        </div>
 
         {/* Result summary */}
         {result && (
           <div className={`border rounded-lg p-4 ${
             result.status === 'COMPLETED' ? 'bg-green-50 border-green-200' :
             result.status === 'FAILED' ? 'bg-red-50 border-red-200' :
+            result.status === 'CANCELLED' ? 'bg-gray-50 border-gray-200' :
             'bg-yellow-50 border-yellow-200'
           }`}>
             <p className={`font-semibold mb-2 ${
               result.status === 'COMPLETED' ? 'text-green-700' :
               result.status === 'FAILED' ? 'text-red-700' :
+              result.status === 'CANCELLED' ? 'text-gray-700' :
               'text-yellow-700'
             }`}>
-              {result.status === 'COMPLETED' ? '✅' : result.status === 'FAILED' ? '❌' : '⚠️'} Upload {result.status === 'COMPLETED' ? 'Complete' : result.status === 'FAILED' ? 'Failed' : 'Partially Complete'}
+              {result.status === 'COMPLETED' ? '✅' : result.status === 'FAILED' ? '❌' : result.status === 'CANCELLED' ? '⏹️' : '⚠️'} Upload {result.status === 'COMPLETED' ? 'Complete' : result.status === 'FAILED' ? 'Failed' : result.status === 'CANCELLED' ? 'Cancelled' : 'Partially Complete'}
             </p>
+            {result.status === 'CANCELLED' && (
+              <p className="text-xs text-gray-500 mb-2">
+                Processing was stopped. Records already sent to Oracle were kept; the rest were not processed.
+              </p>
+            )}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
               <div><span className="text-gray-500">Total:</span> <strong>{result.totalRecords}</strong></div>
               <div><span className="text-gray-500">Success:</span> <strong className="text-green-600">{result.successCount}</strong></div>
@@ -302,6 +365,7 @@ export default function InventoryPage() {
             <HistoryFilterBar
               search={search} onSearch={setSearch}
               status={statusFilter} onStatus={setStatusFilter}
+              statusOptions={['COMPLETED', 'PARTIAL', 'FAILED', 'PROCESSING', 'CANCELLED']}
               from={fromDate} to={toDate} onFrom={setFromDate} onTo={setToDate}
               count={filteredUploads.length} total={allUploads.length}
             />
@@ -470,6 +534,7 @@ function StatusBadge({ status }) {
     PARTIAL: 'bg-yellow-100 text-yellow-700',
     PROCESSING: 'bg-blue-100 text-blue-700',
     PENDING: 'bg-gray-100 text-gray-600',
+    CANCELLED: 'bg-gray-200 text-gray-700',
   }
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-gray-100 text-gray-600'}`}>

@@ -349,6 +349,12 @@ function mapRowToPayload(row, organizationName) {
 // Increase for faster throughput; decrease if Oracle rate-limits.
 const CONCURRENCY = 10;
 
+// Upload IDs for which the user has requested cancellation. The background
+// processing loop checks this set between batches and stops early. Kept in
+// memory because processing runs in the same Node process as the request that
+// starts it (fire-and-forget); the flag is cleared once the loop stops.
+const cancelledUploads = new Set();
+
 // How many success / failure records to accumulate before flushing to DB.
 const DB_FLUSH_SIZE = 500;
 
@@ -635,75 +641,92 @@ async function processUploadRows(upload, records, organizationName) {
     }
   }
 
-  // Process rows in concurrent batches of CONCURRENCY
-  for (let batchStart = 0; batchStart < records.length; batchStart += CONCURRENCY) {
-    const batchEnd = Math.min(batchStart + CONCURRENCY, records.length);
-    const batch = records.slice(batchStart, batchEnd);
-
-    const batchResults = await Promise.all(
-      batch.map((row, idx) => processRow(row, batchStart + idx + 2)) // +2: 1-based + header row
-    );
-
-    for (const result of batchResults) {
-      if (result.type === 'success') {
-        successCount++;
-        pendingSuccesses.push({
-          uploadId: upload.id,
-          rowNumber: result.rowNumber,
-          rawData: sanitizeForDatabase(result.rawData),
-          responseBody: sanitizeForDatabase(result.responseBody, 50000) || null,
-          responseStatus: result.responseStatus ?? null,
+  try {
+    // Process rows in concurrent batches of CONCURRENCY
+    for (let batchStart = 0; batchStart < records.length; batchStart += CONCURRENCY) {
+      // Stop early if the user requested cancellation. Persist whatever has
+      // been processed so far and mark the upload CANCELLED.
+      if (cancelledUploads.has(upload.id)) {
+        await flushRecords();
+        await prisma.inventoryUpload.update({
+          where: { id: upload.id },
+          data: { successCount, failureCount, status: 'CANCELLED' },
         });
-        seenPayloads.add(result.rawData);
-      } else if (result.type === 'skip-duplicate') {
-        // Count as success for this upload to keep progress accurate,
-        // but do not create another success record.
-        successCount++;
-      } else if (result.type === 'skip-missing-barcode') {
-        // Skip rows with missing barcodes without recording a failure
-        successCount++;
-      } else {
-        failureCount++;
-        pendingFailures.push({
-          uploadId: upload.id,
-          rowNumber: result.rowNumber,
-          rawData: sanitizeForDatabase(result.rawData),
-          errorMessage: sanitizeForDatabase(result.error, 10000),
-          responseBody: sanitizeForDatabase(result.responseBody, 50000) || null,
-          responseStatus: result.responseStatus ?? null,
-          oracleErrorCode: result.oracleErrorCode || null,
-          oracleProcessStatus: result.oracleProcessStatus || null,
-        });
+        console.log(`[Inventory] Upload #${upload.id} CANCELLED by user | Processed: ${successCount + failureCount}/${records.length} | Success: ${successCount} | Failed: ${failureCount}`);
+        return;
       }
+
+      const batchEnd = Math.min(batchStart + CONCURRENCY, records.length);
+      const batch = records.slice(batchStart, batchEnd);
+
+      const batchResults = await Promise.all(
+        batch.map((row, idx) => processRow(row, batchStart + idx + 2)) // +2: 1-based + header row
+      );
+
+      for (const result of batchResults) {
+        if (result.type === 'success') {
+          successCount++;
+          pendingSuccesses.push({
+            uploadId: upload.id,
+            rowNumber: result.rowNumber,
+            rawData: sanitizeForDatabase(result.rawData),
+            responseBody: sanitizeForDatabase(result.responseBody, 50000) || null,
+            responseStatus: result.responseStatus ?? null,
+          });
+          seenPayloads.add(result.rawData);
+        } else if (result.type === 'skip-duplicate') {
+          // Count as success for this upload to keep progress accurate,
+          // but do not create another success record.
+          successCount++;
+        } else if (result.type === 'skip-missing-barcode') {
+          // Skip rows with missing barcodes without recording a failure
+          successCount++;
+        } else {
+          failureCount++;
+          pendingFailures.push({
+            uploadId: upload.id,
+            rowNumber: result.rowNumber,
+            rawData: sanitizeForDatabase(result.rawData),
+            errorMessage: sanitizeForDatabase(result.error, 10000),
+            responseBody: sanitizeForDatabase(result.responseBody, 50000) || null,
+            responseStatus: result.responseStatus ?? null,
+            oracleErrorCode: result.oracleErrorCode || null,
+            oracleProcessStatus: result.oracleProcessStatus || null,
+          });
+        }
+      }
+
+      // Flush to DB when buffers are large enough to avoid memory pressure
+      if (pendingSuccesses.length >= DB_FLUSH_SIZE || pendingFailures.length >= DB_FLUSH_SIZE) {
+        await flushRecords();
+      }
+
+      // Update progress counters after each batch (not each row)
+      await prisma.inventoryUpload.update({
+        where: { id: upload.id },
+        data: { successCount, failureCount },
+      });
     }
 
-    // Flush to DB when buffers are large enough to avoid memory pressure
-    if (pendingSuccesses.length >= DB_FLUSH_SIZE || pendingFailures.length >= DB_FLUSH_SIZE) {
-      await flushRecords();
-    }
+    // Flush any remaining buffered records
+    await flushRecords();
 
-    // Update progress counters after each batch (not each row)
+    // Update final upload status
+    const finalStatus = failureCount === 0 ? 'COMPLETED' : successCount === 0 ? 'FAILED' : 'PARTIAL';
     await prisma.inventoryUpload.update({
       where: { id: upload.id },
-      data: { successCount, failureCount },
+      data: {
+        successCount,
+        failureCount,
+        status: finalStatus,
+      },
     });
+
+    console.log(`[Inventory] Upload #${upload.id} COMPLETE | Total: ${records.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus}`);
+  } finally {
+    // Always clear the cancellation flag so the Set does not grow unbounded.
+    cancelledUploads.delete(upload.id);
   }
-
-  // Flush any remaining buffered records
-  await flushRecords();
-
-  // Update final upload status
-  const finalStatus = failureCount === 0 ? 'COMPLETED' : successCount === 0 ? 'FAILED' : 'PARTIAL';
-  await prisma.inventoryUpload.update({
-    where: { id: upload.id },
-    data: {
-      successCount,
-      failureCount,
-      status: finalStatus,
-    },
-  });
-
-  console.log(`[Inventory] Upload #${upload.id} COMPLETE | Total: ${records.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus}`);
 }
 
 /**
@@ -1086,6 +1109,47 @@ async function getUploadProgress(req, res, next) {
 }
 
 /**
+ * POST /api/inventory/uploads/:id/cancel
+ * Requests cancellation of an in-progress upload. Sets an in-memory flag that
+ * the background processing loop checks between batches; already-processed rows
+ * are kept and the upload is marked CANCELLED once the loop stops.
+ */
+async function cancelUpload(req, res, next) {
+  try {
+    const uploadId = parseInt(req.params.id);
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
+
+    const upload = await prisma.inventoryUpload.findUnique({ where: { id: uploadId } });
+    if (!upload) {
+      return res.status(404).json({ error: 'Upload not found.' });
+    }
+    if (req.user.role === 'USER' && upload.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    // Only in-flight uploads can be cancelled.
+    if (upload.status !== 'PROCESSING' && upload.status !== 'PENDING') {
+      return res.status(409).json({
+        error: `Upload is already ${upload.status} and can no longer be cancelled.`,
+      });
+    }
+
+    cancelledUploads.add(uploadId);
+    console.log(`[Inventory] Upload #${uploadId} cancellation requested by user ${req.user.id}`);
+
+    return res.json({
+      uploadId,
+      status: 'CANCELLING',
+      message: 'Cancellation requested. Processing will stop shortly.',
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * GET /api/inventory/uploads/:id/detail
  * Returns full upload details including both success and failure records
  * for complete visibility of the upload process.
@@ -1387,4 +1451,4 @@ async function exportFailures(req, res, next) {
   }
 }
 
-module.exports = { bulkUpload, listUploads, getFailures, retryUpload, downloadTemplate, getUploadProgress, getUploadDetail, getSuccessRecords, getDebugLog, exportFailures };
+module.exports = { bulkUpload, listUploads, getFailures, retryUpload, downloadTemplate, getUploadProgress, getUploadDetail, getSuccessRecords, getDebugLog, exportFailures, cancelUpload };
