@@ -229,6 +229,13 @@ function normalizeOnlineRow(row) {
   if (normalized.TransactionDate != null) {
     normalized.TransactionDate = maybeExcelSerialToDate(normalized.TransactionDate);
   }
+  // Force online processing. The inventoryStagedTransactions REST API only
+  // posts the transaction immediately when TransactionMode is "1" (online).
+  // The template's TRANSACTION_MODE sample value (2/3 = background) is accepted
+  // (ProcessStatus 1) but leaves the row in the interface with a null
+  // TransactionHeaderId — never processed into inventory, so it never appears
+  // in Oracle. Override it so Online posts the same way as the Normal flow.
+  normalized.TransactionMode = '1';
   return normalized;
 }
 

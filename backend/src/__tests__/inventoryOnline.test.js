@@ -41,7 +41,9 @@ describe('normalizeOnlineRow', () => {
     expect(n.SourceCode).toBe('SR');
     expect(n.SourceHeaderId).toBe('123456');
     expect(n.SourceLineId).toBe('121364');
-    expect(n.TransactionMode).toBe('2');
+    // TransactionMode is forced to online ("1") regardless of the file value,
+    // so the staged transaction actually posts (see normalizeOnlineRow).
+    expect(n.TransactionMode).toBe('1');
   });
 
   it('prefers TRANSACTION_UNIT_OF_MEASURE when TRANSACTION_UOM is blank', () => {
@@ -81,7 +83,7 @@ describe('mapRowToPayload (online)', () => {
       TransactionUnitOfMeasure: 'Ea',
       SourceHeaderId: '123456',
       SourceLineId: '121364',
-      TransactionMode: '2',
+      TransactionMode: '1', // forced online so the transaction posts
       SourceCode: 'SR',
       UseCurrentCostFlag: 'true', // blank in file → default
     });
