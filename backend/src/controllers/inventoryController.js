@@ -3,6 +3,7 @@
  * Handles CSV parsing, Oracle REST API calls, and result persistence.
  */
 
+const path = require('path');
 const { parse } = require('csv-parse/sync');
 const axios = require('axios');
 const prisma = require('../services/prisma');
@@ -139,6 +140,99 @@ function normalizeRow(row) {
 }
 
 /**
+ * Maps the Oracle FBDI "Inventory Transaction Import" column headers (used by
+ * the "Online" upload) to the canonical field names shared with the Normal
+ * pipeline. Keys are the normalized header (leading "*" and surrounding
+ * whitespace stripped, lowercased) — see normalizeHeaderKey.
+ *
+ * Unlike the Normal path, the Online file also carries the OrganizationName
+ * and the Oracle "fixed" fields (SourceCode, SourceHeaderId, SourceLineId,
+ * TransactionMode, UseCurrentCost) as columns, so they are mapped here too.
+ */
+const ONLINE_COLUMN_ALIASES = {
+  'organization_name': 'OrganizationName',
+  'item_number': 'ItemNumber',
+  'subinventory_code': 'SubinventoryCode',
+  'transaction_quantity': 'TransactionQuantity',
+  'transaction_uom': 'TransactionUnitOfMeasure',
+  'transaction_unit_of_measure': 'TransactionUnitOfMeasure',
+  'transaction_date': 'TransactionDate',
+  'transaction_type_name': 'TransactionTypeName',
+  'transaction_reference': 'TransactionReference',
+  'source_code': 'SourceCode',
+  'source_header_id': 'SourceHeaderId',
+  'source_line_id': 'SourceLineId',
+  'transaction_mode': 'TransactionMode',
+  'use_current_cost': 'UseCurrentCostFlag',
+};
+
+/**
+ * Normalizes a column header for alias lookup: strips a leading "*" (used in
+ * the Oracle template to mark required columns) and surrounding whitespace,
+ * then lowercases. Harmless for Normal CSV headers, which have no asterisks.
+ */
+function normalizeHeaderKey(key) {
+  return String(key ?? '').trim().replace(/^\*\s*/, '').trim().toLowerCase();
+}
+
+/**
+ * Oracle templates may export TRANSACTION_DATE as an Excel serial number
+ * (e.g. 46266) instead of a formatted date. When the value is a bare integer
+ * in a plausible serial range, convert it to a YYYY-MM-DD string so the shared
+ * date parser (formatDateToISO) can handle it. Otherwise the value is returned
+ * unchanged for normal date-string parsing.
+ */
+function maybeExcelSerialToDate(value) {
+  const s = String(value ?? '').trim();
+  // Pure number with no date separators, in a sane Excel-serial window
+  // (~1954–2119). Real date strings contain "/" or "-" and are left alone.
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Number(s);
+    if (n >= 20000 && n <= 80000) {
+      // Excel's day 0 is 1899-12-30 (handles the 1900 leap-year bug for
+      // dates after 1900-03-01, which covers all plausible inputs here).
+      const ms = Date.UTC(1899, 11, 30) + Math.round(n) * 86400000;
+      const d = new Date(ms);
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+    }
+  }
+  return value;
+}
+
+/**
+ * Normalizes a parsed row from the "Online" (Oracle FBDI) CSV by mapping the
+ * FBDI column headers to the canonical field names used by the pipeline.
+ * The first non-empty value wins when two headers map to the same field
+ * (e.g. TRANSACTION_UOM is preferred over TRANSACTION_UNIT_OF_MEASURE).
+ * Original keys are preserved so no data is lost. The original row is not
+ * mutated; a new object is returned.
+ */
+function normalizeOnlineRow(row) {
+  const normalized = {};
+  for (const [key, value] of Object.entries(row)) {
+    const canonical = ONLINE_COLUMN_ALIASES[normalizeHeaderKey(key)];
+    if (canonical) {
+      const curEmpty = normalized[canonical] == null || String(normalized[canonical]).trim() === '';
+      const valEmpty = value == null || String(value).trim() === '';
+      if (curEmpty && !valEmpty) {
+        normalized[canonical] = value;
+      } else if (!(canonical in normalized)) {
+        normalized[canonical] = value ?? '';
+      }
+    }
+    // Always keep the original key so no data is lost
+    if (!(key in normalized)) {
+      normalized[key] = value;
+    }
+  }
+  // Oracle may export the date as an Excel serial — normalize it to YYYY-MM-DD.
+  if (normalized.TransactionDate != null) {
+    normalized.TransactionDate = maybeExcelSerialToDate(normalized.TransactionDate);
+  }
+  return normalized;
+}
+
+/**
  * Validates a parsed CSV row and returns an error message if invalid.
  * Returns null when the row is valid.
  *
@@ -149,7 +243,12 @@ function normalizeRow(row) {
  *  - Missing subinventory (tries to extract from TransactionReference)
  *  - Missing TransactionUnitOfMeasure (UoM)
  */
-function validateRow(row) {
+function validateRow(row, { requireOrg = false } = {}) {
+  // Online uploads carry OrganizationName per row (Normal supplies it via a
+  // form field, validated separately in bulkUpload).
+  if (requireOrg && (!row.OrganizationName || String(row.OrganizationName).trim() === '')) {
+    return 'Empty organization name';
+  }
   if (!row.ItemNumber || row.ItemNumber.trim() === '') {
     return MISSING_BARCODE_ERROR;
   }
@@ -214,7 +313,9 @@ function cleanReference(ref) {
  * @returns {{ value?: string, error?: string }} ISO 8601 formatted timestamp or error
  */
 function formatDateToISO(dateStr) {
-  const raw = String(dateStr ?? '').trim();
+  // Accept Excel serial dates (e.g. from the Oracle "Online" template) by
+  // converting them to YYYY-MM-DD before the string parsing below.
+  const raw = String(maybeExcelSerialToDate(dateStr) ?? '').trim();
   if (!raw) return { error: 'Empty transaction date' };
 
   // Use only the date part before any whitespace or time separator
@@ -325,8 +426,21 @@ function mapRowToPayload(row, organizationName) {
 
   const txRef = cleanReference(row.TransactionReference);
 
+  // OrganizationName: Normal supplies it via the form field (organizationName);
+  // Online carries it per row. Prefer the form value, fall back to the row.
+  const org = (organizationName && organizationName.trim()) || row.OrganizationName?.trim() || '';
+
+  // Returns the trimmed row value when present, otherwise the default.
+  // Normal rows have none of these columns, so they get the fixed defaults
+  // below (matching the working Python reference script). Online rows carry
+  // them as columns and override the defaults.
+  const valueOr = (value, fallback) => {
+    const trimmed = (value == null ? '' : String(value)).trim();
+    return trimmed !== '' ? trimmed : fallback;
+  };
+
   return {
-    OrganizationName: organizationName,
+    OrganizationName: org,
     TransactionTypeName: row.TransactionTypeName?.trim(),
     ItemNumber: row.ItemNumber?.trim(),
     SubinventoryCode: subinventory,
@@ -336,12 +450,13 @@ function mapRowToPayload(row, organizationName) {
     ExternalSystemTransactionReference: txRef,
     TransactionUnitOfMeasure: uom,
     // Fixed fields required by the Oracle inventoryStagedTransactions REST API.
-    // Values match the working Python reference script provided by the client.
-    SourceHeaderId: '1',
-    SourceLineId: '0',
-    TransactionMode: '1',
-    SourceCode: 'SERVICE',
-    UseCurrentCostFlag: 'true',
+    // Defaults match the working Python reference script; the Online upload
+    // can override each one via the corresponding template column.
+    SourceHeaderId: valueOr(row.SourceHeaderId, '1'),
+    SourceLineId: valueOr(row.SourceLineId, '0'),
+    TransactionMode: valueOr(row.TransactionMode, '1'),
+    SourceCode: valueOr(row.SourceCode, 'SERVICE'),
+    UseCurrentCostFlag: valueOr(row.UseCurrentCostFlag, 'true'),
   };
 }
 
@@ -461,7 +576,7 @@ function stringifyResponseBody(body, fallback = '') {
  * records to the database periodically, and updates progress after each batch
  * so the frontend can poll efficiently.
  */
-async function processUploadRows(upload, records, organizationName) {
+async function processUploadRows(upload, records, organizationName, { requireOrg = false } = {}) {
   let successCount = 0;
   let failureCount = 0;
   let pendingSuccesses = [];
@@ -558,7 +673,7 @@ async function processUploadRows(upload, records, organizationName) {
 
   /** Process a single row: validate, map, call Oracle API. */
   async function processRow(row, rowNumber) {
-    const validationError = validateRow(row);
+    const validationError = validateRow(row, { requireOrg });
     if (validationError) {
       if (validationError === MISSING_BARCODE_ERROR) {
         console.warn(`[Inventory] Upload #${upload.id} Row ${rowNumber} SKIPPED: Missing barcode`);
@@ -741,13 +856,30 @@ async function bulkUpload(req, res, next) {
       return res.status(400).json({ error: 'CSV file is required.' });
     }
 
+    // Upload mode: "normal" (default) uses the form-supplied Organization Name
+    // and the Odoo/Vend column aliases; "online" reads the Oracle FBDI template
+    // columns (OrganizationName and the Oracle fixed fields come from the file).
+    const mode = String(req.body.mode || 'normal').toLowerCase() === 'online' ? 'online' : 'normal';
+
     const organizationName = req.body.organizationName?.trim();
-    if (!organizationName) {
+    if (mode === 'normal' && !organizationName) {
       return res.status(400).json({ error: 'Organization name is required.' });
     }
 
-    // Parse the CSV file buffer
-    const records = parse(req.file.buffer, {
+    // Parse the CSV file buffer. For Online, the Oracle template can carry
+    // title rows ("Inventory Transactions", "* Required") above the header row,
+    // so skip down to the first line that looks like the FBDI header.
+    let csvBuffer = req.file.buffer;
+    if (mode === 'online') {
+      const text = csvBuffer.toString('utf8');
+      const lines = text.split(/\r?\n/);
+      const headerIdx = lines.findIndex((l) => /\*?\s*ORGANIZATION_NAME|ITEM_NUMBER/i.test(l));
+      if (headerIdx > 0) {
+        csvBuffer = Buffer.from(lines.slice(headerIdx).join('\n'), 'utf8');
+      }
+    }
+
+    const records = parse(csvBuffer, {
       columns: true,       // use first row as headers
       skip_empty_lines: true,
       trim: true,
@@ -760,7 +892,16 @@ async function bulkUpload(req, res, next) {
 
     // Normalize column names so alternative headers are accepted
     for (let i = 0; i < records.length; i++) {
-      records[i] = normalizeRow(records[i]);
+      records[i] = mode === 'online' ? normalizeOnlineRow(records[i]) : normalizeRow(records[i]);
+    }
+
+    // The upload record stores a single organization label. For Online, the
+    // organization lives per row, so record the first non-empty one (or a
+    // placeholder) for display in the history table.
+    let uploadOrg = organizationName || '';
+    if (mode === 'online') {
+      const firstOrg = records.find((r) => r.OrganizationName && String(r.OrganizationName).trim() !== '');
+      uploadOrg = firstOrg ? String(firstOrg.OrganizationName).trim() : 'Online';
     }
 
     // Create the upload record in PROCESSING state
@@ -768,7 +909,7 @@ async function bulkUpload(req, res, next) {
       data: {
         userId: req.user.id,
         filename: req.file.originalname,
-        organizationName,
+        organizationName: uploadOrg,
         totalRecords: records.length,
         status: 'PROCESSING',
       },
@@ -784,8 +925,12 @@ async function bulkUpload(req, res, next) {
       status: 'PROCESSING',
     });
 
-    // Process rows in the background (fire and forget)
-    processUploadRows(upload, records, organizationName).catch((err) => {
+    // Process rows in the background (fire and forget). For Online, pass an
+    // empty organization so mapRowToPayload falls back to each row's own
+    // OrganizationName, and require it during validation.
+    processUploadRows(upload, records, mode === 'online' ? '' : organizationName, {
+      requireOrg: mode === 'online',
+    }).catch((err) => {
       console.error(`[Inventory] Upload #${upload.id} BACKGROUND ERROR:`, err);
       prisma.inventoryUpload.update({
         where: { id: upload.id },
@@ -1073,6 +1218,23 @@ function downloadTemplate(_req, res) {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="inventory_template.csv"');
   return res.send(csv);
+}
+
+// Filename of the committed Oracle FBDI template served for Online uploads.
+const ONLINE_TEMPLATE_FILENAME = 'accInventoryTransactionImportTemplate.xlsm';
+
+/**
+ * GET /api/inventory/template/online
+ * Returns the Oracle FBDI "Inventory Transaction Import" template (.xlsm)
+ * used for the Online upload flow. The file is committed under backend/assets.
+ */
+function downloadOnlineTemplate(_req, res) {
+  const filePath = path.join(__dirname, '..', '..', 'assets', ONLINE_TEMPLATE_FILENAME);
+  res.download(filePath, ONLINE_TEMPLATE_FILENAME, (err) => {
+    if (err && !res.headersSent) {
+      res.status(404).json({ error: 'Online template is not available on the server.' });
+    }
+  });
 }
 
 /**
@@ -1451,4 +1613,10 @@ async function exportFailures(req, res, next) {
   }
 }
 
-module.exports = { bulkUpload, listUploads, getFailures, retryUpload, downloadTemplate, getUploadProgress, getUploadDetail, getSuccessRecords, getDebugLog, exportFailures, cancelUpload };
+module.exports = {
+  bulkUpload, listUploads, getFailures, retryUpload, downloadTemplate,
+  downloadOnlineTemplate, getUploadProgress, getUploadDetail, getSuccessRecords,
+  getDebugLog, exportFailures, cancelUpload,
+  // Exported for unit testing of the pure mapping/validation helpers.
+  _test: { normalizeRow, normalizeOnlineRow, mapRowToPayload, validateRow, formatDateToISO, maybeExcelSerialToDate },
+};

@@ -19,6 +19,7 @@ const {
   getFailures,
   retryUpload,
   downloadTemplate,
+  downloadOnlineTemplate,
   getUploadProgress,
   getUploadDetail,
   getSuccessRecords,
@@ -56,6 +57,21 @@ const upload = multer({
  *         description: CSV file download
  */
 router.get('/template', downloadTemplate);
+
+/**
+ * @swagger
+ * /inventory/template/online:
+ *   get:
+ *     tags: [Inventory]
+ *     summary: Download the Oracle FBDI (.xlsm) template for Online uploads
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Excel macro-enabled template download
+ *       404:
+ *         description: Template file not present on the server
+ */
+router.get('/template/online', downloadOnlineTemplate);
 
 // ── Protected routes (JWT auth + activity logging) ──────────────────────
 

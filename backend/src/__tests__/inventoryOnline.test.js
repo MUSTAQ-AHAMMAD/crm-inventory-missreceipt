@@ -1,0 +1,117 @@
+/**
+ * Unit tests for the "Online" (Oracle FBDI) inventory upload mapping:
+ * FBDI column headers → canonical fields → Oracle REST payload, plus the
+ * Excel-serial date handling and per-row organization validation.
+ */
+
+const { _test } = require('../controllers/inventoryController');
+const { normalizeOnlineRow, normalizeRow, mapRowToPayload, validateRow, maybeExcelSerialToDate } = _test;
+
+// A row mirroring the sample filled into the Oracle template (row 5), with the
+// asterisks/spacing the template uses on required headers.
+function sampleOnlineRow() {
+  return {
+    '* ORGANIZATION_NAME': 'Online Store',
+    'ITEM_NUMBER': '6287020282591',
+    'SUBINVENTORY_CODE': 'Shipped',
+    '*TRANSACTION_QUANTITY': '-1',
+    'TRANSACTION_UOM': 'Ea',
+    'TRANSACTION_UNIT_OF_MEASURE': '',
+    'TRANSACTION_DATE': '2026-08-27',
+    'TRANSACTION_TYPE_NAME': 'Online sales',
+    'TRANSACTION_REFERENCE': 'Completed no.276752514',
+    '*SOURCE_CODE': 'SR',
+    '*SOURCE_HEADER_ID': '123456',
+    '*SOURCE_LINE_ID': '121364',
+    '*TRANSACTION_MODE': '2',
+    '*USE_CURRENT_COST': '',
+  };
+}
+
+describe('normalizeOnlineRow', () => {
+  it('maps FBDI headers (with asterisks) to canonical fields', () => {
+    const n = normalizeOnlineRow(sampleOnlineRow());
+    expect(n.OrganizationName).toBe('Online Store');
+    expect(n.ItemNumber).toBe('6287020282591');
+    expect(n.SubinventoryCode).toBe('Shipped');
+    expect(n.TransactionQuantity).toBe('-1');
+    expect(n.TransactionUnitOfMeasure).toBe('Ea'); // UOM preferred over empty UNIT_OF_MEASURE
+    expect(n.TransactionTypeName).toBe('Online sales');
+    expect(n.TransactionReference).toBe('Completed no.276752514');
+    expect(n.SourceCode).toBe('SR');
+    expect(n.SourceHeaderId).toBe('123456');
+    expect(n.SourceLineId).toBe('121364');
+    expect(n.TransactionMode).toBe('2');
+  });
+
+  it('prefers TRANSACTION_UNIT_OF_MEASURE when TRANSACTION_UOM is blank', () => {
+    const n = normalizeOnlineRow({ 'TRANSACTION_UOM': '', 'TRANSACTION_UNIT_OF_MEASURE': 'Each' });
+    expect(n.TransactionUnitOfMeasure).toBe('Each');
+  });
+
+  it('converts an Excel serial TRANSACTION_DATE to YYYY-MM-DD', () => {
+    const n = normalizeOnlineRow({ 'ITEM_NUMBER': 'X', 'TRANSACTION_DATE': '46266' });
+    expect(n.TransactionDate).toBe('2026-09-01');
+  });
+});
+
+describe('maybeExcelSerialToDate', () => {
+  it('converts serials in range and leaves date strings alone', () => {
+    expect(maybeExcelSerialToDate('46266')).toBe('2026-09-01');
+    expect(maybeExcelSerialToDate('2026-08-27')).toBe('2026-08-27');
+    expect(maybeExcelSerialToDate('7/1/2026')).toBe('7/1/2026');
+    expect(maybeExcelSerialToDate('5')).toBe('5'); // out of serial range → untouched
+  });
+});
+
+describe('mapRowToPayload (online)', () => {
+  it('reads org and fixed fields from the row when no form org is passed', () => {
+    const row = normalizeOnlineRow(sampleOnlineRow());
+    expect(validateRow(row, { requireOrg: true })).toBeNull();
+    const payload = mapRowToPayload(row, '');
+    expect(payload).toMatchObject({
+      OrganizationName: 'Online Store',
+      TransactionTypeName: 'Online sales',
+      ItemNumber: '6287020282591',
+      SubinventoryCode: 'Shipped',
+      TransactionDate: '2026-08-27T00:00:00.000+00:00',
+      TransactionQuantity: '-1',
+      TransactionReference: 'Completed no.276752514',
+      ExternalSystemTransactionReference: 'Completed no.276752514',
+      TransactionUnitOfMeasure: 'Ea',
+      SourceHeaderId: '123456',
+      SourceLineId: '121364',
+      TransactionMode: '2',
+      SourceCode: 'SR',
+      UseCurrentCostFlag: 'true', // blank in file → default
+    });
+  });
+
+  it('flags a missing organization name for online rows', () => {
+    const row = normalizeOnlineRow({ 'ITEM_NUMBER': 'X', '*TRANSACTION_QUANTITY': '1' });
+    expect(validateRow(row, { requireOrg: true })).toBe('Empty organization name');
+  });
+});
+
+describe('mapRowToPayload (normal, backward compatible)', () => {
+  it('uses the form org and the fixed defaults when the row has no such columns', () => {
+    const row = normalizeRow({
+      TransactionTypeName: 'Vend RMA',
+      ItemNumber: 'AS54888',
+      SubinventoryCode: 'AZIZMALL',
+      TransactionDate: '2024-01-15',
+      TransactionQuantity: '10',
+      TransactionReference: 'REF001',
+      TransactionUnitOfMeasure: 'Ea',
+    });
+    const payload = mapRowToPayload(row, 'Vision Operations');
+    expect(payload).toMatchObject({
+      OrganizationName: 'Vision Operations',
+      SourceHeaderId: '1',
+      SourceLineId: '0',
+      TransactionMode: '1',
+      SourceCode: 'SERVICE',
+      UseCurrentCostFlag: 'true',
+    });
+  });
+});

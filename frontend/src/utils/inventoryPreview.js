@@ -36,6 +36,14 @@ const COLUMN_ALIASES = {
   'transaction reference': 'TransactionReference',
   'order lines/order ref': 'TransactionReference',
   'order ref': 'TransactionReference',
+  // Oracle FBDI "Online" template headers (asterisks are stripped before lookup)
+  'item_number': 'ItemNumber',
+  'subinventory_code': 'SubinventoryCode',
+  'transaction_quantity': 'TransactionQuantity',
+  'transaction_uom': 'TransactionUnitOfMeasure',
+  'transaction_unit_of_measure': 'TransactionUnitOfMeasure',
+  'transaction_date': 'TransactionDate',
+  'transaction_reference': 'TransactionReference',
 }
 
 const CANONICAL = [
@@ -86,6 +94,15 @@ export function parseCsv(text) {
 export function toIsoDate(dateStr) {
   const raw = String(dateStr ?? '').trim()
   if (!raw) return null
+
+  // Oracle "Online" template may export the date as an Excel serial number.
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    const n = Number(raw)
+    if (n >= 20000 && n <= 80000) {
+      const d = new Date(Date.UTC(1899, 11, 30) + Math.round(n) * 86400000)
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+    }
+  }
 
   const datePart = raw.split(/[T\s]/)[0]
   const sep = datePart.includes('/') ? '/' : '-'
@@ -157,7 +174,8 @@ export function buildDatePreview(text) {
   const header = rows[0].map((h) => h.trim())
   const colIndex = {}
   header.forEach((h, i) => {
-    const lower = h.toLowerCase()
+    // Strip a leading "*" (Oracle template marks required columns with it)
+    const lower = h.replace(/^\*\s*/, '').trim().toLowerCase()
     if (CANONICAL.includes(h) && !(h in colIndex)) colIndex[h] = i
     const canonical = COLUMN_ALIASES[lower]
     if (canonical && !(canonical in colIndex)) colIndex[canonical] = i

@@ -15,15 +15,30 @@ import HistoryFilterBar from '../components/common/HistoryFilterBar'
 import { filterUploads } from '../utils/format'
 import { buildDatePreview } from '../utils/inventoryPreview'
 
-// Required CSV columns for inventory uploads (OrganizationName is a separate form field)
+// Required CSV columns for "Normal" inventory uploads (OrganizationName is a
+// separate form field).
 const REQUIRED_COLUMNS = [
   'TransactionTypeName', 'ItemNumber',
   'SubinventoryCode', 'TransactionDate', 'TransactionQuantity',
   'TransactionReference', 'TransactionUnitOfMeasure',
 ]
 
+// Key columns read from the "Online" (Oracle FBDI) template. The file carries
+// the Organization Name and the Oracle fixed fields as columns, so there is no
+// Organization Name form field in Online mode.
+const ONLINE_COLUMNS = [
+  'ORGANIZATION_NAME', 'ITEM_NUMBER', 'SUBINVENTORY_CODE',
+  'TRANSACTION_QUANTITY', 'TRANSACTION_UOM', 'TRANSACTION_DATE',
+  'TRANSACTION_TYPE_NAME', 'TRANSACTION_REFERENCE',
+  'SOURCE_CODE', 'SOURCE_HEADER_ID', 'SOURCE_LINE_ID',
+  'TRANSACTION_MODE', 'USE_CURRENT_COST',
+]
+
 export default function InventoryPage() {
   const queryClient = useQueryClient()
+  // Upload mode: 'normal' (Odoo/Vend CSV + form org name) or 'online' (Oracle
+  // FBDI template CSV where org name and fixed fields come from the file).
+  const [mode, setMode] = useState('normal')
   const [file, setFile] = useState(null)
   const [organizationName, setOrganizationName] = useState('')
   const [uploading, setUploading] = useState(false)
@@ -96,7 +111,9 @@ export default function InventoryPage() {
   }, [progressData, activeUploadId, queryClient])
 
   const handleUpload = useCallback(async () => {
-    if (!organizationName.trim()) { setError('Please enter an Organization Name.'); return }
+    if (mode === 'normal' && !organizationName.trim()) {
+      setError('Please enter an Organization Name.'); return
+    }
     if (!file) { setError('Please select a CSV file.'); return }
     setError('')
     setResult(null)
@@ -107,7 +124,11 @@ export default function InventoryPage() {
 
     const formData = new FormData()
     formData.append('file', file)
-    formData.append('organizationName', organizationName.trim())
+    formData.append('mode', mode)
+    // Online reads Organization Name from the file; Normal sends the form value.
+    if (mode === 'normal') {
+      formData.append('organizationName', organizationName.trim())
+    }
 
     const controller = new AbortController()
     abortRef.current = controller
@@ -145,7 +166,7 @@ export default function InventoryPage() {
     } finally {
       abortRef.current = null
     }
-  }, [file, organizationName, queryClient])
+  }, [file, organizationName, mode, queryClient])
 
   // Cancel the upload: abort the in-flight POST if still uploading, otherwise
   // tell the backend to stop the in-progress job.
@@ -171,8 +192,21 @@ export default function InventoryPage() {
   }, [activeUploadId])
 
   const handleDownloadTemplate = () => {
-    window.open(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api'}/inventory/template`, '_blank')
+    const base = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api'
+    const path = mode === 'online' ? '/inventory/template/online' : '/inventory/template'
+    window.open(`${base}${path}`, '_blank')
   }
+
+  // Switch upload mode and reset the per-upload state so the two flows don't
+  // leak file/org/preview into each other.
+  const handleSwitchMode = useCallback((next) => {
+    if (next === mode || uploading) return
+    setMode(next)
+    setFile(null)
+    setPreview(null)
+    setResult(null)
+    setError('')
+  }, [mode, uploading])
 
   // Compute progress stats from polling data
   const processed = progressData ? progressData.successCount + progressData.failureCount : 0
@@ -188,50 +222,91 @@ export default function InventoryPage() {
           onClick={handleDownloadTemplate}
           className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
         >
-          ⬇️ Download Template
+          ⬇️ Download {mode === 'online' ? 'Online Template (.xlsm)' : 'Template'}
         </button>
       </div>
 
       {/* Upload card */}
       <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
-        <h2 className="font-semibold text-gray-700">Upload CSV File</h2>
-
-        <div>
-          <label htmlFor="organizationName" className="block text-sm font-medium text-gray-700 mb-1">
-            Organization Name
-          </label>
-          <input
-            id="organizationName"
-            type="text"
-            value={organizationName}
-            onChange={(e) => setOrganizationName(e.target.value)}
-            placeholder="e.g. Vision Operations"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-          />
+        {/* Normal / Online mode switcher */}
+        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
+          {[
+            { key: 'normal', label: 'Normal' },
+            { key: 'online', label: 'Online' },
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => handleSwitchMode(tab.key)}
+              disabled={uploading}
+              className={`px-5 py-1.5 text-sm font-medium rounded-md transition-colors disabled:opacity-60 ${
+                mode === tab.key
+                  ? 'bg-white text-blue-700 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
-        <FileDropzone onFile={handleFile} label="inventory CSV" />
+        <h2 className="font-semibold text-gray-700">
+          Upload {mode === 'online' ? 'Online (Oracle Template) CSV' : 'CSV File'}
+        </h2>
+
+        {mode === 'normal' && (
+          <div>
+            <label htmlFor="organizationName" className="block text-sm font-medium text-gray-700 mb-1">
+              Organization Name
+            </label>
+            <input
+              id="organizationName"
+              type="text"
+              value={organizationName}
+              onChange={(e) => setOrganizationName(e.target.value)}
+              placeholder="e.g. Vision Operations"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+            />
+          </div>
+        )}
+
+        <FileDropzone onFile={handleFile} label={mode === 'online' ? 'Oracle template CSV' : 'inventory CSV'} />
 
         {/* Per-date preview — visual confirmation before processing */}
         {preview && <DatePreview preview={preview} />}
 
         {/* Column mapping reference */}
-        <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-          <p className="text-sm font-medium text-blue-700 mb-2">Required CSV Columns:</p>
-          <div className="flex flex-wrap gap-2">
-            {REQUIRED_COLUMNS.map((col) => (
-              <span key={col} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-mono">{col}</span>
-            ))}
+        {mode === 'online' ? (
+          <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
+            <p className="text-sm font-medium text-blue-700 mb-2">Online (Oracle template) columns used:</p>
+            <div className="flex flex-wrap gap-2">
+              {ONLINE_COLUMNS.map((col) => (
+                <span key={col} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-mono">{col}</span>
+              ))}
+            </div>
+            <p className="text-xs text-blue-600 mt-2">
+              Fill the <span className="font-mono">INV_TRANSACTIONS_INTERFACE</span> sheet of the downloaded template, then upload it as CSV (headers in the first row).{' '}
+              <span className="font-mono">ORGANIZATION_NAME</span> and the Oracle fixed fields (<span className="font-mono">SOURCE_CODE</span>, <span className="font-mono">SOURCE_HEADER_ID</span>, <span className="font-mono">SOURCE_LINE_ID</span>, <span className="font-mono">TRANSACTION_MODE</span>, <span className="font-mono">USE_CURRENT_COST</span>) are read from the file.{' '}
+              Either <span className="font-mono">TRANSACTION_UOM</span> or <span className="font-mono">TRANSACTION_UNIT_OF_MEASURE</span> is accepted for the UoM.
+            </p>
           </div>
-          <p className="text-xs text-blue-600 mt-2">
-            Alternative column names are also accepted (e.g. <span className="font-mono">Order Lines/Product/Barcode</span> for <span className="font-mono">ItemNumber</span>,{' '}
-            <span className="font-mono">Order Lines/Branch/Name</span> for <span className="font-mono">SubinventoryCode</span>,{' '}
-            <span className="font-mono">diff</span> for <span className="font-mono">TransactionQuantity</span>,{' '}
-            <span className="font-mono">Order Lines/Order Ref</span> for <span className="font-mono">TransactionReference</span>,{' '}
-            <span className="font-mono">Order Lines/Order Ref/Date</span> for <span className="font-mono">TransactionDate</span>,{' '}
-            <span className="font-mono">Order Lines/Base UoM</span> for <span className="font-mono">TransactionUnitOfMeasure</span>).
-          </p>
-        </div>
+        ) : (
+          <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
+            <p className="text-sm font-medium text-blue-700 mb-2">Required CSV Columns:</p>
+            <div className="flex flex-wrap gap-2">
+              {REQUIRED_COLUMNS.map((col) => (
+                <span key={col} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-mono">{col}</span>
+              ))}
+            </div>
+            <p className="text-xs text-blue-600 mt-2">
+              Alternative column names are also accepted (e.g. <span className="font-mono">Order Lines/Product/Barcode</span> for <span className="font-mono">ItemNumber</span>,{' '}
+              <span className="font-mono">Order Lines/Branch/Name</span> for <span className="font-mono">SubinventoryCode</span>,{' '}
+              <span className="font-mono">diff</span> for <span className="font-mono">TransactionQuantity</span>,{' '}
+              <span className="font-mono">Order Lines/Order Ref</span> for <span className="font-mono">TransactionReference</span>,{' '}
+              <span className="font-mono">Order Lines/Order Ref/Date</span> for <span className="font-mono">TransactionDate</span>,{' '}
+              <span className="font-mono">Order Lines/Base UoM</span> for <span className="font-mono">TransactionUnitOfMeasure</span>).
+            </p>
+          </div>
+        )}
 
         <ErrorAlert message={error} onDismiss={() => setError('')} />
 
@@ -297,7 +372,7 @@ export default function InventoryPage() {
         <div className="flex flex-wrap gap-3">
           <button
             onClick={handleUpload}
-            disabled={uploading || !file || !organizationName.trim()}
+            disabled={uploading || !file || (mode === 'normal' && !organizationName.trim())}
             className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center gap-2"
           >
             {uploading ? <Spinner size="sm" /> : '📤'}
