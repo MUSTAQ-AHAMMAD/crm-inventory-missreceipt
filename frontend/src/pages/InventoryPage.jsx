@@ -286,7 +286,7 @@ export default function InventoryPage() {
             <p className="text-xs text-blue-600 mt-2">
               Fill the <span className="font-mono">INV_TRANSACTIONS_INTERFACE</span> sheet of the downloaded template, then upload it as CSV (headers in the first row).{' '}
               <span className="font-mono">ORGANIZATION_NAME</span> and the Oracle fixed fields (<span className="font-mono">SOURCE_CODE</span>, <span className="font-mono">SOURCE_HEADER_ID</span>, <span className="font-mono">SOURCE_LINE_ID</span>, <span className="font-mono">USE_CURRENT_COST</span>) are read from the file.{' '}
-              Either <span className="font-mono">TRANSACTION_UOM</span> or <span className="font-mono">TRANSACTION_UNIT_OF_MEASURE</span> is accepted for the UoM.{' '}
+              Either <span className="font-mono">TRANSACTION_UOM</span> or <span className="font-mono">TRANSACTION_UNIT_OF_MEASURE</span> is accepted for the UoM; the short code <span className="font-mono">Ea</span> is sent to Oracle as <span className="font-mono">Each</span>.{' '}
               <span className="font-mono">TRANSACTION_MODE</span> is always sent as online (1) so the transaction posts immediately — a background mode (2/3) would stay unprocessed in Oracle.
             </p>
           </div>

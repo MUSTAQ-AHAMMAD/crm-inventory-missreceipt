@@ -176,6 +176,36 @@ function normalizeHeaderKey(key) {
 }
 
 /**
+ * Returns the value of an Oracle FBDI column (by its normalized header name)
+ * from a raw parsed row, regardless of asterisks/spacing in the header.
+ */
+function findFbdiValue(row, normalizedHeader) {
+  for (const [key, value] of Object.entries(row)) {
+    if (normalizeHeaderKey(key) === normalizedHeader) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Maps the Oracle template's short UOM codes to the UOM *names* the inventory
+ * REST API resolves. The template's TRANSACTION_UOM sample is an abbreviation
+ * (e.g. "Ea"), but Oracle expects the unit's name ("Each") — the same value
+ * the working Normal uploads send. Unknown values pass through unchanged so a
+ * full name typed directly (e.g. "Each", "Box") still works.
+ */
+const ONLINE_UOM_ALIASES = {
+  'ea': 'Each',
+  'each': 'Each',
+  'eaches': 'Each',
+};
+
+function normalizeUom(value) {
+  const trimmed = (value == null ? '' : String(value)).trim();
+  if (!trimmed) return '';
+  return ONLINE_UOM_ALIASES[trimmed.toLowerCase()] || trimmed;
+}
+
+/**
  * Oracle templates may export TRANSACTION_DATE as an Excel serial number
  * (e.g. 46266) instead of a formatted date. When the value is a bare integer
  * in a plausible serial range, convert it to a YYYY-MM-DD string so the shared
@@ -225,6 +255,16 @@ function normalizeOnlineRow(row) {
       normalized[key] = value;
     }
   }
+  // Resolve the UOM to a name Oracle accepts. Prefer the full-name column
+  // (TRANSACTION_UNIT_OF_MEASURE) over the short code (TRANSACTION_UOM), and
+  // translate known codes (e.g. "Ea" → "Each"). Oracle rejects the raw code
+  // with [INV_INUOM_INVALID_UOM]; the Normal flow proves the name resolves.
+  const resolvedUom = normalizeUom(findFbdiValue(row, 'transaction_unit_of_measure'))
+    || normalizeUom(findFbdiValue(row, 'transaction_uom'));
+  if (resolvedUom) {
+    normalized.TransactionUnitOfMeasure = resolvedUom;
+  }
+
   // Oracle may export the date as an Excel serial — normalize it to YYYY-MM-DD.
   if (normalized.TransactionDate != null) {
     normalized.TransactionDate = maybeExcelSerialToDate(normalized.TransactionDate);
@@ -1625,5 +1665,5 @@ module.exports = {
   downloadOnlineTemplate, getUploadProgress, getUploadDetail, getSuccessRecords,
   getDebugLog, exportFailures, cancelUpload,
   // Exported for unit testing of the pure mapping/validation helpers.
-  _test: { normalizeRow, normalizeOnlineRow, mapRowToPayload, validateRow, formatDateToISO, maybeExcelSerialToDate },
+  _test: { normalizeRow, normalizeOnlineRow, mapRowToPayload, validateRow, formatDateToISO, maybeExcelSerialToDate, normalizeUom },
 };

@@ -5,7 +5,7 @@
  */
 
 const { _test } = require('../controllers/inventoryController');
-const { normalizeOnlineRow, normalizeRow, mapRowToPayload, validateRow, maybeExcelSerialToDate } = _test;
+const { normalizeOnlineRow, normalizeRow, mapRowToPayload, validateRow, maybeExcelSerialToDate, normalizeUom } = _test;
 
 // A row mirroring the sample filled into the Oracle template (row 5), with the
 // asterisks/spacing the template uses on required headers.
@@ -35,7 +35,7 @@ describe('normalizeOnlineRow', () => {
     expect(n.ItemNumber).toBe('6287020282591');
     expect(n.SubinventoryCode).toBe('Shipped');
     expect(n.TransactionQuantity).toBe('-1');
-    expect(n.TransactionUnitOfMeasure).toBe('Ea'); // UOM preferred over empty UNIT_OF_MEASURE
+    expect(n.TransactionUnitOfMeasure).toBe('Each'); // "Ea" code resolved to the name Oracle accepts
     expect(n.TransactionTypeName).toBe('Online sales');
     expect(n.TransactionReference).toBe('Completed no.276752514');
     expect(n.SourceCode).toBe('SR');
@@ -46,9 +46,18 @@ describe('normalizeOnlineRow', () => {
     expect(n.TransactionMode).toBe('1');
   });
 
-  it('prefers TRANSACTION_UNIT_OF_MEASURE when TRANSACTION_UOM is blank', () => {
-    const n = normalizeOnlineRow({ 'TRANSACTION_UOM': '', 'TRANSACTION_UNIT_OF_MEASURE': 'Each' });
-    expect(n.TransactionUnitOfMeasure).toBe('Each');
+  it('prefers TRANSACTION_UNIT_OF_MEASURE (name) over TRANSACTION_UOM (code)', () => {
+    expect(normalizeOnlineRow({ 'TRANSACTION_UOM': '', 'TRANSACTION_UNIT_OF_MEASURE': 'Each' }).TransactionUnitOfMeasure).toBe('Each');
+    expect(normalizeOnlineRow({ 'TRANSACTION_UOM': 'Ea', 'TRANSACTION_UNIT_OF_MEASURE': '' }).TransactionUnitOfMeasure).toBe('Each');
+    expect(normalizeOnlineRow({ 'TRANSACTION_UOM': 'Box', 'TRANSACTION_UNIT_OF_MEASURE': '' }).TransactionUnitOfMeasure).toBe('Box');
+  });
+
+  it('normalizeUom maps "Ea" to "Each" and passes unknown values through', () => {
+    expect(normalizeUom('Ea')).toBe('Each');
+    expect(normalizeUom('ea')).toBe('Each');
+    expect(normalizeUom('Each')).toBe('Each');
+    expect(normalizeUom('Box')).toBe('Box');
+    expect(normalizeUom('')).toBe('');
   });
 
   it('converts an Excel serial TRANSACTION_DATE to YYYY-MM-DD', () => {
@@ -80,7 +89,7 @@ describe('mapRowToPayload (online)', () => {
       TransactionQuantity: '-1',
       TransactionReference: 'Completed no.276752514',
       ExternalSystemTransactionReference: 'Completed no.276752514',
-      TransactionUnitOfMeasure: 'Ea',
+      TransactionUnitOfMeasure: 'Each', // "Ea" resolved to the valid Oracle UOM name
       SourceHeaderId: '123456',
       SourceLineId: '121364',
       TransactionMode: '1', // forced online so the transaction posts
