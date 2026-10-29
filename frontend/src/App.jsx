@@ -13,6 +13,7 @@ import InventoryTemplateGenerationPage from './pages/InventoryTemplateGeneration
 import MiscReceiptPage from './pages/MiscReceiptPage'
 import StandardReceiptPage from './pages/StandardReceiptPage'
 import ApplyReceiptPage from './pages/ApplyReceiptPage'
+import ApplyCreditMemoPage from './pages/ApplyCreditMemoPage'
 import ArInvoicePage from './pages/ArInvoicePage'
 import ArInvoiceDataPage from './pages/ArInvoiceDataPage'
 import ArInvoiceDetailPage from './pages/ArInvoiceDetailPage'
@@ -68,6 +69,7 @@ export default function App() {
             <Route path="misc-receipt" element={<MiscReceiptPage />} />
             <Route path="standard-receipt" element={<StandardReceiptPage />} />
             <Route path="apply-receipt" element={<ApplyReceiptPage />} />
+            <Route path="apply-credit-memo" element={<ApplyCreditMemoPage />} />
             <Route path="ar-invoice" element={<ArInvoicePage />} />
             <Route path="ar-invoice-data" element={<ArInvoiceDataPage />} />
             <Route path="ar-invoice/uploads/:uploadId" element={<ArInvoiceDetailPage />} />

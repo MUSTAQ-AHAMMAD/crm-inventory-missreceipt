@@ -95,7 +95,8 @@ describe('vendInvoiceController', () => {
 
     const response = res.json.mock.calls[0][0];
 
-    // All generated payloads (discount lines always produce totalAmount=0, so they go to positivePayloads)
+    // Discount-only groups net to totalAmount=0, which now routes to the separate
+    // credit-memo (negativePayloads) bucket; combine both to inspect every payload.
     const allPayloads = [...(response.positivePayloads || []), ...(response.negativePayloads || [])];
     for (const payload of allPayloads) {
       const line = payload.receivablesInvoiceLines[0];
@@ -464,5 +465,120 @@ describe('vendInvoiceController', () => {
     expect(prisma.fusionInvoiceLine.findMany).not.toHaveBeenCalled();
     const response = res.json.mock.calls[0][0];
     expect(response.stats.skippedExistingLines).toBe(0);
+  });
+
+  test('routes a negative-total group to the per-brand Credit Memo type and keeps it separate', async () => {
+    XLSX.utils.sheet_to_json
+      .mockImplementationOnce(() => ([
+        { 'Order Ref': 'HASALMMAL/14025', Branch: 'HASALMMAL', 'Payments/Payment Method': 'Cash' },
+      ]))
+      .mockImplementationOnce(() => ([
+        // Discount/memo line (no barcode) with a negative price — stays in the invoice group.
+        { 'Order Lines/Order Ref': 'HASALMMAL/14025', 'Order Lines/Order Ref/Date': '2025-12-24', 'Order Lines/Product Barcode': '', 'Order Lines/Product': 'Discount', 'Order Lines/Base Quantity': 1, 'Order Lines/Subtotal w/o Tax': -260.85 },
+        // Smaller positive item line, so the group nets negative (-195.63).
+        { 'Order Lines/Order Ref': 'HASALMMAL/14025', 'Order Lines/Order Ref/Date': '2025-12-24', 'Order Lines/Product Barcode': '6287020282096', 'Order Lines/Product': 'Item', 'Order Lines/Base Quantity': 1, 'Order Lines/Subtotal w/o Tax': 65.22 },
+      ]));
+
+    fusionMetadataService.findByCustomerType.mockResolvedValue({ billToName: 'Hikayat Anber', billToAccount: 127018, siteNumber: '112033' });
+    fusionMetadataService.mapToArInvoiceHeader.mockReturnValue({
+      BillToCustomerName: 'Hikayat Anber',
+      BillToCustomerNumber: '127018',
+      BillToSite: '112033',
+      BusinessUnit: 'Hikayat Anber-KSA',
+      TransactionSource: 'Vend Hikayat Anber',
+      TransactionType: 'HA Vend Invoice',
+      CreditMemoTransactionType: 'HA Vend Credit Memo',
+    });
+
+    const req = { files: { paymentLines: { name: 'p.xlsx', data: Buffer.from('p') }, salesLines: { name: 's.xlsx', data: Buffer.from('s') } } };
+    const res = { json: jest.fn(), status: jest.fn().mockReturnThis() };
+    await uploadVendInvoice(req, res, jest.fn());
+
+    const response = res.json.mock.calls[0][0];
+    expect(response.positivePayloads).toHaveLength(0);
+    expect(response.negativePayloads).toHaveLength(1);
+
+    const cm = response.negativePayloads[0];
+    // Negative group is stamped with the Credit Memo type + per-brand source/BU from metadata.
+    expect(cm.TransactionType).toBe('HA Vend Credit Memo');
+    expect(cm.TransactionSource).toBe('Vend Hikayat Anber');
+    expect(cm.BusinessUnit).toBe('Hikayat Anber-KSA');
+    expect(response.stats.negativeMissingCreditMemoType).toBe(0);
+  });
+
+  test('builds creditMemoPayloads from BOTH a net-negative group and a returned-item refund line', async () => {
+    XLSX.utils.sheet_to_json
+      .mockImplementationOnce(() => ([
+        { 'Order Ref': 'REDSEA/1', Branch: 'REDSEA', 'Payments/Payment Method': 'Cash' },
+        { 'Order Ref': 'REDSEA/2', Branch: 'REDSEA', 'Payments/Payment Method': 'Cash' },
+      ]))
+      .mockImplementationOnce(() => ([
+        // Net-negative group: a discount memo line (no barcode) with a negative price.
+        { 'Order Lines/Order Ref': 'REDSEA/1', 'Order Lines/Order Ref/Date': '2026-07-11', 'Order Lines/Product Barcode': '', 'Order Lines/Product': 'Discount', 'Order Lines/Base Quantity': 1, 'Order Lines/Subtotal w/o Tax': -300 },
+        // Returned item: real barcode + negative price → separated into refunds → credit memo.
+        { 'Order Lines/Order Ref': 'REDSEA/2', 'Order Lines/Order Ref/Date': '2026-07-11', 'Order Lines/Product Barcode': '999', 'Order Lines/Product': 'Returned Item', 'Order Lines/Base Quantity': 1, 'Order Lines/Subtotal w/o Tax': -50 },
+      ]));
+
+    fusionMetadataService.findByCustomerType.mockResolvedValue({ billToName: 'Cash Customer', billToAccount: 14, siteNumber: '14' });
+    fusionMetadataService.mapToArInvoiceHeader.mockReturnValue({
+      BillToCustomerName: 'Cash Customer', BillToCustomerNumber: '14', BillToSite: '14',
+      BusinessUnit: 'AlQurashi-KSA', TransactionSource: 'Vend',
+      TransactionType: 'Vend Invoice', CreditMemoTransactionType: 'Vend Invoice - CN',
+    });
+
+    const req = { files: { paymentLines: { name: 'p.xlsx', data: Buffer.from('p') }, salesLines: { name: 's.xlsx', data: Buffer.from('s') } } };
+    const res = { json: jest.fn(), status: jest.fn().mockReturnThis() };
+    await uploadVendInvoice(req, res, jest.fn());
+
+    const response = res.json.mock.calls[0][0];
+
+    // One CM from the net-negative group + one from the returned-item refund line.
+    expect(response.creditMemoPayloads).toHaveLength(2);
+    expect(response.stats.creditMemoPayloadsCount).toBe(2);
+    expect(response.stats.creditMemoMissingType).toBe(0);
+
+    for (const cm of response.creditMemoPayloads) {
+      // Credit memos always use a valid CM type/source ("Vend" is not a valid CM source).
+      expect(cm.TransactionType).toBe('Credit Memo');
+      expect(cm.TransactionSource).toBe('Manual');
+      expect(Array.isArray(cm.receivablesCreditMemoLines)).toBe(true);
+    }
+
+    // The returned-item CM: negative credit quantity, positive price, KSA tax line.
+    const refundCm = response.creditMemoPayloads.find(
+      (cm) => cm.receivablesCreditMemoLines.some((l) => l.ItemNumber === '999')
+    );
+    expect(refundCm).toBeTruthy();
+    const line = refundCm.receivablesCreditMemoLines.find((l) => l.ItemNumber === '999');
+    expect(parseFloat(line.LineQuantityCredit)).toBeLessThan(0);
+    expect(parseFloat(line.UnitSellingPrice)).toBeGreaterThan(0);
+    expect(line.receivablesCreditMemoLineTaxLines[0].TaxRegimeCode).toBe('KSA REGIME');
+  });
+
+  test('flags negative groups with no Credit Memo type mapped (keeps invoice type, counts them)', async () => {
+    XLSX.utils.sheet_to_json
+      .mockImplementationOnce(() => ([
+        { 'Order Ref': 'REDSEA/60775', Branch: 'REDSEA', 'Payments/Payment Method': 'Cash' },
+      ]))
+      .mockImplementationOnce(() => ([
+        { 'Order Lines/Order Ref': 'REDSEA/60775', 'Order Lines/Order Ref/Date': '2026-05-18', 'Order Lines/Product Barcode': '', 'Order Lines/Product': 'Discount', 'Order Lines/Base Quantity': 1, 'Order Lines/Subtotal w/o Tax': -50 },
+      ]));
+
+    // Metadata resolves the invoice type but has NO Credit Memo type.
+    fusionMetadataService.findByCustomerType.mockResolvedValue({ billToName: 'Cash Customer', billToAccount: 14, siteNumber: '14' });
+    fusionMetadataService.mapToArInvoiceHeader.mockReturnValue({
+      BillToCustomerName: 'Cash Customer', BillToCustomerNumber: '14', BillToSite: '14',
+      TransactionType: 'Vend Invoice',
+    });
+
+    const req = { files: { paymentLines: { name: 'p.xlsx', data: Buffer.from('p') }, salesLines: { name: 's.xlsx', data: Buffer.from('s') } } };
+    const res = { json: jest.fn(), status: jest.fn().mockReturnThis() };
+    await uploadVendInvoice(req, res, jest.fn());
+
+    const response = res.json.mock.calls[0][0];
+    expect(response.negativePayloads).toHaveLength(1);
+    // Unmapped → keeps the invoice type and is counted so the UI can warn.
+    expect(response.negativePayloads[0].TransactionType).toBe('Vend Invoice');
+    expect(response.stats.negativeMissingCreditMemoType).toBe(1);
   });
 });

@@ -26,6 +26,7 @@ const NAV_GROUPS = [
       { to: '/misc-receipt', label: 'Misc Receipt', icon: '🧾' },
       { to: '/standard-receipt', label: 'Standard Receipt', icon: '💳' },
       { to: '/apply-receipt', label: 'Apply Receipt', icon: '🔗' },
+      { to: '/apply-credit-memo', label: 'Apply Credit Memo', icon: '💠' },
       { to: '/receipt-response', label: 'Receipt Responses', icon: '📨' },
     ],
   },

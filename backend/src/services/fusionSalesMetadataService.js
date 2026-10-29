@@ -61,6 +61,28 @@ async function findByCustomerType(customerType, subinventory) {
 }
 
 /**
+ * Derive a Credit Memo (credit note) transaction type from an invoice transaction type.
+ *
+ * Oracle names the credit-memo transaction type as the invoice type with " - CN"
+ * appended — e.g.
+ *   "Vend Invoice"        → "Vend Invoice - CN"
+ *   "HA Vend Invoice"     → "HA Vend Invoice - CN"
+ *   "Vend Invoice Oman"   → "Vend Invoice Oman - CN"
+ * This lets negative groups be routed to a credit-memo type using the invoice type
+ * already stored in metadata, with no separate mapping to import. Idempotent: a type
+ * that already ends in " - CN" is returned unchanged.
+ *
+ * @param {string} txnType - invoice transaction type (e.g. "Vend Invoice")
+ * @returns {string|null}
+ */
+function deriveCreditMemoType(txnType) {
+  if (!txnType) return null;
+  const s = String(txnType).trim();
+  if (!s) return null;
+  return /\s-\s*CN$/i.test(s) ? s : `${s} - CN`;
+}
+
+/**
  * Map metadata to AR invoice header fields
  * @param {Object} metadata - FusionSalesMetadata record
  * @returns {Object} AR invoice header fields
@@ -74,6 +96,10 @@ function mapToArInvoiceHeader(metadata) {
     BusinessUnit: metadata.businessUnit,
     TransactionSource: metadata.txnSource,
     TransactionType: metadata.txnType,
+    // Per-brand Credit Memo transaction type for negative/zero-total groups.
+    // Prefer an explicit mapping (txnTypeCreditMemo override); otherwise derive it
+    // from the invoice type already in the DB (Invoice → Credit Memo).
+    CreditMemoTransactionType: metadata.txnTypeCreditMemo ?? deriveCreditMemoType(metadata.txnType),
     BillToCustomerName: metadata.billToName,
     BillToCustomerNumber: metadata.billToAccount.toString(),
     BillToSite: metadata.siteNumber,
@@ -128,6 +154,7 @@ module.exports = {
   findBySalesHeader,
   findByCustomerType,
   mapToArInvoiceHeader,
+  deriveCreditMemoType,
   getArInvoiceHeaderMapping,
   getAllMetadata,
 };

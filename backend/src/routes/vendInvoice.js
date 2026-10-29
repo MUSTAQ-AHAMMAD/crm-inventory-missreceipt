@@ -11,6 +11,7 @@ const { activityLogger } = require('../middleware/activityLogger');
 const {
   uploadVendInvoice,
   previewVendInvoice,
+  createCreditMemos,
   downloadPayloadsAsJson,
   downloadPayloadsAsCsv,
   downloadRefundsAsCsv,
@@ -130,5 +131,22 @@ router.post('/download-csv', downloadPayloadsAsCsv);
  *         description: Invalid request
  */
 router.post('/download-refunds-csv', downloadRefundsAsCsv);
+
+/**
+ * @swagger
+ * /vend-invoice/create-credit-memos:
+ *   post:
+ *     tags: [VendInvoice]
+ *     summary: Create credit memos in Oracle (receivablesCreditMemos REST resource)
+ *     description: Posts credit-memo payloads (built from returned-item and net-negative groups) to Oracle Fusion. Returns per-payload results.
+ *     responses:
+ *       200:
+ *         description: Credit-memo creation results
+ *       400:
+ *         description: Invalid request
+ *       500:
+ *         description: Credit-memo endpoint not configured or server error
+ */
+router.post('/create-credit-memos', createCreditMemos);
 
 module.exports = router;

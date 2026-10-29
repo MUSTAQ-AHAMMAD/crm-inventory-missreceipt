@@ -7,6 +7,7 @@ const XLSX = require('xlsx');
 const { v4: uuidv4 } = require('uuid');
 const prisma = require('../services/prisma');
 const fusionMetadataService = require('../services/fusionSalesMetadataService');
+const creditMemoService = require('../services/creditMemoService');
 
 function normalizeCellValue(value) {
   return String(value ?? '')
@@ -115,6 +116,65 @@ function getPaymentType(paymentMethod) {
   if (normalizedMethod.includes('TABBY')) return 'TABBY';
   if (normalizedMethod.includes('TAMARA')) return 'TAMARA';
   return 'NORMAL';
+}
+
+/** True when a metadata region code denotes Oman (region 'OM'). */
+function isOmanRegion(region) {
+  const key = normalizeUpper(region);
+  return key === 'OM' || key === 'OMAN';
+}
+
+/**
+ * Tax classification code (the "tax name") for a region.
+ * Oman uses OM-OUTPUT-GOODS-DOM-5% (5% VAT); KSA uses OUTPUT-GOODS-DOM-15% (15% VAT).
+ */
+function taxClassificationForRegion(region) {
+  return isOmanRegion(region) ? 'OM-OUTPUT-GOODS-DOM-5%' : 'OUTPUT-GOODS-DOM-15%';
+}
+
+/** Currency for a region: Oman → OMR, otherwise SAR. */
+function currencyForRegion(region) {
+  return isOmanRegion(region) ? 'OMR' : 'SAR';
+}
+
+/**
+ * Fallback branch assignment when the sales/payment files carry no usable order
+ * reference (the order-ref prefix is empty, so a discount line can't be tied to a
+ * branch by reference). The payment file lists each branch with its gross (tax-incl)
+ * total; the sales lines are assumed to be ordered by branch to match the payment
+ * rows. We walk the sales lines top-to-bottom and assign consecutive lines to each
+ * payment row's Branch until their running gross total reaches that row's amount,
+ * then advance to the next payment row.
+ *
+ * @param {Array<{amount:number}>} salesAmounts - per-line gross (tax-incl) amounts, in file order
+ * @param {Array<{store:string, paymentType:string, amount:number}>} paymentRows - branch rows, in file order
+ * @returns {Map<number, {store:string, paymentType:string}>} salesIndex -> assignment
+ */
+function assignBranchesByCumulativeAmount(salesAmounts, paymentRows) {
+  const assignment = new Map();
+  if (!paymentRows.length) return assignment;
+
+  // Tolerance absorbs per-line rounding (each gross amount is rounded to 2 dp, so a
+  // block of N lines can differ from the branch total by up to ~0.01·N).
+  const TOL = 0.5;
+  let pi = 0;
+  let running = 0;
+
+  for (let i = 0; i < salesAmounts.length; i++) {
+    // Once past the last payment row, dump any remaining lines onto the last branch.
+    const idx = Math.min(pi, paymentRows.length - 1);
+    assignment.set(i, { store: paymentRows[idx].store, paymentType: paymentRows[idx].paymentType });
+
+    if (pi < paymentRows.length) {
+      running += Math.abs(Number(salesAmounts[i].amount) || 0);
+      const target = Math.abs(Number(paymentRows[pi].amount) || 0);
+      if (running >= target - TOL) {
+        pi++;
+        running = 0;
+      }
+    }
+  }
+  return assignment;
 }
 
 /**
@@ -269,6 +329,11 @@ async function uploadVendInvoice(req, res, next) {
     // The Store column in payment lines matches the store code extracted from sales lines
     const storePaymentMap = {}; // Key: storeCode -> { paymentTypes: Set<string>, subinventory, branch }
     const orderPaymentTypeMap = {}; // Key: orderRef (upper) -> Set<paymentType>
+    // Key: orderRef (upper) -> store code resolved from the payment file's Branch column.
+    // The Branch is the authoritative store name for metadata/customer lookup; the sales
+    // order-ref prefix does not always match the store, so we map each order to its
+    // payment Branch here and prefer it over the prefix when processing sales lines.
+    const orderStoreMap = {};
 
     for (const payment of paymentLines) {
       const orderRef = normalizeUpper(getFirstNonEmpty(payment, ['Order Ref', 'Order Lines/Order Ref', 'Order Reference']));
@@ -299,6 +364,13 @@ async function uploadVendInvoice(req, res, next) {
             orderPaymentTypeMap[orderRef] = new Set();
           }
           orderPaymentTypeMap[orderRef].add(paymentType);
+
+          // Remember which store (from the Branch column) this order belongs to, so
+          // sales lines can resolve their store from the payment file rather than the
+          // order-ref prefix. First payment row for an order wins.
+          if (!orderStoreMap[orderRef]) {
+            orderStoreMap[orderRef] = storeCode;
+          }
         }
       }
     }
@@ -356,6 +428,30 @@ async function uploadVendInvoice(req, res, next) {
     // can be reviewed/downloaded and handled separately (credit memo / refund flow).
     const refunds = [];
 
+    // Fallback: when NO sales line carries a usable order-ref prefix, the lines can't
+    // be tied to a branch by reference. In that case assign them to the payment file's
+    // Branch rows by cumulative gross (tax-incl) amount in file order (see helper).
+    // Files with real order refs skip this entirely and use the order-ref mapping.
+    const salesHaveNoStoreRef = salesLines.every((r) =>
+      !normalizeUpper(getFirstNonEmpty(r, ['Order Lines/Order Ref', 'Order Ref', 'Order Reference']).split('/')[0]));
+    let branchAssignment = null;
+    if (salesHaveNoStoreRef) {
+      const paymentRowsForMatch = paymentLines.map((p) => {
+        const orderRef = normalizeUpper(getFirstNonEmpty(p, ['Order Ref', 'Order Lines/Order Ref', 'Order Reference']));
+        const orderStoreCode = normalizeUpper(orderRef.split('/')[0] || '');
+        const store = normalizeUpper(getFirstNonEmpty(p, ['Store', 'Store Code', 'Branch'])) || orderStoreCode;
+        const method = getFirstNonEmpty(p, ['Payment Method', 'Payments/Payment Method', 'Payments/Method', 'Order Payment/Method', 'Order Payment/Payment Method', 'Payment Method Details', 'Method']);
+        const amount = parseNumericField(p, ['Payments/Amount', 'Payment Amount', 'Amount', 'Payments/Total', 'Total']);
+        return { store, paymentType: getPaymentType(method), amount };
+      }).filter((r) => r.store);
+      const salesAmounts = salesLines.map((r) => ({
+        amount: parseNumericField(r, ['Order Lines/Tax Incl.', 'Order Lines/Tax Incl', 'Tax Incl.', 'Tax Incl']),
+      }));
+      branchAssignment = assignBranchesByCumulativeAmount(salesAmounts, paymentRowsForMatch);
+      const branches = [...new Set([...branchAssignment.values()].map((a) => `${a.store}/${a.paymentType}`))];
+      console.log(`[Vend Invoice] Order refs absent — matched ${salesLines.length} sales line(s) to ${paymentRowsForMatch.length} payment branch(es) by cumulative amount: ${branches.join(', ')}`);
+    }
+
     // Process sales lines and group by store + date + payment type
     const invoiceGroups = {}; // Key: `${subinventory}_${date}_${paymentType}`
     const errors = [];
@@ -366,7 +462,13 @@ async function uploadVendInvoice(req, res, next) {
         // Extract sales order reference (e.g., "AZIZMALL/64181")
         const salesOrderRef = getFirstNonEmpty(row, ['Order Lines/Order Ref', 'Order Ref', 'Order Reference']);
         const salesOrderRefKey = normalizeUpper(salesOrderRef);
-        const storeCode = normalizeUpper(salesOrderRef.split('/')[0]); // e.g., "AZIZMALL"
+        const storeCodeFromRef = normalizeUpper(salesOrderRef.split('/')[0]); // e.g., "AZIZMALL"
+        // Branch assigned by cumulative-amount matching (only when order refs are absent).
+        const assigned = branchAssignment ? branchAssignment.get(i) : null;
+        // Store resolution priority: (1) cumulative-amount branch when order refs are
+        // absent, (2) the payment file's Branch keyed by order ref, (3) the sales
+        // order-ref prefix. The Branch column is the authoritative store for metadata.
+        const storeCode = (assigned && assigned.store) || orderStoreMap[salesOrderRefKey] || storeCodeFromRef;
         const orderPaymentTypes = orderPaymentTypeMap[salesOrderRefKey];
 
         // Find subinventory code, branch, and available payment types for this store
@@ -501,13 +603,16 @@ async function uploadVendInvoice(req, res, next) {
           continue;
         }
 
-        // If line has a specific payment method, only add it to that invoice
-        // Otherwise, use payment type(s) detected for this order; if unavailable, fallback to store map
-        const targetPaymentTypes = linePaymentType
-          ? [linePaymentType]
-          : (orderPaymentTypes && orderPaymentTypes.size > 0
-            ? Array.from(orderPaymentTypes)
-            : Array.from(paymentTypes));
+        // Payment type priority: (1) the cumulative-amount assignment's payment type
+        // (the matched payment row's method), (2) an explicit line payment method,
+        // (3) the order's detected types, (4) the store's types.
+        const targetPaymentTypes = (assigned && assigned.paymentType)
+          ? [assigned.paymentType]
+          : (linePaymentType
+            ? [linePaymentType]
+            : (orderPaymentTypes && orderPaymentTypes.size > 0
+              ? Array.from(orderPaymentTypes)
+              : Array.from(paymentTypes)));
 
         for (const paymentType of targetPaymentTypes) {
           // Ensure store-level payment types include detected order-level payment types
@@ -544,6 +649,18 @@ async function uploadVendInvoice(req, res, next) {
               customerNumber: headerData.BillToCustomerNumber || '',
               siteNumber: headerData.BillToSite || '',
               conversionRateType: headerData.ConversionRateType || 'Corporate',
+              // Per-brand transaction identifiers from metadata. Fall back to the
+              // AlQurashi defaults so behaviour is unchanged when metadata is absent.
+              businessUnit: headerData.BusinessUnit || 'AlQurashi-KSA',
+              txnSource: headerData.TransactionSource || 'Vend',
+              txnType: headerData.TransactionType || 'Vend Invoice',
+              // Credit-memo transaction type used to route negative/zero-total groups.
+              // Null when metadata has no mapping yet — those groups stay separate and
+              // are not stamped with a credit-memo type.
+              creditMemoType: headerData.CreditMemoTransactionType || null,
+              // Region from metadata drives the tax name (KSA 15% vs Oman 5%) and
+              // currency (SAR vs OMR). Defaults to SA when metadata is absent.
+              region: (metadata && metadata.region) || 'SA',
               lines: [],
             };
           }
@@ -565,8 +682,8 @@ async function uploadVendInvoice(req, res, next) {
               Quantity: quantity,
               UnitSellingPrice: unitSellingPrice,
               UomCode: 'EA',
-              CurrencyCode: 'SAR',
-              TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
+              CurrencyCode: currencyForRegion(invoiceGroups[groupKey].region),
+              TaxClassificationCode: taxClassificationForRegion(invoiceGroups[groupKey].region),
               SalesOrder: salesOrderRef,
               SalesOrderLine: lineNumber,
               MemoLineName: 'Discount Item',
@@ -582,8 +699,8 @@ async function uploadVendInvoice(req, res, next) {
               Quantity: quantity,
               UnitSellingPrice: unitSellingPrice,
               UomCode: lineUom || 'EA',
-              CurrencyCode: 'SAR',
-              TaxClassificationCode: 'OUTPUT-GOODS-DOM-15%',
+              CurrencyCode: currencyForRegion(invoiceGroups[groupKey].region),
+              TaxClassificationCode: taxClassificationForRegion(invoiceGroups[groupKey].region),
               SalesOrder: salesOrderRef,
               SalesOrderLine: lineNumber,
             });
@@ -629,16 +746,16 @@ async function uploadVendInvoice(req, res, next) {
       const crossReference = nextCrossRef++;
 
       const payload = {
-        BusinessUnit: 'AlQurashi-KSA',
-        TransactionSource: 'Vend',
-        TransactionType: 'Vend Invoice',
+        BusinessUnit: group.businessUnit,
+        TransactionSource: group.txnSource,
+        TransactionType: group.txnType,
         TransactionDate: group.date,
         AccountingDate: group.date,
         BillToCustomerName: group.customerName,
         BillToCustomerNumber: group.customerNumber,
         BillToSite: group.siteNumber,
         PaymentTerms: 'Immediate',
-        InvoiceCurrencyCode: 'SAR',
+        InvoiceCurrencyCode: currencyForRegion(group.region),
         CrossReference: String(crossReference),
         Comments: `${paymentTypeLabel} payment - Cross-reference: ${crossReference}`,
         receivablesInvoiceLines: renumberedLines,
@@ -660,6 +777,11 @@ async function uploadVendInvoice(req, res, next) {
         paymentType: group.paymentType,
         lineCount,
         totalAmount,
+        // Carried alongside (not on the payload) so the split step can stamp the
+        // right Credit Memo transaction type on negative/zero-total groups.
+        creditMemoType: group.creditMemoType,
+        // Region drives the credit-memo tax regime (KSA REGIME vs OMAN REGIME).
+        region: group.region,
       });
     }
 
@@ -669,18 +791,130 @@ async function uploadVendInvoice(req, res, next) {
     let positiveTotalAmount = 0;
     let negativeTotalAmount = 0;
 
+    // Groups whose net total is not strictly positive must NOT go in as an invoice:
+    // an invoice transaction type has Creation Sign = Positive, and Oracle rejects a
+    // zero-or-negative total with AR-855286. Such groups are routed to the per-brand
+    // Credit Memo transaction type and kept in a separate list the user pushes
+    // explicitly. `> 0` (not `>= 0`) so net-zero groups are diverted too.
+    let negativeMissingCreditMemoType = 0;
     for (let i = 0; i < payloads.length; i++) {
-      if (payloadStats[i].totalAmount >= 0) {
+      const stat = payloadStats[i];
+      if (stat.totalAmount > 0) {
         positivePayloads.push(payloads[i]);
-        positiveTotalAmount += payloadStats[i].totalAmount;
+        positiveTotalAmount += stat.totalAmount;
       } else {
+        if (stat.creditMemoType) {
+          payloads[i].TransactionType = stat.creditMemoType;
+        } else {
+          // No credit-memo type mapped for this brand yet — keep the payload separate
+          // and flag it so the UI can warn instead of silently pushing a bad-sign type.
+          negativeMissingCreditMemoType++;
+        }
+        // Stamp the region on the (soon-to-be credit-memo) payload so Source 1 can pass
+        // the right tax regime. Safe: negative payloads are never sent as invoices.
+        payloads[i].region = stat.region;
         negativePayloads.push(payloads[i]);
-        negativeTotalAmount += payloadStats[i].totalAmount;
+        negativeTotalAmount += stat.totalAmount;
       }
     }
 
     positiveTotalAmount = Math.round(positiveTotalAmount * 100) / 100;
     negativeTotalAmount = Math.round(negativeTotalAmount * 100) / 100;
+
+    // ── Build credit-memo payloads (REST receivablesCreditMemos) ──────────────
+    // Two sources (per requirement): (1) the net-negative invoice groups already
+    // stamped with the "- CN" type, and (2) the returned-item refund lines,
+    // grouped by store/date/payment type. Oracle has no SOAP credit-memo op, so
+    // these go to the REST resource; sign is moved to LineQuantityCredit.
+    const creditMemoPayloads = [];
+
+    // GL/accounting date for credit memos follows the transaction (sale) date so the
+    // memo posts into the same period as the sale it credits — the July period must be
+    // kept OPEN until these are posted. CREDIT_MEMO_GL_DATE remains an optional override:
+    // if a sale's period is already closed, set it to a date in an OPEN period. Unset →
+    // accounting date = transaction (sale) date.
+    const cmAccountingDateOverride = process.env.CREDIT_MEMO_GL_DATE || null;
+
+    // Credit-memo transaction type + source. Verified against Oracle's LOVs:
+    //   - "Vend" is NOT a valid credit-memo transaction source (invoices use it, credit
+    //     memos cannot) → sending it triggers AR-856386. Valid sources include "Manual".
+    //   - "Credit Memo" is a valid transaction type (and "Manual"+"Credit Memo" is the
+    //     combo on 190 existing AlQurashi credit memos).
+    // So credit memos ALWAYS use a valid CM type/source; the invoice's Vend source is
+    // never propagated here. Overridable per environment via env vars.
+    const cmType   = process.env.CREDIT_MEMO_TXN_TYPE   || 'Credit Memo';
+    const cmSource = process.env.CREDIT_MEMO_TXN_SOURCE || 'Manual';
+
+    // Source 1: net-negative invoice groups → credit memos (header already resolved).
+    for (const p of negativePayloads) {
+      creditMemoPayloads.push(creditMemoService.buildCreditMemoPayload({
+        BillToCustomerNumber: p.BillToCustomerNumber,
+        BillToSite:           p.BillToSite,
+        BusinessUnit:         p.BusinessUnit,
+        TransactionSource:    cmSource,
+        TransactionType:      cmType,
+        TransactionDate:      p.TransactionDate,
+        AccountingDate:       cmAccountingDateOverride || p.TransactionDate,
+        CrossReference:       p.CrossReference,
+        region:              p.region || 'SA',
+        lines: (p.receivablesInvoiceLines || []).map((l) => ({
+          ItemNumber:            l.ItemNumber,
+          MemoLineName:          l.MemoLineName,
+          Description:           l.Description,
+          Quantity:              l.Quantity,
+          UnitSellingPrice:      l.UnitSellingPrice,
+          SalesOrder:            l.SalesOrder,
+          TaxClassificationCode: l.TaxClassificationCode,
+        })),
+      }));
+    }
+
+    // Source 2: returned-item refund lines → credit memos grouped by store/date/payment type.
+    const refundGroups = {};
+    for (const r of refunds) {
+      const pType = getPaymentType(r.paymentMethod);
+      const key = `${r.store}_${r.date}_${pType}`;
+      if (!refundGroups[key]) refundGroups[key] = { store: r.store, date: r.date, paymentType: pType, lines: [] };
+      refundGroups[key].lines.push(r);
+    }
+    for (const g of Object.values(refundGroups)) {
+      let headerData = {};
+      let refundRegion = 'SA';
+      try {
+        const metadata = await fusionMetadataService.findByCustomerType(g.paymentType, g.store);
+        if (metadata) {
+          headerData = fusionMetadataService.mapToArInvoiceHeader(metadata);
+          refundRegion = metadata.region || 'SA';
+        }
+      } catch (err) {
+        console.warn(`[Vend Invoice] Credit-memo metadata lookup failed for ${g.store}/${g.paymentType}: ${err.message}`);
+      }
+      creditMemoPayloads.push(creditMemoService.buildCreditMemoPayload({
+        BillToCustomerNumber: headerData.BillToCustomerNumber || '',
+        BillToSite:           headerData.BillToSite || '',
+        BusinessUnit:         headerData.BusinessUnit || 'AlQurashi-KSA',
+        TransactionSource:    cmSource,
+        TransactionType:      cmType,
+        TransactionDate:      g.date,
+        AccountingDate:       cmAccountingDateOverride || g.date,
+        CrossReference:       String(nextCrossRef++),
+        region:              refundRegion,
+        lines: g.lines.map((r) => ({
+          ItemNumber:            r.itemNumber,
+          Description:           r.description,
+          Quantity:              r.quantity,
+          UnitSellingPrice:      r.unitSellingPrice,
+          SalesOrder:            r.orderRef,
+          TaxClassificationCode: taxClassificationForRegion(refundRegion),
+        })),
+      }));
+    }
+
+    // A credit memo is unpushable only if it has no transaction type at all
+    // (empty). The type itself (e.g. "Credit Memo", "… - CN") is validated by Oracle.
+    const creditMemoMissingType = creditMemoPayloads.filter(
+      (p) => !String(p.TransactionType || '').trim()
+    ).length;
 
     const refundTotal = Math.round(refunds.reduce((sum, r) => sum + (r.lineTotal || 0), 0) * 100) / 100;
 
@@ -689,6 +923,12 @@ async function uploadVendInvoice(req, res, next) {
       totalPayloads: payloads.length,
       positivePayloadsCount: positivePayloads.length,
       negativePayloadsCount: negativePayloads.length,
+      // Negative/zero groups with no per-brand Credit Memo type mapped in metadata.
+      // These are kept separate and still carry the invoice type — the UI warns.
+      negativeMissingCreditMemoType,
+      // Credit-memo (REST receivablesCreditMemos) payloads built from both sources.
+      creditMemoPayloadsCount: creditMemoPayloads.length,
+      creditMemoMissingType,
       skippedExistingLines: skippedExistingCount,
       refundLinesCount: refunds.length,
       refundTotalAmount: refundTotal,
@@ -712,10 +952,67 @@ async function uploadVendInvoice(req, res, next) {
         (refunds.length ? `, ${refunds.length} refund line(s) separated` : ''),
       positivePayloads,
       negativePayloads,
+      creditMemoPayloads,
       refunds,
       stats,
     });
 
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/vend-invoice/create-credit-memos
+ * Posts credit-memo payloads to Oracle's receivablesCreditMemos REST resource.
+ * Synchronous: credit memos per upload are few (returns), so results are returned
+ * directly rather than via async batch polling.
+ */
+async function createCreditMemos(req, res, next) {
+  try {
+    const { payloads } = req.body;
+    if (!Array.isArray(payloads) || payloads.length === 0) {
+      return res.status(400).json({ error: 'payloads must be a non-empty array.' });
+    }
+    if (!process.env.ORACLE_RECEIVABLES_CREDIT_MEMOS_API_URL) {
+      return res.status(500).json({ error: 'Missing env var: ORACLE_RECEIVABLES_CREDIT_MEMOS_API_URL' });
+    }
+
+    let successCount = 0;
+    let failureCount = 0;
+    const results = [];
+
+    for (let i = 0; i < payloads.length; i++) {
+      const payload = payloads[i];
+      const label = `${payload.TransactionType || 'CN'} ${payload.CrossReference || ''}`.trim();
+
+      // Guard: never push a credit memo with no transaction type at all.
+      if (!String(payload.TransactionType || '').trim()) {
+        failureCount++;
+        results.push({ index: i, status: 'FAILED', crossReference: payload.CrossReference || null, message: 'Missing credit-memo transaction type', payloadSent: payload });
+        continue;
+      }
+
+      try {
+        const response = await creditMemoService.sendCreditMemoRest(payload, label);
+        const data = response.data;
+        if (response.status >= 200 && response.status < 300) {
+          successCount++;
+          const cmNumber = (data && (data.TransactionNumber ?? data.CreditMemoNumber ?? data.CustomerTransactionId)) ?? null;
+          results.push({ index: i, status: 'SUCCESS', crossReference: payload.CrossReference || null, creditMemoNumber: cmNumber != null ? String(cmNumber) : null, httpStatus: response.status, payloadSent: payload });
+        } else {
+          failureCount++;
+          const detail = (data && (data.detail || data.title)) || (typeof data === 'string' ? data.slice(0, 300) : `HTTP ${response.status}`);
+          results.push({ index: i, status: 'FAILED', crossReference: payload.CrossReference || null, message: `Oracle HTTP ${response.status}: ${detail}`, httpStatus: response.status, payloadSent: payload });
+        }
+      } catch (err) {
+        failureCount++;
+        results.push({ index: i, status: 'FAILED', crossReference: payload.CrossReference || null, message: err.message, payloadSent: payload });
+      }
+    }
+
+    const status = failureCount === 0 ? 'SUCCESS' : successCount === 0 ? 'FAILED' : 'PARTIAL';
+    return res.json({ total: payloads.length, successCount, failureCount, status, results });
   } catch (err) {
     next(err);
   }
@@ -872,6 +1169,7 @@ async function downloadRefundsAsCsv(req, res, next) {
 module.exports = {
   uploadVendInvoice,
   previewVendInvoice,
+  createCreditMemos,
   downloadPayloadsAsJson,
   downloadPayloadsAsCsv,
   downloadRefundsAsCsv,
