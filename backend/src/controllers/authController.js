@@ -6,6 +6,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../services/prisma');
+const { parseModules } = require('../config/modules');
 
 /**
  * POST /api/auth/login
@@ -36,9 +37,11 @@ async function login(req, res, next) {
       return res.status(401).json({ error: 'Invalid credentials.' });
     }
 
-    // Sign JWT
+    // Sign JWT. Modules are embedded so the per-request module guard needs no
+    // DB lookup; changes to a user's modules take effect on their next login.
+    const modules = parseModules(user.modules);
     const token = jwt.sign(
-      { id: user.id, email: user.email, role: user.role },
+      { id: user.id, email: user.email, role: user.role, modules },
       process.env.JWT_SECRET,
       { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
     );
@@ -55,7 +58,7 @@ async function login(req, res, next) {
 
     return res.json({
       token,
-      user: { id: user.id, email: user.email, role: user.role },
+      user: { id: user.id, email: user.email, role: user.role, modules },
     });
   } catch (err) {
     next(err);
@@ -92,14 +95,14 @@ async function me(req, res, next) {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { id: true, email: true, role: true, isActive: true, createdAt: true },
+      select: { id: true, email: true, role: true, modules: true, isActive: true, createdAt: true },
     });
 
     if (!user) {
       return res.status(404).json({ error: 'User not found.' });
     }
 
-    return res.json(user);
+    return res.json({ ...user, modules: parseModules(user.modules) });
   } catch (err) {
     next(err);
   }

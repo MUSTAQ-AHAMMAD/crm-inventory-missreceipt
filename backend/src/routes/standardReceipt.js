@@ -5,7 +5,7 @@
 
 const express = require('express');
 const multer = require('multer');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireModule } = require('../middleware/auth');
 const { activityLogger } = require('../middleware/activityLogger');
 const {
   previewXml,
@@ -34,7 +34,7 @@ const csvUpload = multer({
 router.get('/template', downloadTemplate);
 
 // Protected routes
-router.use(authenticate, activityLogger);
+router.use(authenticate, requireModule('receipts'), activityLogger);
 router.post('/preview', csvUpload.single('file'), previewXml);
 router.post('/upload', csvUpload.single('file'), upload);
 router.get('/uploads', listUploads);

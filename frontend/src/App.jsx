@@ -3,8 +3,9 @@
  * Sets up React Router and applies the AuthContext to all routes.
  */
 
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { PATH_MODULE, canAccess } from './constants/modules'
 import Layout from './components/layout/Layout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
@@ -46,6 +47,19 @@ function AdminRoute({ children }) {
   return children
 }
 
+/**
+ * Layout gate – redirects to the dashboard when the current path belongs to a
+ * module the user cannot access. Paths not in PATH_MODULE (dashboard, reports,
+ * help, admin) are always allowed.
+ */
+function ModuleGate() {
+  const { user } = useAuth()
+  const { pathname } = useLocation()
+  const moduleKey = PATH_MODULE[pathname.split('/')[1] || '']
+  if (moduleKey && !canAccess(user, moduleKey)) return <Navigate to="/" replace />
+  return <Outlet />
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -63,6 +77,7 @@ export default function App() {
               </PrivateRoute>
             }
           >
+            <Route element={<ModuleGate />}>
             <Route index element={<DashboardPage />} />
             <Route path="inventory" element={<InventoryPage />} />
             <Route path="inventory-template" element={<InventoryTemplateGenerationPage />} />
@@ -93,6 +108,7 @@ export default function App() {
             <Route path="failures/:uploadId" element={<FailureDetailsPage />} />
             <Route path="receipt-upload/:type/:uploadId" element={<ReceiptUploadDetailPage />} />
             <Route path="help" element={<HelpPage />} />
+            </Route>
           </Route>
 
           {/* Fallback */}

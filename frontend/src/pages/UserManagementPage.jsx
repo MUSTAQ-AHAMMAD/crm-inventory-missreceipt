@@ -9,6 +9,7 @@ import { useForm } from 'react-hook-form'
 import api from '../hooks/useApi'
 import Spinner from '../components/common/Spinner'
 import ErrorAlert from '../components/common/ErrorAlert'
+import { MODULES } from '../constants/modules'
 
 export default function UserManagementPage() {
   const queryClient = useQueryClient()
@@ -24,21 +25,30 @@ export default function UserManagementPage() {
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm()
 
-  const openCreate = () => { setEditUser(null); reset({}); setShowModal(true) }
-  const openEdit = (u) => { setEditUser(u); reset({ email: u.email, role: u.role, isActive: u.isActive }); setShowModal(true) }
+  const openCreate = () => { setEditUser(null); reset({ modules: [] }); setShowModal(true) }
+  // A legacy user with modules === null has full access; pre-check every module
+  // so saving keeps that access rather than silently restricting them.
+  const openEdit = (u) => {
+    setEditUser(u)
+    reset({ email: u.email, role: u.role, isActive: u.isActive, modules: u.modules ?? MODULES.map((m) => m.key) })
+    setShowModal(true)
+  }
 
   const onSubmit = async (formData) => {
     setError('')
+    const sel = formData.modules
+    const modules = Array.isArray(sel) ? sel : sel ? [sel] : []
     try {
       if (editUser) {
         await api.put(`/admin/users/${editUser.id}`, {
           email: formData.email,
           role: formData.role,
           isActive: formData.isActive === 'true' || formData.isActive === true,
+          modules,
         })
         setSuccessMsg('User updated.')
       } else {
-        await api.post('/admin/users', formData)
+        await api.post('/admin/users', { ...formData, modules })
         setSuccessMsg('User created.')
       }
       setShowModal(false)
@@ -99,6 +109,7 @@ export default function UserManagementPage() {
                   <th className="px-4 py-2 text-left">ID</th>
                   <th className="px-4 py-2 text-left">Email</th>
                   <th className="px-4 py-2 text-left">Role</th>
+                  <th className="px-4 py-2 text-left">Modules</th>
                   <th className="px-4 py-2 text-left">Status</th>
                   <th className="px-4 py-2 text-left">Created</th>
                   <th className="px-4 py-2 text-left">Actions</th>
@@ -106,7 +117,7 @@ export default function UserManagementPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {(!data?.users || data.users.length === 0) && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No users found</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No users found</td></tr>
                 )}
                 {data?.users?.map((u) => (
                   <tr key={u.id} className="hover:bg-gray-50">
@@ -114,6 +125,13 @@ export default function UserManagementPage() {
                     <td className="px-4 py-3 text-gray-700">{u.email}</td>
                     <td className="px-4 py-3">
                       <RoleBadge role={u.role} />
+                    </td>
+                    <td className="px-4 py-3 text-gray-600 text-xs">
+                      {u.role === 'ADMIN' || u.modules == null
+                        ? 'All'
+                        : u.modules.length === 0
+                          ? '—'
+                          : u.modules.map((k) => MODULES.find((m) => m.key === k)?.label || k).join(', ')}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 rounded text-xs font-medium ${u.isActive ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
@@ -186,6 +204,19 @@ export default function UserManagementPage() {
                   <option value="MANAGER">Manager</option>
                   <option value="ADMIN">Admin</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Modules</label>
+                <p className="text-xs text-gray-400 mb-2">Modules this user can access. Admins always have access to all.</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {MODULES.map((m) => (
+                    <label key={m.key} className="flex items-center gap-2 text-sm text-gray-700">
+                      <input type="checkbox" value={m.key} {...register('modules')} className="rounded border-gray-300" />
+                      {m.label}
+                    </label>
+                  ))}
+                </div>
               </div>
 
               {editUser && (

@@ -6,6 +6,7 @@
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const prisma = require('../services/prisma');
+const { parseModules, serializeModules } = require('../config/modules');
 
 /**
  * POST /api/admin/users
@@ -13,7 +14,7 @@ const prisma = require('../services/prisma');
  */
 async function createUser(req, res, next) {
   try {
-    const { email, password, role } = req.body;
+    const { email, password, role, modules } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
@@ -25,11 +26,12 @@ async function createUser(req, res, next) {
     const passwordHash = await bcrypt.hash(password, 10);
 
     const user = await prisma.user.create({
-      data: { email, passwordHash, role: userRole },
-      select: { id: true, email: true, role: true, isActive: true, createdAt: true },
+      // serializeModules stores null when no array is sent (= full access).
+      data: { email, passwordHash, role: userRole, modules: serializeModules(modules) },
+      select: { id: true, email: true, role: true, modules: true, isActive: true, createdAt: true },
     });
 
-    return res.status(201).json(user);
+    return res.status(201).json({ ...user, modules: parseModules(user.modules) });
   } catch (err) {
     next(err);
   }
@@ -50,12 +52,17 @@ async function listUsers(req, res, next) {
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
-        select: { id: true, email: true, role: true, isActive: true, createdAt: true, updatedAt: true },
+        select: { id: true, email: true, role: true, modules: true, isActive: true, createdAt: true, updatedAt: true },
       }),
       prisma.user.count(),
     ]);
 
-    return res.json({ users, total, page, limit });
+    return res.json({
+      users: users.map((u) => ({ ...u, modules: parseModules(u.modules) })),
+      total,
+      page,
+      limit,
+    });
   } catch (err) {
     next(err);
   }
@@ -68,13 +75,14 @@ async function listUsers(req, res, next) {
 async function updateUser(req, res, next) {
   try {
     const userId = parseInt(req.params.id);
-    const { email, role, isActive } = req.body;
+    const { email, role, isActive, modules } = req.body;
 
     const validRoles = ['ADMIN', 'MANAGER', 'USER'];
     const data = {};
     if (email) data.email = email;
     if (role && validRoles.includes(role)) data.role = role;
     if (typeof isActive === 'boolean') data.isActive = isActive;
+    if (Array.isArray(modules)) data.modules = serializeModules(modules);
 
     if (Object.keys(data).length === 0) {
       return res.status(400).json({ error: 'No valid fields provided for update.' });
@@ -83,10 +91,10 @@ async function updateUser(req, res, next) {
     const user = await prisma.user.update({
       where: { id: userId },
       data,
-      select: { id: true, email: true, role: true, isActive: true, updatedAt: true },
+      select: { id: true, email: true, role: true, modules: true, isActive: true, updatedAt: true },
     });
 
-    return res.json(user);
+    return res.json({ ...user, modules: parseModules(user.modules) });
   } catch (err) {
     next(err);
   }

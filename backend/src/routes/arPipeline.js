@@ -5,7 +5,7 @@
  */
 
 const express = require('express');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireModule } = require('../middleware/auth');
 const { activityLogger } = require('../middleware/activityLogger');
 const {
   getSummary,
@@ -21,7 +21,7 @@ const {
 
 const router = express.Router();
 
-router.use(authenticate, activityLogger);
+router.use(authenticate, requireModule('ar-invoice'), activityLogger);
 
 // Dashboard summary: counts per step, grouped by store + date
 router.get('/summary', getSummary);

@@ -6,7 +6,7 @@
 
 const express = require('express');
 const fileUpload = require('express-fileupload');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireModule } = require('../middleware/auth');
 const { activityLogger } = require('../middleware/activityLogger');
 const {
   uploadVendInvoice,
@@ -27,7 +27,7 @@ router.use(fileUpload({
 }));
 
 // ── Protected routes (JWT auth + activity logging) ──────────────────────
-router.use(authenticate, activityLogger);
+router.use(authenticate, requireModule('vend'), activityLogger);
 
 /**
  * @swagger

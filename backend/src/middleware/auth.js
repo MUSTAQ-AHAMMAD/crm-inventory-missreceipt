@@ -40,4 +40,24 @@ function requireRole(...roles) {
   };
 }
 
-module.exports = { authenticate, requireRole };
+/**
+ * Module-access guard – restricts a route to users granted the given module.
+ * Must be used AFTER `authenticate`. Admins and users whose `modules` is unset
+ * (null – legacy users) have access to every module.
+ *
+ * @param {string} moduleKey - module key from src/config/modules.js
+ */
+function requireModule(moduleKey) {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required.' });
+    }
+    if (req.user.role === 'ADMIN') return next();
+    const mods = req.user.modules;
+    if (mods == null) return next(); // not set = full access (legacy users)
+    if (Array.isArray(mods) && mods.includes(moduleKey)) return next();
+    return res.status(403).json({ error: 'You do not have access to this module.' });
+  };
+}
+
+module.exports = { authenticate, requireRole, requireModule };

@@ -6,7 +6,7 @@
 
 const express = require('express');
 const fileUpload = require('express-fileupload');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireModule } = require('../middleware/auth');
 const { activityLogger } = require('../middleware/activityLogger');
 const {
   generateReceipts,
@@ -29,7 +29,7 @@ router.use(fileUpload({
   responseOnLimit: 'File size exceeds the 50MB limit.',
 }));
 
-router.use(authenticate, activityLogger);
+router.use(authenticate, requireModule('vend'), activityLogger);
 
 /**
  * POST /api/vend-receipt/generate

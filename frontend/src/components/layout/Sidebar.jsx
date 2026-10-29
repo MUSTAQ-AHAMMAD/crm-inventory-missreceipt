@@ -5,6 +5,7 @@
 
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { canAccess } from '../../constants/modules'
 
 const NAV_GROUPS = [
   {
@@ -15,6 +16,7 @@ const NAV_GROUPS = [
   },
   {
     label: 'Inventory',
+    module: 'inventory',
     items: [
       { to: '/inventory', label: 'Inventory Upload', icon: '📦' },
       { to: '/inventory-template', label: 'Template Generation', icon: '🧩' },
@@ -22,6 +24,7 @@ const NAV_GROUPS = [
   },
   {
     label: 'Receipts',
+    module: 'receipts',
     items: [
       { to: '/misc-receipt', label: 'Misc Receipt', icon: '🧾' },
       { to: '/standard-receipt', label: 'Standard Receipt', icon: '💳' },
@@ -32,6 +35,7 @@ const NAV_GROUPS = [
   },
   {
     label: 'AR Invoice',
+    module: 'ar-invoice',
     items: [
       { to: '/ar-pipeline', label: 'AR Pipeline', icon: '🔄' },
       { to: '/ar-invoice', label: 'AR Invoice Upload', icon: '📄' },
@@ -41,6 +45,7 @@ const NAV_GROUPS = [
   },
   {
     label: 'Vend',
+    module: 'vend',
     items: [
       { to: '/vend-invoice', label: 'Vend Invoice', icon: '🏪' },
       { to: '/vend-sales-metadata', label: 'Sales Metadata', icon: '🗂️' },
@@ -114,14 +119,16 @@ export default function Sidebar({ open, onClose }) {
 
       {/* Navigation */}
       <nav className="flex-1 mt-4 px-3 overflow-y-auto pb-24">
-        {NAV_GROUPS.map((group, i) => (
-          <div key={group.label} className={i > 0 ? 'mt-5' : ''}>
-            <SectionLabel>{group.label}</SectionLabel>
-            {group.items.map(({ to, label, icon, exact }) => (
-              <NavItem key={to} to={to} label={label} icon={icon} exact={exact} onClose={onClose} />
-            ))}
-          </div>
-        ))}
+        {NAV_GROUPS
+          .filter((group) => !group.module || canAccess(user, group.module))
+          .map((group, i) => (
+            <div key={group.label} className={i > 0 ? 'mt-5' : ''}>
+              <SectionLabel>{group.label}</SectionLabel>
+              {group.items.map(({ to, label, icon, exact }) => (
+                <NavItem key={to} to={to} label={label} icon={icon} exact={exact} onClose={onClose} />
+              ))}
+            </div>
+          ))}
 
         {/* Admin-only items */}
         {user?.role === 'ADMIN' && (

@@ -42,10 +42,16 @@ const PORT = process.env.PORT || 4000;
 
 // ─── Global Middleware ────────────────────────────────────────────────────────
 
-// CORS – allow requests from the configured frontend origin
+// CORS – allow requests from the configured frontend origin(s).
+// FRONTEND_URL may list several origins separated by commas (e.g. when the dev
+// server port changes), each allowed.
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: allowedOrigins,
     credentials: true,
   })
 );

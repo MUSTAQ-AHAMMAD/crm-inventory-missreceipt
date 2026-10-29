@@ -11,7 +11,7 @@
 
 const express = require('express');
 const multer = require('multer');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireModule } = require('../middleware/auth');
 const { activityLogger } = require('../middleware/activityLogger');
 const {
   bulkUpload,
@@ -75,7 +75,7 @@ router.get('/template/online', downloadOnlineTemplate);
 
 // ── Protected routes (JWT auth + activity logging) ──────────────────────
 
-router.use(authenticate, activityLogger);
+router.use(authenticate, requireModule('inventory'), activityLogger);
 
 /**
  * @swagger
