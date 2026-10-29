@@ -230,6 +230,25 @@ function maybeExcelSerialToDate(value) {
 }
 
 /**
+ * Builds the Oracle DistributionAccountId from the FBDI segment columns
+ * DST_SEGMENT1..DST_SEGMENT7, joined with "-" in order. Values are read by
+ * normalized header so asterisks/spacing in the template headers don't matter.
+ * Returns an empty string when every segment is blank (e.g. Normal uploads,
+ * which carry no DST_SEGMENT columns), so no DistributionAccountId is sent.
+ */
+function buildDistributionAccountId(row) {
+  const segments = [];
+  let hasValue = false;
+  for (let i = 1; i <= 7; i += 1) {
+    const raw = findFbdiValue(row, `dst_segment${i}`);
+    const value = (raw == null ? '' : String(raw)).trim();
+    if (value) hasValue = true;
+    segments.push(value);
+  }
+  return hasValue ? segments.join('-') : '';
+}
+
+/**
  * Normalizes a parsed row from the "Online" (Oracle FBDI) CSV by mapping the
  * FBDI column headers to the canonical field names used by the pipeline.
  * The first non-empty value wins when two headers map to the same field
@@ -268,6 +287,16 @@ function normalizeOnlineRow(row) {
   // Oracle may export the date as an Excel serial — normalize it to YYYY-MM-DD.
   if (normalized.TransactionDate != null) {
     normalized.TransactionDate = maybeExcelSerialToDate(normalized.TransactionDate);
+  }
+
+  // Build the distribution account from the seven FBDI segment columns
+  // (DST_SEGMENT1..DST_SEGMENT7), joined with "-" to match the account format
+  // Oracle expects (e.g. "01-000-1410-0000-000-0000-0000"). Positions are
+  // preserved so each segment stays in its slot; the field is only set when at
+  // least one segment carries a value.
+  const distributionAccountId = buildDistributionAccountId(row);
+  if (distributionAccountId) {
+    normalized.DistributionAccountId = distributionAccountId;
   }
   // Force online processing. The inventoryStagedTransactions REST API only
   // posts the transaction immediately when TransactionMode is "1" (online).
@@ -486,7 +515,7 @@ function mapRowToPayload(row, organizationName) {
     return trimmed !== '' ? trimmed : fallback;
   };
 
-  return {
+  const payload = {
     OrganizationName: org,
     TransactionTypeName: row.TransactionTypeName?.trim(),
     ItemNumber: row.ItemNumber?.trim(),
@@ -505,6 +534,17 @@ function mapRowToPayload(row, organizationName) {
     SourceCode: valueOr(row.SourceCode, 'SERVICE'),
     UseCurrentCostFlag: valueOr(row.UseCurrentCostFlag, 'true'),
   };
+
+  // AccountCombination is the segment string built from the Online template's
+  // DST_SEGMENT1..7 columns (see normalizeOnlineRow). The staging resource has
+  // no "Account" attribute (that's read-only on inventoryCompletedTransactions);
+  // the writable segment field is AccountCombination. Only Online rows carry it.
+  const distributionAccountId = row.DistributionAccountId?.trim();
+  if (distributionAccountId) {
+    payload.AccountCombination = distributionAccountId;
+  }
+
+  return payload;
 }
 
 // Number of Oracle API requests to send in parallel per batch.

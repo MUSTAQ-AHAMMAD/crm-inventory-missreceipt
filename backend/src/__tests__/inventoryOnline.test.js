@@ -25,6 +25,13 @@ function sampleOnlineRow() {
     '*SOURCE_LINE_ID': '121364',
     '*TRANSACTION_MODE': '2',
     '*USE_CURRENT_COST': '',
+    'DST_SEGMENT1': '01',
+    'DST_SEGMENT2': '000',
+    'DST_SEGMENT3': '1410',
+    'DST_SEGMENT4': '0000',
+    'DST_SEGMENT5': '000',
+    'DST_SEGMENT6': '0000',
+    'DST_SEGMENT7': '0000',
   };
 }
 
@@ -44,6 +51,40 @@ describe('normalizeOnlineRow', () => {
     // TransactionMode is forced to online ("1") regardless of the file value,
     // so the staged transaction actually posts (see normalizeOnlineRow).
     expect(n.TransactionMode).toBe('1');
+    // DST_SEGMENT1..7 joined with "-" in order.
+    expect(n.DistributionAccountId).toBe('01-000-1410-0000-000-0000-0000');
+  });
+
+  it('builds DistributionAccountId from DST_SEGMENT columns (asterisks/spacing ignored)', () => {
+    const n = normalizeOnlineRow({
+      'ITEM_NUMBER': 'X',
+      '* DST_SEGMENT1': '01',
+      'DST_SEGMENT2': '000',
+      'DST_SEGMENT3': '1410',
+      'DST_SEGMENT4': '0000',
+      'DST_SEGMENT5': '000',
+      'DST_SEGMENT6': '0000',
+      'DST_SEGMENT7': '0000',
+    });
+    expect(n.DistributionAccountId).toBe('01-000-1410-0000-000-0000-0000');
+  });
+
+  it('omits DistributionAccountId when every segment is blank or absent', () => {
+    expect(normalizeOnlineRow({ 'ITEM_NUMBER': 'X' }).DistributionAccountId).toBeUndefined();
+    expect(normalizeOnlineRow({
+      'ITEM_NUMBER': 'X',
+      'DST_SEGMENT1': '',
+      'DST_SEGMENT2': '  ',
+    }).DistributionAccountId).toBeUndefined();
+  });
+
+  it('preserves empty slots between populated segments', () => {
+    const n = normalizeOnlineRow({
+      'ITEM_NUMBER': 'X',
+      'DST_SEGMENT1': '01',
+      'DST_SEGMENT3': '1410',
+    });
+    expect(n.DistributionAccountId).toBe('01--1410----');
   });
 
   it('prefers TRANSACTION_UNIT_OF_MEASURE (name) over TRANSACTION_UOM (code)', () => {
@@ -95,6 +136,7 @@ describe('mapRowToPayload (online)', () => {
       TransactionMode: '1', // forced online so the transaction posts
       SourceCode: 'SR',
       UseCurrentCostFlag: 'true', // blank in file → default
+      AccountCombination: '01-000-1410-0000-000-0000-0000',
     });
   });
 
@@ -124,5 +166,6 @@ describe('mapRowToPayload (normal, backward compatible)', () => {
       SourceCode: 'SERVICE',
       UseCurrentCostFlag: 'true',
     });
+    expect(payload).not.toHaveProperty('AccountCombination');
   });
 });
