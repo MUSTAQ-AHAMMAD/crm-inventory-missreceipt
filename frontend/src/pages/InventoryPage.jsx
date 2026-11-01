@@ -4,7 +4,7 @@
  * and a table of recent uploads with links to failure details.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import api from '../hooks/useApi'
@@ -15,15 +15,30 @@ import HistoryFilterBar from '../components/common/HistoryFilterBar'
 import { filterUploads } from '../utils/format'
 import { buildDatePreview } from '../utils/inventoryPreview'
 
-// Required CSV columns for inventory uploads (OrganizationName is a separate form field)
+// Required CSV columns for "Normal" inventory uploads (OrganizationName is a
+// separate form field).
 const REQUIRED_COLUMNS = [
   'TransactionTypeName', 'ItemNumber',
   'SubinventoryCode', 'TransactionDate', 'TransactionQuantity',
   'TransactionReference', 'TransactionUnitOfMeasure',
 ]
 
+// Key columns read from the "Online" (Oracle FBDI) template. The file carries
+// the Organization Name and the Oracle fixed fields as columns, so there is no
+// Organization Name form field in Online mode.
+const ONLINE_COLUMNS = [
+  'ORGANIZATION_NAME', 'ITEM_NUMBER', 'SUBINVENTORY_CODE',
+  'TRANSACTION_QUANTITY', 'TRANSACTION_UOM', 'TRANSACTION_DATE',
+  'TRANSACTION_TYPE_NAME', 'TRANSACTION_REFERENCE',
+  'SOURCE_CODE', 'SOURCE_HEADER_ID', 'SOURCE_LINE_ID',
+  'TRANSACTION_MODE', 'USE_CURRENT_COST',
+]
+
 export default function InventoryPage() {
   const queryClient = useQueryClient()
+  // Upload mode: 'normal' (Odoo/Vend CSV + form org name) or 'online' (Oracle
+  // FBDI template CSV where org name and fixed fields come from the file).
+  const [mode, setMode] = useState('normal')
   const [file, setFile] = useState(null)
   const [organizationName, setOrganizationName] = useState('')
   const [uploading, setUploading] = useState(false)
@@ -32,6 +47,11 @@ export default function InventoryPage() {
   const [uploadProgress, setUploadProgress] = useState(0)
   // Tracks the active upload being processed in the background
   const [activeUploadId, setActiveUploadId] = useState(null)
+  // True while a cancellation request is in flight / pending
+  const [cancelling, setCancelling] = useState(false)
+  // AbortController for the in-flight file POST (used to cancel before the
+  // backend job starts)
+  const abortRef = useRef(null)
   // Client-side per-date breakdown of the selected file (visual confirmation)
   const [preview, setPreview] = useState(null)
 
@@ -80,30 +100,42 @@ export default function InventoryPage() {
   useEffect(() => {
     if (!progressData || !activeUploadId) return
     const { status } = progressData
-    if (status === 'COMPLETED' || status === 'FAILED' || status === 'PARTIAL') {
+    if (status === 'COMPLETED' || status === 'FAILED' || status === 'PARTIAL' || status === 'CANCELLED') {
       setResult(progressData)
       setActiveUploadId(null)
       setUploading(false)
       setUploadProgress(0)
+      setCancelling(false)
       queryClient.invalidateQueries({ queryKey: ['inventoryUploads'] })
     }
   }, [progressData, activeUploadId, queryClient])
 
   const handleUpload = useCallback(async () => {
-    if (!organizationName.trim()) { setError('Please enter an Organization Name.'); return }
+    if (mode === 'normal' && !organizationName.trim()) {
+      setError('Please enter an Organization Name.'); return
+    }
     if (!file) { setError('Please select a CSV file.'); return }
     setError('')
     setResult(null)
     setUploading(true)
+    setCancelling(false)
     setUploadProgress(10)
     setActiveUploadId(null)
 
     const formData = new FormData()
     formData.append('file', file)
-    formData.append('organizationName', organizationName.trim())
+    formData.append('mode', mode)
+    // Online reads Organization Name from the file; Normal sends the form value.
+    if (mode === 'normal') {
+      formData.append('organizationName', organizationName.trim())
+    }
+
+    const controller = new AbortController()
+    abortRef.current = controller
 
     try {
       const res = await api.post('/inventory/bulk-upload', formData, {
+        signal: controller.signal,
         onUploadProgress: (e) => {
           setUploadProgress(Math.round((e.loaded / e.total) * 80))
         },
@@ -121,15 +153,60 @@ export default function InventoryPage() {
         queryClient.invalidateQueries({ queryKey: ['inventoryUploads'] })
       }
     } catch (err) {
+      // Request aborted by the user (cancelled before the backend job began)
+      if (err.code === 'ERR_CANCELED' || err.name === 'CanceledError') {
+        setUploading(false)
+        setUploadProgress(0)
+        setCancelling(false)
+        return
+      }
       setError(err.response?.data?.error || 'Upload failed.')
       setUploading(false)
       setUploadProgress(0)
+    } finally {
+      abortRef.current = null
     }
-  }, [file, organizationName, queryClient])
+  }, [file, organizationName, mode, queryClient])
+
+  // Cancel the upload: abort the in-flight POST if still uploading, otherwise
+  // tell the backend to stop the in-progress job.
+  const handleCancel = useCallback(async () => {
+    setCancelling(true)
+    if (abortRef.current) {
+      abortRef.current.abort()
+      return
+    }
+    if (activeUploadId) {
+      try {
+        await api.post(`/inventory/uploads/${activeUploadId}/cancel`)
+        // Polling will pick up the CANCELLED status and finalize the UI.
+      } catch (err) {
+        setError(err.response?.data?.error || 'Could not cancel the upload.')
+        setCancelling(false)
+      }
+    } else {
+      setUploading(false)
+      setUploadProgress(0)
+      setCancelling(false)
+    }
+  }, [activeUploadId])
 
   const handleDownloadTemplate = () => {
-    window.open(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api'}/inventory/template`, '_blank')
+    const base = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api'
+    const path = mode === 'online' ? '/inventory/template/online' : '/inventory/template'
+    window.open(`${base}${path}`, '_blank')
   }
+
+  // Switch upload mode and reset the per-upload state so the two flows don't
+  // leak file/org/preview into each other.
+  const handleSwitchMode = useCallback((next) => {
+    if (next === mode || uploading) return
+    setMode(next)
+    setFile(null)
+    setPreview(null)
+    setResult(null)
+    setError('')
+  }, [mode, uploading])
 
   // Compute progress stats from polling data
   const processed = progressData ? progressData.successCount + progressData.failureCount : 0
@@ -145,50 +222,92 @@ export default function InventoryPage() {
           onClick={handleDownloadTemplate}
           className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors flex items-center gap-2"
         >
-          ⬇️ Download Template
+          ⬇️ Download {mode === 'online' ? 'Online Template (.xlsm)' : 'Template'}
         </button>
       </div>
 
       {/* Upload card */}
       <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
-        <h2 className="font-semibold text-gray-700">Upload CSV File</h2>
-
-        <div>
-          <label htmlFor="organizationName" className="block text-sm font-medium text-gray-700 mb-1">
-            Organization Name
-          </label>
-          <input
-            id="organizationName"
-            type="text"
-            value={organizationName}
-            onChange={(e) => setOrganizationName(e.target.value)}
-            placeholder="e.g. Vision Operations"
-            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
-          />
+        {/* Normal / Online mode switcher */}
+        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
+          {[
+            { key: 'normal', label: 'Normal' },
+            { key: 'online', label: 'Online' },
+          ].map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => handleSwitchMode(tab.key)}
+              disabled={uploading}
+              className={`px-5 py-1.5 text-sm font-medium rounded-md transition-colors disabled:opacity-60 ${
+                mode === tab.key
+                  ? 'bg-white text-blue-700 shadow-sm'
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
-        <FileDropzone onFile={handleFile} label="inventory CSV" />
+        <h2 className="font-semibold text-gray-700">
+          Upload {mode === 'online' ? 'Online (Oracle Template) CSV' : 'CSV File'}
+        </h2>
+
+        {mode === 'normal' && (
+          <div>
+            <label htmlFor="organizationName" className="block text-sm font-medium text-gray-700 mb-1">
+              Organization Name
+            </label>
+            <input
+              id="organizationName"
+              type="text"
+              value={organizationName}
+              onChange={(e) => setOrganizationName(e.target.value)}
+              placeholder="e.g. Vision Operations"
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-colors"
+            />
+          </div>
+        )}
+
+        <FileDropzone onFile={handleFile} label={mode === 'online' ? 'Oracle template CSV' : 'inventory CSV'} />
 
         {/* Per-date preview — visual confirmation before processing */}
         {preview && <DatePreview preview={preview} />}
 
         {/* Column mapping reference */}
-        <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
-          <p className="text-sm font-medium text-blue-700 mb-2">Required CSV Columns:</p>
-          <div className="flex flex-wrap gap-2">
-            {REQUIRED_COLUMNS.map((col) => (
-              <span key={col} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-mono">{col}</span>
-            ))}
+        {mode === 'online' ? (
+          <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
+            <p className="text-sm font-medium text-blue-700 mb-2">Online (Oracle template) columns used:</p>
+            <div className="flex flex-wrap gap-2">
+              {ONLINE_COLUMNS.map((col) => (
+                <span key={col} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-mono">{col}</span>
+              ))}
+            </div>
+            <p className="text-xs text-blue-600 mt-2">
+              Fill the <span className="font-mono">INV_TRANSACTIONS_INTERFACE</span> sheet of the downloaded template, then upload it as CSV (headers in the first row).{' '}
+              <span className="font-mono">ORGANIZATION_NAME</span> and the Oracle fixed fields (<span className="font-mono">SOURCE_CODE</span>, <span className="font-mono">SOURCE_HEADER_ID</span>, <span className="font-mono">SOURCE_LINE_ID</span>, <span className="font-mono">USE_CURRENT_COST</span>) are read from the file.{' '}
+              Either <span className="font-mono">TRANSACTION_UOM</span> or <span className="font-mono">TRANSACTION_UNIT_OF_MEASURE</span> is accepted for the UoM; the short code <span className="font-mono">Ea</span> is sent to Oracle as <span className="font-mono">Each</span>.{' '}
+              <span className="font-mono">TRANSACTION_MODE</span> is always sent as online (1) so the transaction posts immediately — a background mode (2/3) would stay unprocessed in Oracle.
+            </p>
           </div>
-          <p className="text-xs text-blue-600 mt-2">
-            Alternative column names are also accepted (e.g. <span className="font-mono">Order Lines/Product/Barcode</span> for <span className="font-mono">ItemNumber</span>,{' '}
-            <span className="font-mono">Order Lines/Branch/Name</span> for <span className="font-mono">SubinventoryCode</span>,{' '}
-            <span className="font-mono">diff</span> for <span className="font-mono">TransactionQuantity</span>,{' '}
-            <span className="font-mono">Order Lines/Order Ref</span> for <span className="font-mono">TransactionReference</span>,{' '}
-            <span className="font-mono">Order Lines/Order Ref/Date</span> for <span className="font-mono">TransactionDate</span>,{' '}
-            <span className="font-mono">Order Lines/Base UoM</span> for <span className="font-mono">TransactionUnitOfMeasure</span>).
-          </p>
-        </div>
+        ) : (
+          <div className="bg-blue-50 border border-blue-100 rounded-lg p-4">
+            <p className="text-sm font-medium text-blue-700 mb-2">Required CSV Columns:</p>
+            <div className="flex flex-wrap gap-2">
+              {REQUIRED_COLUMNS.map((col) => (
+                <span key={col} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs font-mono">{col}</span>
+              ))}
+            </div>
+            <p className="text-xs text-blue-600 mt-2">
+              Alternative column names are also accepted (e.g. <span className="font-mono">Order Lines/Product/Barcode</span> for <span className="font-mono">ItemNumber</span>,{' '}
+              <span className="font-mono">Order Lines/Branch/Name</span> for <span className="font-mono">SubinventoryCode</span>,{' '}
+              <span className="font-mono">diff</span> for <span className="font-mono">TransactionQuantity</span>,{' '}
+              <span className="font-mono">Order Lines/Order Ref</span> for <span className="font-mono">TransactionReference</span>,{' '}
+              <span className="font-mono">Order Lines/Order Ref/Date</span> for <span className="font-mono">TransactionDate</span>,{' '}
+              <span className="font-mono">Order Lines/Base UoM</span> for <span className="font-mono">TransactionUnitOfMeasure</span>).
+            </p>
+          </div>
+        )}
 
         <ErrorAlert message={error} onDismiss={() => setError('')} />
 
@@ -207,7 +326,7 @@ export default function InventoryPage() {
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-5 space-y-4">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-blue-800 flex items-center gap-2">
-                <Spinner size="sm" /> Processing Records…
+                <Spinner size="sm" /> {cancelling ? 'Cancelling…' : 'Processing Records…'}
               </span>
               <span className="text-sm font-bold text-blue-700">{percentComplete}%</span>
             </div>
@@ -251,29 +370,49 @@ export default function InventoryPage() {
           </div>
         )}
 
-        <button
-          onClick={handleUpload}
-          disabled={uploading || !file || !organizationName.trim()}
-          className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center gap-2"
-        >
-          {uploading ? <Spinner size="sm" /> : '📤'}
-          {uploading ? 'Processing…' : 'Upload & Process'}
-        </button>
+        <div className="flex flex-wrap gap-3">
+          <button
+            onClick={handleUpload}
+            disabled={uploading || !file || (mode === 'normal' && !organizationName.trim())}
+            className="px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors flex items-center gap-2"
+          >
+            {uploading ? <Spinner size="sm" /> : '📤'}
+            {uploading ? 'Processing…' : 'Upload & Process'}
+          </button>
+
+          {uploading && (
+            <button
+              onClick={handleCancel}
+              disabled={cancelling}
+              className="px-6 py-2.5 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 disabled:opacity-60 transition-colors flex items-center gap-2"
+            >
+              {cancelling ? <Spinner size="sm" /> : '✖'}
+              {cancelling ? 'Cancelling…' : 'Cancel'}
+            </button>
+          )}
+        </div>
 
         {/* Result summary */}
         {result && (
           <div className={`border rounded-lg p-4 ${
             result.status === 'COMPLETED' ? 'bg-green-50 border-green-200' :
             result.status === 'FAILED' ? 'bg-red-50 border-red-200' :
+            result.status === 'CANCELLED' ? 'bg-gray-50 border-gray-200' :
             'bg-yellow-50 border-yellow-200'
           }`}>
             <p className={`font-semibold mb-2 ${
               result.status === 'COMPLETED' ? 'text-green-700' :
               result.status === 'FAILED' ? 'text-red-700' :
+              result.status === 'CANCELLED' ? 'text-gray-700' :
               'text-yellow-700'
             }`}>
-              {result.status === 'COMPLETED' ? '✅' : result.status === 'FAILED' ? '❌' : '⚠️'} Upload {result.status === 'COMPLETED' ? 'Complete' : result.status === 'FAILED' ? 'Failed' : 'Partially Complete'}
+              {result.status === 'COMPLETED' ? '✅' : result.status === 'FAILED' ? '❌' : result.status === 'CANCELLED' ? '⏹️' : '⚠️'} Upload {result.status === 'COMPLETED' ? 'Complete' : result.status === 'FAILED' ? 'Failed' : result.status === 'CANCELLED' ? 'Cancelled' : 'Partially Complete'}
             </p>
+            {result.status === 'CANCELLED' && (
+              <p className="text-xs text-gray-500 mb-2">
+                Processing was stopped. Records already sent to Oracle were kept; the rest were not processed.
+              </p>
+            )}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
               <div><span className="text-gray-500">Total:</span> <strong>{result.totalRecords}</strong></div>
               <div><span className="text-gray-500">Success:</span> <strong className="text-green-600">{result.successCount}</strong></div>
@@ -302,6 +441,7 @@ export default function InventoryPage() {
             <HistoryFilterBar
               search={search} onSearch={setSearch}
               status={statusFilter} onStatus={setStatusFilter}
+              statusOptions={['COMPLETED', 'PARTIAL', 'FAILED', 'PROCESSING', 'CANCELLED']}
               from={fromDate} to={toDate} onFrom={setFromDate} onTo={setToDate}
               count={filteredUploads.length} total={allUploads.length}
             />
@@ -470,6 +610,7 @@ function StatusBadge({ status }) {
     PARTIAL: 'bg-yellow-100 text-yellow-700',
     PROCESSING: 'bg-blue-100 text-blue-700',
     PENDING: 'bg-gray-100 text-gray-600',
+    CANCELLED: 'bg-gray-200 text-gray-700',
   }
   return (
     <span className={`px-2 py-0.5 rounded text-xs font-medium ${map[status] || 'bg-gray-100 text-gray-600'}`}>

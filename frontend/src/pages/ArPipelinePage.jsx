@@ -29,6 +29,54 @@ const INVOICE_CHUNK_SIZE = parseInt(import.meta.env.VITE_INVOICE_CHUNK_SIZE, 10)
 // Polling interval in ms when waiting for an invoice batch to complete.
 const POLL_INTERVAL_MS = parseInt(import.meta.env.VITE_POLL_INTERVAL_MS, 10) || 1000
 
+/**
+ * Submit payloads to the AR invoice batch endpoint in chunks, polling each batch
+ * to completion. Returns merged { totalSuccess, totalFail, invoiceResults }.
+ * Shared by the invoice push (positive payloads) and the credit-memo push
+ * (negative payloads) so the two flows differ only in what they send.
+ */
+async function submitPayloadsInChunks(payloads, { onBatchId, onChunkDone } = {}) {
+  const chunks = []
+  for (let i = 0; i < payloads.length; i += INVOICE_CHUNK_SIZE) {
+    chunks.push(payloads.slice(i, i + INVOICE_CHUNK_SIZE))
+  }
+
+  const batchIds = await Promise.all(
+    chunks.map((chunk) =>
+      api.post('/ar-pipeline/create-invoice-batch', { payloads: chunk }).then((r) => {
+        onBatchId?.(r.data.batchId)
+        return r.data.batchId
+      })
+    )
+  )
+
+  const batchResults = await Promise.all(
+    batchIds.map(async (batchId) => {
+      // Poll this batch until it leaves PROCESSING, then count it as one chunk done.
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const data = await api.get(`/ar-pipeline/invoice-batch/${batchId}/progress`).then((r) => r.data)
+        if (data.status !== 'PROCESSING') { onChunkDone?.(); return data }
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS))
+      }
+    })
+  )
+
+  let totalSuccess = 0
+  let totalFail = 0
+  const invoiceResults = []
+  for (let ci = 0; ci < batchResults.length; ci++) {
+    const br = batchResults[ci]
+    totalSuccess += br.successCount || 0
+    totalFail += br.failureCount || 0
+    const offset = ci * INVOICE_CHUNK_SIZE
+    if (br.invoiceResults) {
+      for (const r of br.invoiceResults) invoiceResults.push({ ...r, index: offset + r.index })
+    }
+  }
+  return { totalSuccess, totalFail, invoiceResults, chunkCount: chunks.length }
+}
+
 function fmt(n, digits = 2) {
   if (n == null || n === '') return '—'
   const num = parseFloat(n)
@@ -198,7 +246,7 @@ function StatGrid({ stats }) {
 
 // ─── Payload preview table ───────────────────────────────────────────────────
 
-function PayloadTable({ payloads, label, color = 'blue' }) {
+function PayloadTable({ payloads, label, color = 'blue', showType = false }) {
   const [showAll, setShowAll] = useState(false)
   const visible = showAll ? payloads : payloads.slice(0, 8)
   if (payloads.length === 0) return null
@@ -216,6 +264,7 @@ function PayloadTable({ payloads, label, color = 'blue' }) {
               <th className="px-3 py-2 text-left">Customer</th>
               <th className="px-3 py-2 text-left">Date</th>
               <th className="px-3 py-2 text-left">Payment Type</th>
+              {showType && <th className="px-3 py-2 text-left">Txn Type</th>}
               <th className="px-3 py-2 text-right">Lines</th>
               <th className="px-3 py-2 text-right">Est. Amount</th>
               <th className="px-3 py-2 text-left">Cross Ref</th>
@@ -223,13 +272,16 @@ function PayloadTable({ payloads, label, color = 'blue' }) {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {visible.map((p, i) => {
-              const totalAmt = (p.receivablesInvoiceLines || []).reduce(
-                (s, l) => s + (parseFloat(l.Quantity) || 0) * (parseFloat(l.UnitSellingPrice) || 0), 0
+              // Works for both invoice (receivablesInvoiceLines / Quantity) and
+              // credit-memo (receivablesCreditMemoLines / LineQuantityCredit) shapes.
+              const lines = p.receivablesInvoiceLines || p.receivablesCreditMemoLines || []
+              const totalAmt = lines.reduce(
+                (s, l) => s + (parseFloat(l.Quantity ?? l.LineQuantityCredit) || 0) * (parseFloat(l.UnitSellingPrice) || 0), 0
               )
               return (
                 <tr key={i} className="hover:bg-gray-50">
                   <td className="px-3 py-1.5 text-gray-400">{i + 1}</td>
-                  <td className="px-3 py-1.5 font-medium text-gray-800 max-w-[180px] truncate">{p.BillToCustomerName || '—'}</td>
+                  <td className="px-3 py-1.5 font-medium text-gray-800 max-w-[180px] truncate">{p.BillToCustomerName || p.BillToCustomerNumber || '—'}</td>
                   <td className="px-3 py-1.5 text-gray-500">{p.TransactionDate || '—'}</td>
                   <td className="px-3 py-1.5">
                     <Badge color={
@@ -240,7 +292,8 @@ function PayloadTable({ payloads, label, color = 'blue' }) {
                        (p.Comments || '').includes('Tamara') ? 'Tamara' : 'Normal'}
                     </Badge>
                   </td>
-                  <td className="px-3 py-1.5 text-right">{(p.receivablesInvoiceLines || []).length}</td>
+                  {showType && <td className="px-3 py-1.5 font-mono text-gray-600 max-w-[160px] truncate" title={p.TransactionType || ''}>{p.TransactionType || '—'}</td>}
+                  <td className="px-3 py-1.5 text-right">{lines.length}</td>
                   <td className={`px-3 py-1.5 text-right font-mono ${totalAmt < 0 ? 'text-red-600' : 'text-gray-800'}`}>
                     {fmt(totalAmt)}
                   </td>
@@ -747,6 +800,17 @@ export default function ArPipelinePage() {
     error: '',
   })
 
+  // ── Step 1 credit-memo sub-flow state (negative/zero-total payloads) ───────
+  // Kept separate from s1 so pushing credit memos never touches the invoice flow
+  // (or the Step 2 unlock, which keys off s1.status).
+  const [cm, setCm] = useState({
+    status: 'idle', // idle | creating | done | error | partial
+    createResults: null,
+    batchId: null,
+    chunkProgress: { current: 0, total: 0 },
+    error: '',
+  })
+
   // ── Step 2 state ──────────────────────────────────────────────────────────
   const [s2, setS2] = useState({
     status: 'idle', // idle | generating | generated | creating-std | creating-misc | done | error
@@ -844,83 +908,38 @@ export default function ArPipelinePage() {
   }
 
   const handleCreateInvoices = async () => {
-    if (!allInvoicePayloads.length) return
-
-    // Split all payloads into chunks so each HTTP request stays small and
-    // Oracle is never flooded with one massive body (mirrors VendReceiptPage chunking).
-    const chunks = []
-    for (let i = 0; i < allInvoicePayloads.length; i += INVOICE_CHUNK_SIZE) {
-      chunks.push(allInvoicePayloads.slice(i, i + INVOICE_CHUNK_SIZE))
-    }
+    // Push ONLY positive-total invoices. Credit memos (negative/zero totals) have
+    // their own button below so they never ride along with the invoice push.
+    const positives = s1.payloads?.positivePayloads || []
+    if (!positives.length) return
 
     setS1(prev => ({
       ...prev,
       status: 'creating',
       createResults: null,
       batchId: null,
-      chunkProgress: { current: 0, total: chunks.length },
+      chunkProgress: { current: 0, total: Math.ceil(positives.length / INVOICE_CHUNK_SIZE) },
       error: '',
     }))
 
-    let totalSuccess = 0
-    let totalFail = 0
-    const allInvoiceResults = []
-
     try {
-      // Submit all chunks concurrently — backend responds immediately with a batchId
-      // for each, so submitting them in parallel has zero Oracle cost at this point.
-      // Non-deterministic batchId writes are intentional: s1.batchId just needs to hold
-      // any in-flight batchId so the React Query progress display has something to poll.
-      const batchIds = await Promise.all(
-        chunks.map(chunk =>
-          api.post('/ar-pipeline/create-invoice-batch', { payloads: chunk }).then(r => {
-            setS1(prev => ({ ...prev, batchId: r.data.batchId }))
-            return r.data.batchId
-          })
-        )
-      )
-
-      // Poll all batches in parallel. Each resolves as soon as its batch completes.
-      // React functional updates (prev => ...) are applied sequentially by the scheduler,
-      // so concurrent increments to chunkProgress.current are always correct.
-      const batchResults = await Promise.all(
-        batchIds.map(async (batchId) => {
-          while (true) {
-            const data = await api.get(`/ar-pipeline/invoice-batch/${batchId}/progress`).then(r => r.data)
-            if (data.status !== 'PROCESSING') {
-              setS1(prev => ({
-                ...prev,
-                chunkProgress: { ...prev.chunkProgress, current: prev.chunkProgress.current + 1 },
-              }))
-              return data
-            }
-            await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
-          }
-        })
-      )
-
-      // Merge per-invoice results, re-indexing so indices are globally unique
-      for (let ci = 0; ci < batchResults.length; ci++) {
-        const batchResult = batchResults[ci]
-        totalSuccess += batchResult.successCount || 0
-        totalFail    += batchResult.failureCount || 0
-        const offset = ci * INVOICE_CHUNK_SIZE
-        if (batchResult.invoiceResults) {
-          for (const r of batchResult.invoiceResults) {
-            allInvoiceResults.push({ ...r, index: offset + r.index })
-          }
-        }
-      }
+      const { totalSuccess, totalFail, invoiceResults } = await submitPayloadsInChunks(positives, {
+        onBatchId: (id) => setS1(prev => ({ ...prev, batchId: id })),
+        onChunkDone: () => setS1(prev => ({
+          ...prev,
+          chunkProgress: { ...prev.chunkProgress, current: prev.chunkProgress.current + 1 },
+        })),
+      })
 
       const newStatus = totalFail === 0 ? 'done' : totalSuccess === 0 ? 'error' : 'partial'
       setS1(prev => ({
         ...prev,
         status: newStatus,
         createResults: {
-          total: allInvoicePayloads.length,
+          total: positives.length,
           successCount: totalSuccess,
           failureCount: totalFail,
-          invoiceResults: allInvoiceResults.length > 0 ? allInvoiceResults : null,
+          invoiceResults: invoiceResults.length > 0 ? invoiceResults : null,
         },
         error: totalFail > 0 && totalSuccess === 0 ? `All ${totalFail} invoices failed.` : '',
       }))
@@ -929,6 +948,36 @@ export default function ArPipelinePage() {
     } catch (err) {
       const msg = err.response?.data?.error || 'Batch invoice creation failed.'
       setS1(prev => ({ ...prev, status: 'error', error: msg }))
+    }
+  }
+
+  // Push the credit-memo payloads to Oracle's receivablesCreditMemos REST resource
+  // (separate from the invoice push). Blocked in the UI when any lacks a CM type.
+  const handleCreateCreditMemos = async () => {
+    const cms = s1.payloads?.creditMemoPayloads || []
+    if (!cms.length) return
+
+    setCm({ status: 'creating', createResults: null, batchId: null, chunkProgress: { current: 0, total: 1 }, error: '' })
+
+    try {
+      const res = await api.post('/vend-invoice/create-credit-memos', { payloads: cms })
+      const d = res.data
+      const newStatus = d.failureCount === 0 ? 'done' : d.successCount === 0 ? 'error' : 'partial'
+      setCm(prev => ({
+        ...prev,
+        status: newStatus,
+        createResults: {
+          total: d.total,
+          successCount: d.successCount,
+          failureCount: d.failureCount,
+          results: d.results || null,
+        },
+        error: d.successCount === 0 ? `All ${d.failureCount} credit memos failed.` : '',
+      }))
+      refetchSummary()
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Credit memo creation failed.'
+      setCm(prev => ({ ...prev, status: 'error', error: msg }))
     }
   }
 
@@ -1145,7 +1194,7 @@ export default function ArPipelinePage() {
               <StatGrid stats={[
                 { label: 'Total Payloads',     value: allInvoicePayloads.length,                       color: 'blue'  },
                 { label: 'Positive',           value: s1.payloads.positivePayloads?.length ?? 0,       color: 'green' },
-                { label: 'Negative (Returns)', value: s1.payloads.negativePayloads?.length ?? 0,       color: 'red'   },
+                { label: 'Credit Memos',       value: s1.payloads.stats?.creditMemoPayloadsCount ?? s1.payloads.creditMemoPayloads?.length ?? 0, color: 'red' },
                 { label: 'Refund Lines',       value: s1.payloads.stats?.refundLinesCount ?? 0,        color: 'purple' },
                 { label: 'Sales Lines',        value: s1.payloads.stats?.totalSalesLines ?? 0,         color: 'gray'  },
               ]} />
@@ -1176,22 +1225,18 @@ export default function ArPipelinePage() {
               {s1.payloads.positivePayloads?.length > 0 && (
                 <PayloadTable payloads={s1.payloads.positivePayloads} label="Positive Invoice Payloads" color="green" />
               )}
-              {s1.payloads.negativePayloads?.length > 0 && (
-                <PayloadTable payloads={s1.payloads.negativePayloads} label="Negative Invoice Payloads (Returns)" color="blue" />
-              )}
-
-              {/* Create button */}
+              {/* Create invoices button (positive-total payloads only) */}
               <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-gray-100">
                 <ActionBtn
                   onClick={handleCreateInvoices}
                   loading={s1.status === 'creating'}
-                  disabled={allInvoicePayloads.length === 0 || s1.status === 'creating'}
+                  disabled={(s1.payloads.positivePayloads?.length ?? 0) === 0 || s1.status === 'creating'}
                   color="blue"
                   size="lg"
                 >
-                  🚀 Create {allInvoicePayloads.length} AR Invoice{allInvoicePayloads.length !== 1 ? 's' : ''} in Oracle
+                  🚀 Create {s1.payloads.positivePayloads?.length ?? 0} AR Invoice{(s1.payloads.positivePayloads?.length ?? 0) !== 1 ? 's' : ''} in Oracle
                 </ActionBtn>
-                <p className="text-xs text-gray-400">Sends payloads to Oracle Fusion and stores responses in database</p>
+                <p className="text-xs text-gray-400">Positive-total invoices only. Credit memos are pushed separately below.</p>
               </div>
             </div>
           )}
@@ -1389,6 +1434,129 @@ export default function ArPipelinePage() {
                       View all AR Invoice responses in database →
                     </Link>
                   </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Credit Memos (returned items + net-negative groups, via REST) ── */}
+          {s1.payloads?.creditMemoPayloads?.length > 0 && (
+            <div className="space-y-3 pt-4 border-t border-gray-100">
+              <div className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+                🧾 Credit Memos ({s1.payloads.creditMemoPayloads.length})
+              </div>
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                Built from returned-item lines and net-negative groups. These can't be invoices
+                (Oracle rejects a non-positive invoice total with AR-855286), so they post to Oracle's{' '}
+                <span className="font-mono">receivablesCreditMemos</span> REST resource with the per-brand
+                “- CN” transaction type — separately from the invoices above.
+              </p>
+
+              {/* Blocked until every credit memo resolves a "- CN" type */}
+              {(s1.payloads.stats?.creditMemoMissingType ?? 0) > 0 && (
+                <p className="text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
+                  ⛔ {s1.payloads.stats.creditMemoMissingType} credit memo(s) have no “- CN” transaction type
+                  resolved (brand missing from metadata) and would be rejected. Load that brand’s metadata
+                  before pushing.
+                </p>
+              )}
+
+              <PayloadTable payloads={s1.payloads.creditMemoPayloads} label="Credit Memo Payloads" color="blue" showType />
+
+              {/* Create credit memos button */}
+              <div className="flex flex-wrap items-center gap-3 pt-2">
+                <ActionBtn
+                  onClick={handleCreateCreditMemos}
+                  loading={cm.status === 'creating'}
+                  disabled={cm.status === 'creating' || (s1.payloads.stats?.creditMemoMissingType ?? 0) > 0}
+                  color="orange"
+                  size="lg"
+                >
+                  🧾 Create {s1.payloads.creditMemoPayloads.length} Credit Memo{s1.payloads.creditMemoPayloads.length !== 1 ? 's' : ''} in Oracle
+                </ActionBtn>
+                {(s1.payloads.stats?.creditMemoMissingType ?? 0) > 0 && (
+                  <p className="text-xs text-red-500">Blocked until all brands resolve a “- CN” type.</p>
+                )}
+              </div>
+
+              {/* Live progress */}
+              {cm.status === 'creating' && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm">
+                  <div className="flex items-center gap-2">
+                    <Spinner size="sm" />
+                    <p className="font-semibold text-amber-700">Posting credit memos to Oracle…</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Results summary */}
+              {cm.createResults && (
+                <div className={`rounded-lg border p-4 text-sm ${
+                  cm.createResults.failureCount === 0 ? 'bg-green-50 border-green-200' :
+                  cm.createResults.successCount === 0 ? 'bg-red-50 border-red-200' :
+                  'bg-yellow-50 border-yellow-200'
+                }`}>
+                  <p className={`font-semibold ${
+                    cm.createResults.failureCount === 0 ? 'text-green-700' :
+                    cm.createResults.successCount === 0 ? 'text-red-700' : 'text-yellow-700'
+                  }`}>
+                    {cm.createResults.failureCount === 0
+                      ? `✅ All ${cm.createResults.successCount} credit memos created successfully!`
+                      : cm.createResults.successCount === 0
+                      ? `❌ All ${cm.createResults.failureCount} credit memos failed`
+                      : `⚠️ ${cm.createResults.successCount} created, ${cm.createResults.failureCount} failed`}
+                  </p>
+                </div>
+              )}
+
+              {cm.error && <ErrorAlert message={cm.error} onDismiss={() => setCm(p => ({ ...p, error: '' }))} />}
+
+              {/* Per-credit-memo detailed results */}
+              {cm.createResults?.results?.length > 0 && (
+                <div className="overflow-x-auto rounded-lg border border-gray-200">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 text-gray-500 uppercase">
+                      <tr>
+                        <th className="px-3 py-2 text-left">#</th>
+                        <th className="px-3 py-2 text-left">Cross Ref</th>
+                        <th className="px-3 py-2 text-left">Credit Memo #</th>
+                        <th className="px-3 py-2 text-left">Status</th>
+                        <th className="px-3 py-2 text-left">Details</th>
+                        <th className="px-3 py-2 text-left">Payload Sent</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {cm.createResults.results.map((r) => (
+                        <tr key={r.index} className={`hover:bg-gray-50 ${r.status === 'FAILED' ? 'bg-red-50' : ''}`}>
+                          <td className="px-3 py-2 text-gray-400">{r.index + 1}</td>
+                          <td className="px-3 py-2 font-mono text-gray-600">{r.crossReference || '—'}</td>
+                          <td className="px-3 py-2 font-mono font-semibold text-blue-700">{r.creditMemoNumber || '—'}</td>
+                          <td className="px-3 py-2">
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                              r.status === 'SUCCESS' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                            }`}>
+                              {r.status === 'SUCCESS' ? '✓ Created' : '✗ Failed'}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2 text-gray-500 max-w-xs">
+                            {r.status === 'FAILED'
+                              ? <span className="text-red-600 break-words" title={r.message || ''}>{r.message || 'Unknown error'}</span>
+                              : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-gray-500">
+                            {r.payloadSent ? (
+                              <details className="cursor-pointer">
+                                <summary className="text-blue-600 hover:underline select-none">View JSON</summary>
+                                <pre className="mt-1 max-h-64 max-w-md overflow-auto rounded bg-gray-900 p-2 text-[10px] leading-tight text-green-200 whitespace-pre-wrap break-all">
+                                  {JSON.stringify(r.payloadSent, null, 2)}
+                                </pre>
+                              </details>
+                            ) : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>

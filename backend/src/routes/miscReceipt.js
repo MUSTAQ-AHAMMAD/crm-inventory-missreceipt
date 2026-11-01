@@ -10,7 +10,7 @@
 
 const express = require('express');
 const multer = require('multer');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireModule } = require('../middleware/auth');
 const { activityLogger } = require('../middleware/activityLogger');
 const {
   previewXml,
@@ -52,7 +52,7 @@ router.get('/template', downloadTemplate);
 
 // ── Protected routes (JWT auth + activity logging) ──────────────────────
 
-router.use(authenticate, activityLogger);
+router.use(authenticate, requireModule('receipts'), activityLogger);
 
 /**
  * @swagger

@@ -21,6 +21,9 @@ model User {
   email        String   @unique
   passwordHash String
   role         String   @default("USER")
+  // JSON array of module keys the user may access (see src/config/modules.js).
+  // NULL = full access (legacy users and admins); "[]" = no module access.
+  modules      String?
   isActive     Boolean  @default(true)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -237,6 +240,10 @@ model FusionSalesMetadata {
   businessUnit         String
   txnSource            String
   txnType              String
+  // Per-brand Credit Memo transaction type (Creation Sign = Negative/Any) used to
+  // route negative-/zero-total groups so Oracle does not reject them with AR-855286.
+  // Nullable: when unset, such groups are kept separate and not auto-pushed.
+  txnTypeCreditMemo    String?
   rateIsCorporate      String
   recActivityNameBank  String
   subinventory         String

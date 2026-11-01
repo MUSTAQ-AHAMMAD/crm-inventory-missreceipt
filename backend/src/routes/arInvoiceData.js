@@ -11,7 +11,7 @@
 
 const express = require('express');
 const multer = require('multer');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireModule } = require('../middleware/auth');
 const { activityLogger } = require('../middleware/activityLogger');
 const {
   previewCsvPayload,
@@ -37,8 +37,27 @@ const csvUpload = multer({
   },
 });
 
+/**
+ * @swagger
+ * /ar-invoice-data/template:
+ *   get:
+ *     tags: [ARInvoiceData]
+ *     summary: Download CSV template for AR invoice data
+ *     responses:
+ *       200:
+ *         description: CSV template file
+ *         content:
+ *           text/csv:
+ *             schema:
+ *               type: string
+ */
+// Public: the template is opened via window.open (no auth header), so it must
+// be registered before the authenticate middleware. It exposes only column
+// headers and example values — no sensitive data.
+router.get('/template', downloadTemplate);
+
 // ── Protected routes (JWT auth + activity logging) ──────────────────────
-router.use(authenticate, activityLogger);
+router.use(authenticate, requireModule('ar-invoice'), activityLogger);
 
 /**
  * @swagger
@@ -174,21 +193,5 @@ router.post('/generate-payload', generatePayload);
  *         description: Batch deleted successfully
  */
 router.delete('/batch/:uploadBatchId', deleteBatch);
-
-/**
- * @swagger
- * /ar-invoice-data/template:
- *   get:
- *     tags: [ARInvoiceData]
- *     summary: Download CSV template for AR invoice data
- *     responses:
- *       200:
- *         description: CSV template file
- *         content:
- *           text/csv:
- *             schema:
- *               type: string
- */
-router.get('/template', downloadTemplate);
 
 module.exports = router;

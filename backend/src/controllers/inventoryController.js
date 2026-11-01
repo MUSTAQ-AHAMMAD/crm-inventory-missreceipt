@@ -3,6 +3,7 @@
  * Handles CSV parsing, Oracle REST API calls, and result persistence.
  */
 
+const path = require('path');
 const { parse } = require('csv-parse/sync');
 const axios = require('axios');
 const prisma = require('../services/prisma');
@@ -139,6 +140,175 @@ function normalizeRow(row) {
 }
 
 /**
+ * Maps the Oracle FBDI "Inventory Transaction Import" column headers (used by
+ * the "Online" upload) to the canonical field names shared with the Normal
+ * pipeline. Keys are the normalized header (leading "*" and surrounding
+ * whitespace stripped, lowercased) — see normalizeHeaderKey.
+ *
+ * Unlike the Normal path, the Online file also carries the OrganizationName
+ * and the Oracle "fixed" fields (SourceCode, SourceHeaderId, SourceLineId,
+ * TransactionMode, UseCurrentCost) as columns, so they are mapped here too.
+ */
+const ONLINE_COLUMN_ALIASES = {
+  'organization_name': 'OrganizationName',
+  'item_number': 'ItemNumber',
+  'subinventory_code': 'SubinventoryCode',
+  'transaction_quantity': 'TransactionQuantity',
+  'transaction_uom': 'TransactionUnitOfMeasure',
+  'transaction_unit_of_measure': 'TransactionUnitOfMeasure',
+  'transaction_date': 'TransactionDate',
+  'transaction_type_name': 'TransactionTypeName',
+  'transaction_reference': 'TransactionReference',
+  'source_code': 'SourceCode',
+  'source_header_id': 'SourceHeaderId',
+  'source_line_id': 'SourceLineId',
+  'transaction_mode': 'TransactionMode',
+  'use_current_cost': 'UseCurrentCostFlag',
+};
+
+/**
+ * Normalizes a column header for alias lookup: strips a leading "*" (used in
+ * the Oracle template to mark required columns) and surrounding whitespace,
+ * then lowercases. Harmless for Normal CSV headers, which have no asterisks.
+ */
+function normalizeHeaderKey(key) {
+  return String(key ?? '').trim().replace(/^\*\s*/, '').trim().toLowerCase();
+}
+
+/**
+ * Returns the value of an Oracle FBDI column (by its normalized header name)
+ * from a raw parsed row, regardless of asterisks/spacing in the header.
+ */
+function findFbdiValue(row, normalizedHeader) {
+  for (const [key, value] of Object.entries(row)) {
+    if (normalizeHeaderKey(key) === normalizedHeader) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Maps the Oracle template's short UOM codes to the UOM *names* the inventory
+ * REST API resolves. The template's TRANSACTION_UOM sample is an abbreviation
+ * (e.g. "Ea"), but Oracle expects the unit's name ("Each") — the same value
+ * the working Normal uploads send. Unknown values pass through unchanged so a
+ * full name typed directly (e.g. "Each", "Box") still works.
+ */
+const ONLINE_UOM_ALIASES = {
+  'ea': 'Each',
+  'each': 'Each',
+  'eaches': 'Each',
+};
+
+function normalizeUom(value) {
+  const trimmed = (value == null ? '' : String(value)).trim();
+  if (!trimmed) return '';
+  return ONLINE_UOM_ALIASES[trimmed.toLowerCase()] || trimmed;
+}
+
+/**
+ * Oracle templates may export TRANSACTION_DATE as an Excel serial number
+ * (e.g. 46266) instead of a formatted date. When the value is a bare integer
+ * in a plausible serial range, convert it to a YYYY-MM-DD string so the shared
+ * date parser (formatDateToISO) can handle it. Otherwise the value is returned
+ * unchanged for normal date-string parsing.
+ */
+function maybeExcelSerialToDate(value) {
+  const s = String(value ?? '').trim();
+  // Pure number with no date separators, in a sane Excel-serial window
+  // (~1954–2119). Real date strings contain "/" or "-" and are left alone.
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Number(s);
+    if (n >= 20000 && n <= 80000) {
+      // Excel's day 0 is 1899-12-30 (handles the 1900 leap-year bug for
+      // dates after 1900-03-01, which covers all plausible inputs here).
+      const ms = Date.UTC(1899, 11, 30) + Math.round(n) * 86400000;
+      const d = new Date(ms);
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+    }
+  }
+  return value;
+}
+
+/**
+ * Builds the Oracle DistributionAccountId from the FBDI segment columns
+ * DST_SEGMENT1..DST_SEGMENT7, joined with "-" in order. Values are read by
+ * normalized header so asterisks/spacing in the template headers don't matter.
+ * Returns an empty string when every segment is blank (e.g. Normal uploads,
+ * which carry no DST_SEGMENT columns), so no DistributionAccountId is sent.
+ */
+function buildDistributionAccountId(row) {
+  const segments = [];
+  let hasValue = false;
+  for (let i = 1; i <= 7; i += 1) {
+    const raw = findFbdiValue(row, `dst_segment${i}`);
+    const value = (raw == null ? '' : String(raw)).trim();
+    if (value) hasValue = true;
+    segments.push(value);
+  }
+  return hasValue ? segments.join('-') : '';
+}
+
+/**
+ * Normalizes a parsed row from the "Online" (Oracle FBDI) CSV by mapping the
+ * FBDI column headers to the canonical field names used by the pipeline.
+ * The first non-empty value wins when two headers map to the same field
+ * (e.g. TRANSACTION_UOM is preferred over TRANSACTION_UNIT_OF_MEASURE).
+ * Original keys are preserved so no data is lost. The original row is not
+ * mutated; a new object is returned.
+ */
+function normalizeOnlineRow(row) {
+  const normalized = {};
+  for (const [key, value] of Object.entries(row)) {
+    const canonical = ONLINE_COLUMN_ALIASES[normalizeHeaderKey(key)];
+    if (canonical) {
+      const curEmpty = normalized[canonical] == null || String(normalized[canonical]).trim() === '';
+      const valEmpty = value == null || String(value).trim() === '';
+      if (curEmpty && !valEmpty) {
+        normalized[canonical] = value;
+      } else if (!(canonical in normalized)) {
+        normalized[canonical] = value ?? '';
+      }
+    }
+    // Always keep the original key so no data is lost
+    if (!(key in normalized)) {
+      normalized[key] = value;
+    }
+  }
+  // Resolve the UOM to a name Oracle accepts. Prefer the full-name column
+  // (TRANSACTION_UNIT_OF_MEASURE) over the short code (TRANSACTION_UOM), and
+  // translate known codes (e.g. "Ea" → "Each"). Oracle rejects the raw code
+  // with [INV_INUOM_INVALID_UOM]; the Normal flow proves the name resolves.
+  const resolvedUom = normalizeUom(findFbdiValue(row, 'transaction_unit_of_measure'))
+    || normalizeUom(findFbdiValue(row, 'transaction_uom'));
+  if (resolvedUom) {
+    normalized.TransactionUnitOfMeasure = resolvedUom;
+  }
+
+  // Oracle may export the date as an Excel serial — normalize it to YYYY-MM-DD.
+  if (normalized.TransactionDate != null) {
+    normalized.TransactionDate = maybeExcelSerialToDate(normalized.TransactionDate);
+  }
+
+  // Build the distribution account from the seven FBDI segment columns
+  // (DST_SEGMENT1..DST_SEGMENT7), joined with "-" to match the account format
+  // Oracle expects (e.g. "01-000-1410-0000-000-0000-0000"). Positions are
+  // preserved so each segment stays in its slot; the field is only set when at
+  // least one segment carries a value.
+  const distributionAccountId = buildDistributionAccountId(row);
+  if (distributionAccountId) {
+    normalized.DistributionAccountId = distributionAccountId;
+  }
+  // Force online processing. The inventoryStagedTransactions REST API only
+  // posts the transaction immediately when TransactionMode is "1" (online).
+  // The template's TRANSACTION_MODE sample value (2/3 = background) is accepted
+  // (ProcessStatus 1) but leaves the row in the interface with a null
+  // TransactionHeaderId — never processed into inventory, so it never appears
+  // in Oracle. Override it so Online posts the same way as the Normal flow.
+  normalized.TransactionMode = '1';
+  return normalized;
+}
+
+/**
  * Validates a parsed CSV row and returns an error message if invalid.
  * Returns null when the row is valid.
  *
@@ -149,7 +319,12 @@ function normalizeRow(row) {
  *  - Missing subinventory (tries to extract from TransactionReference)
  *  - Missing TransactionUnitOfMeasure (UoM)
  */
-function validateRow(row) {
+function validateRow(row, { requireOrg = false } = {}) {
+  // Online uploads carry OrganizationName per row (Normal supplies it via a
+  // form field, validated separately in bulkUpload).
+  if (requireOrg && (!row.OrganizationName || String(row.OrganizationName).trim() === '')) {
+    return 'Empty organization name';
+  }
   if (!row.ItemNumber || row.ItemNumber.trim() === '') {
     return MISSING_BARCODE_ERROR;
   }
@@ -214,7 +389,9 @@ function cleanReference(ref) {
  * @returns {{ value?: string, error?: string }} ISO 8601 formatted timestamp or error
  */
 function formatDateToISO(dateStr) {
-  const raw = String(dateStr ?? '').trim();
+  // Accept Excel serial dates (e.g. from the Oracle "Online" template) by
+  // converting them to YYYY-MM-DD before the string parsing below.
+  const raw = String(maybeExcelSerialToDate(dateStr) ?? '').trim();
   if (!raw) return { error: 'Empty transaction date' };
 
   // Use only the date part before any whitespace or time separator
@@ -325,8 +502,21 @@ function mapRowToPayload(row, organizationName) {
 
   const txRef = cleanReference(row.TransactionReference);
 
-  return {
-    OrganizationName: organizationName,
+  // OrganizationName: Normal supplies it via the form field (organizationName);
+  // Online carries it per row. Prefer the form value, fall back to the row.
+  const org = (organizationName && organizationName.trim()) || row.OrganizationName?.trim() || '';
+
+  // Returns the trimmed row value when present, otherwise the default.
+  // Normal rows have none of these columns, so they get the fixed defaults
+  // below (matching the working Python reference script). Online rows carry
+  // them as columns and override the defaults.
+  const valueOr = (value, fallback) => {
+    const trimmed = (value == null ? '' : String(value)).trim();
+    return trimmed !== '' ? trimmed : fallback;
+  };
+
+  const payload = {
+    OrganizationName: org,
     TransactionTypeName: row.TransactionTypeName?.trim(),
     ItemNumber: row.ItemNumber?.trim(),
     SubinventoryCode: subinventory,
@@ -336,18 +526,36 @@ function mapRowToPayload(row, organizationName) {
     ExternalSystemTransactionReference: txRef,
     TransactionUnitOfMeasure: uom,
     // Fixed fields required by the Oracle inventoryStagedTransactions REST API.
-    // Values match the working Python reference script provided by the client.
-    SourceHeaderId: '1',
-    SourceLineId: '0',
-    TransactionMode: '1',
-    SourceCode: 'SERVICE',
-    UseCurrentCostFlag: 'true',
+    // Defaults match the working Python reference script; the Online upload
+    // can override each one via the corresponding template column.
+    SourceHeaderId: valueOr(row.SourceHeaderId, '1'),
+    SourceLineId: valueOr(row.SourceLineId, '0'),
+    TransactionMode: valueOr(row.TransactionMode, '1'),
+    SourceCode: valueOr(row.SourceCode, 'SERVICE'),
+    UseCurrentCostFlag: valueOr(row.UseCurrentCostFlag, 'true'),
   };
+
+  // AccountCombination is the segment string built from the Online template's
+  // DST_SEGMENT1..7 columns (see normalizeOnlineRow). The staging resource has
+  // no "Account" attribute (that's read-only on inventoryCompletedTransactions);
+  // the writable segment field is AccountCombination. Only Online rows carry it.
+  const distributionAccountId = row.DistributionAccountId?.trim();
+  if (distributionAccountId) {
+    payload.AccountCombination = distributionAccountId;
+  }
+
+  return payload;
 }
 
 // Number of Oracle API requests to send in parallel per batch.
 // Increase for faster throughput; decrease if Oracle rate-limits.
 const CONCURRENCY = 10;
+
+// Upload IDs for which the user has requested cancellation. The background
+// processing loop checks this set between batches and stops early. Kept in
+// memory because processing runs in the same Node process as the request that
+// starts it (fire-and-forget); the flag is cleared once the loop stops.
+const cancelledUploads = new Set();
 
 // How many success / failure records to accumulate before flushing to DB.
 const DB_FLUSH_SIZE = 500;
@@ -455,7 +663,7 @@ function stringifyResponseBody(body, fallback = '') {
  * records to the database periodically, and updates progress after each batch
  * so the frontend can poll efficiently.
  */
-async function processUploadRows(upload, records, organizationName) {
+async function processUploadRows(upload, records, organizationName, { requireOrg = false } = {}) {
   let successCount = 0;
   let failureCount = 0;
   let pendingSuccesses = [];
@@ -552,7 +760,7 @@ async function processUploadRows(upload, records, organizationName) {
 
   /** Process a single row: validate, map, call Oracle API. */
   async function processRow(row, rowNumber) {
-    const validationError = validateRow(row);
+    const validationError = validateRow(row, { requireOrg });
     if (validationError) {
       if (validationError === MISSING_BARCODE_ERROR) {
         console.warn(`[Inventory] Upload #${upload.id} Row ${rowNumber} SKIPPED: Missing barcode`);
@@ -635,75 +843,92 @@ async function processUploadRows(upload, records, organizationName) {
     }
   }
 
-  // Process rows in concurrent batches of CONCURRENCY
-  for (let batchStart = 0; batchStart < records.length; batchStart += CONCURRENCY) {
-    const batchEnd = Math.min(batchStart + CONCURRENCY, records.length);
-    const batch = records.slice(batchStart, batchEnd);
-
-    const batchResults = await Promise.all(
-      batch.map((row, idx) => processRow(row, batchStart + idx + 2)) // +2: 1-based + header row
-    );
-
-    for (const result of batchResults) {
-      if (result.type === 'success') {
-        successCount++;
-        pendingSuccesses.push({
-          uploadId: upload.id,
-          rowNumber: result.rowNumber,
-          rawData: sanitizeForDatabase(result.rawData),
-          responseBody: sanitizeForDatabase(result.responseBody, 50000) || null,
-          responseStatus: result.responseStatus ?? null,
+  try {
+    // Process rows in concurrent batches of CONCURRENCY
+    for (let batchStart = 0; batchStart < records.length; batchStart += CONCURRENCY) {
+      // Stop early if the user requested cancellation. Persist whatever has
+      // been processed so far and mark the upload CANCELLED.
+      if (cancelledUploads.has(upload.id)) {
+        await flushRecords();
+        await prisma.inventoryUpload.update({
+          where: { id: upload.id },
+          data: { successCount, failureCount, status: 'CANCELLED' },
         });
-        seenPayloads.add(result.rawData);
-      } else if (result.type === 'skip-duplicate') {
-        // Count as success for this upload to keep progress accurate,
-        // but do not create another success record.
-        successCount++;
-      } else if (result.type === 'skip-missing-barcode') {
-        // Skip rows with missing barcodes without recording a failure
-        successCount++;
-      } else {
-        failureCount++;
-        pendingFailures.push({
-          uploadId: upload.id,
-          rowNumber: result.rowNumber,
-          rawData: sanitizeForDatabase(result.rawData),
-          errorMessage: sanitizeForDatabase(result.error, 10000),
-          responseBody: sanitizeForDatabase(result.responseBody, 50000) || null,
-          responseStatus: result.responseStatus ?? null,
-          oracleErrorCode: result.oracleErrorCode || null,
-          oracleProcessStatus: result.oracleProcessStatus || null,
-        });
+        console.log(`[Inventory] Upload #${upload.id} CANCELLED by user | Processed: ${successCount + failureCount}/${records.length} | Success: ${successCount} | Failed: ${failureCount}`);
+        return;
       }
+
+      const batchEnd = Math.min(batchStart + CONCURRENCY, records.length);
+      const batch = records.slice(batchStart, batchEnd);
+
+      const batchResults = await Promise.all(
+        batch.map((row, idx) => processRow(row, batchStart + idx + 2)) // +2: 1-based + header row
+      );
+
+      for (const result of batchResults) {
+        if (result.type === 'success') {
+          successCount++;
+          pendingSuccesses.push({
+            uploadId: upload.id,
+            rowNumber: result.rowNumber,
+            rawData: sanitizeForDatabase(result.rawData),
+            responseBody: sanitizeForDatabase(result.responseBody, 50000) || null,
+            responseStatus: result.responseStatus ?? null,
+          });
+          seenPayloads.add(result.rawData);
+        } else if (result.type === 'skip-duplicate') {
+          // Count as success for this upload to keep progress accurate,
+          // but do not create another success record.
+          successCount++;
+        } else if (result.type === 'skip-missing-barcode') {
+          // Skip rows with missing barcodes without recording a failure
+          successCount++;
+        } else {
+          failureCount++;
+          pendingFailures.push({
+            uploadId: upload.id,
+            rowNumber: result.rowNumber,
+            rawData: sanitizeForDatabase(result.rawData),
+            errorMessage: sanitizeForDatabase(result.error, 10000),
+            responseBody: sanitizeForDatabase(result.responseBody, 50000) || null,
+            responseStatus: result.responseStatus ?? null,
+            oracleErrorCode: result.oracleErrorCode || null,
+            oracleProcessStatus: result.oracleProcessStatus || null,
+          });
+        }
+      }
+
+      // Flush to DB when buffers are large enough to avoid memory pressure
+      if (pendingSuccesses.length >= DB_FLUSH_SIZE || pendingFailures.length >= DB_FLUSH_SIZE) {
+        await flushRecords();
+      }
+
+      // Update progress counters after each batch (not each row)
+      await prisma.inventoryUpload.update({
+        where: { id: upload.id },
+        data: { successCount, failureCount },
+      });
     }
 
-    // Flush to DB when buffers are large enough to avoid memory pressure
-    if (pendingSuccesses.length >= DB_FLUSH_SIZE || pendingFailures.length >= DB_FLUSH_SIZE) {
-      await flushRecords();
-    }
+    // Flush any remaining buffered records
+    await flushRecords();
 
-    // Update progress counters after each batch (not each row)
+    // Update final upload status
+    const finalStatus = failureCount === 0 ? 'COMPLETED' : successCount === 0 ? 'FAILED' : 'PARTIAL';
     await prisma.inventoryUpload.update({
       where: { id: upload.id },
-      data: { successCount, failureCount },
+      data: {
+        successCount,
+        failureCount,
+        status: finalStatus,
+      },
     });
+
+    console.log(`[Inventory] Upload #${upload.id} COMPLETE | Total: ${records.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus}`);
+  } finally {
+    // Always clear the cancellation flag so the Set does not grow unbounded.
+    cancelledUploads.delete(upload.id);
   }
-
-  // Flush any remaining buffered records
-  await flushRecords();
-
-  // Update final upload status
-  const finalStatus = failureCount === 0 ? 'COMPLETED' : successCount === 0 ? 'FAILED' : 'PARTIAL';
-  await prisma.inventoryUpload.update({
-    where: { id: upload.id },
-    data: {
-      successCount,
-      failureCount,
-      status: finalStatus,
-    },
-  });
-
-  console.log(`[Inventory] Upload #${upload.id} COMPLETE | Total: ${records.length} | Success: ${successCount} | Failed: ${failureCount} | Status: ${finalStatus}`);
 }
 
 /**
@@ -718,13 +943,30 @@ async function bulkUpload(req, res, next) {
       return res.status(400).json({ error: 'CSV file is required.' });
     }
 
+    // Upload mode: "normal" (default) uses the form-supplied Organization Name
+    // and the Odoo/Vend column aliases; "online" reads the Oracle FBDI template
+    // columns (OrganizationName and the Oracle fixed fields come from the file).
+    const mode = String(req.body.mode || 'normal').toLowerCase() === 'online' ? 'online' : 'normal';
+
     const organizationName = req.body.organizationName?.trim();
-    if (!organizationName) {
+    if (mode === 'normal' && !organizationName) {
       return res.status(400).json({ error: 'Organization name is required.' });
     }
 
-    // Parse the CSV file buffer
-    const records = parse(req.file.buffer, {
+    // Parse the CSV file buffer. For Online, the Oracle template can carry
+    // title rows ("Inventory Transactions", "* Required") above the header row,
+    // so skip down to the first line that looks like the FBDI header.
+    let csvBuffer = req.file.buffer;
+    if (mode === 'online') {
+      const text = csvBuffer.toString('utf8');
+      const lines = text.split(/\r?\n/);
+      const headerIdx = lines.findIndex((l) => /\*?\s*ORGANIZATION_NAME|ITEM_NUMBER/i.test(l));
+      if (headerIdx > 0) {
+        csvBuffer = Buffer.from(lines.slice(headerIdx).join('\n'), 'utf8');
+      }
+    }
+
+    const records = parse(csvBuffer, {
       columns: true,       // use first row as headers
       skip_empty_lines: true,
       trim: true,
@@ -737,7 +979,16 @@ async function bulkUpload(req, res, next) {
 
     // Normalize column names so alternative headers are accepted
     for (let i = 0; i < records.length; i++) {
-      records[i] = normalizeRow(records[i]);
+      records[i] = mode === 'online' ? normalizeOnlineRow(records[i]) : normalizeRow(records[i]);
+    }
+
+    // The upload record stores a single organization label. For Online, the
+    // organization lives per row, so record the first non-empty one (or a
+    // placeholder) for display in the history table.
+    let uploadOrg = organizationName || '';
+    if (mode === 'online') {
+      const firstOrg = records.find((r) => r.OrganizationName && String(r.OrganizationName).trim() !== '');
+      uploadOrg = firstOrg ? String(firstOrg.OrganizationName).trim() : 'Online';
     }
 
     // Create the upload record in PROCESSING state
@@ -745,7 +996,7 @@ async function bulkUpload(req, res, next) {
       data: {
         userId: req.user.id,
         filename: req.file.originalname,
-        organizationName,
+        organizationName: uploadOrg,
         totalRecords: records.length,
         status: 'PROCESSING',
       },
@@ -761,8 +1012,12 @@ async function bulkUpload(req, res, next) {
       status: 'PROCESSING',
     });
 
-    // Process rows in the background (fire and forget)
-    processUploadRows(upload, records, organizationName).catch((err) => {
+    // Process rows in the background (fire and forget). For Online, pass an
+    // empty organization so mapRowToPayload falls back to each row's own
+    // OrganizationName, and require it during validation.
+    processUploadRows(upload, records, mode === 'online' ? '' : organizationName, {
+      requireOrg: mode === 'online',
+    }).catch((err) => {
       console.error(`[Inventory] Upload #${upload.id} BACKGROUND ERROR:`, err);
       prisma.inventoryUpload.update({
         where: { id: upload.id },
@@ -1052,6 +1307,23 @@ function downloadTemplate(_req, res) {
   return res.send(csv);
 }
 
+// Filename of the committed Oracle FBDI template served for Online uploads.
+const ONLINE_TEMPLATE_FILENAME = 'accInventoryTransactionImportTemplate.xlsm';
+
+/**
+ * GET /api/inventory/template/online
+ * Returns the Oracle FBDI "Inventory Transaction Import" template (.xlsm)
+ * used for the Online upload flow. The file is committed under backend/assets.
+ */
+function downloadOnlineTemplate(_req, res) {
+  const filePath = path.join(__dirname, '..', '..', 'assets', ONLINE_TEMPLATE_FILENAME);
+  res.download(filePath, ONLINE_TEMPLATE_FILENAME, (err) => {
+    if (err && !res.headersSent) {
+      res.status(404).json({ error: 'Online template is not available on the server.' });
+    }
+  });
+}
+
 /**
  * GET /api/inventory/uploads/:id/progress
  * Returns current processing progress for a specific upload.
@@ -1079,6 +1351,47 @@ async function getUploadProgress(req, res, next) {
       failureCount: upload.failureCount,
       status: upload.status,
       organizationName: upload.organizationName,
+    });
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * POST /api/inventory/uploads/:id/cancel
+ * Requests cancellation of an in-progress upload. Sets an in-memory flag that
+ * the background processing loop checks between batches; already-processed rows
+ * are kept and the upload is marked CANCELLED once the loop stops.
+ */
+async function cancelUpload(req, res, next) {
+  try {
+    const uploadId = parseInt(req.params.id);
+    if (isNaN(uploadId)) {
+      return res.status(400).json({ error: 'Invalid upload ID.' });
+    }
+
+    const upload = await prisma.inventoryUpload.findUnique({ where: { id: uploadId } });
+    if (!upload) {
+      return res.status(404).json({ error: 'Upload not found.' });
+    }
+    if (req.user.role === 'USER' && upload.userId !== req.user.id) {
+      return res.status(403).json({ error: 'Access denied.' });
+    }
+
+    // Only in-flight uploads can be cancelled.
+    if (upload.status !== 'PROCESSING' && upload.status !== 'PENDING') {
+      return res.status(409).json({
+        error: `Upload is already ${upload.status} and can no longer be cancelled.`,
+      });
+    }
+
+    cancelledUploads.add(uploadId);
+    console.log(`[Inventory] Upload #${uploadId} cancellation requested by user ${req.user.id}`);
+
+    return res.json({
+      uploadId,
+      status: 'CANCELLING',
+      message: 'Cancellation requested. Processing will stop shortly.',
     });
   } catch (err) {
     next(err);
@@ -1387,4 +1700,10 @@ async function exportFailures(req, res, next) {
   }
 }
 
-module.exports = { bulkUpload, listUploads, getFailures, retryUpload, downloadTemplate, getUploadProgress, getUploadDetail, getSuccessRecords, getDebugLog, exportFailures };
+module.exports = {
+  bulkUpload, listUploads, getFailures, retryUpload, downloadTemplate,
+  downloadOnlineTemplate, getUploadProgress, getUploadDetail, getSuccessRecords,
+  getDebugLog, exportFailures, cancelUpload,
+  // Exported for unit testing of the pure mapping/validation helpers.
+  _test: { normalizeRow, normalizeOnlineRow, mapRowToPayload, validateRow, formatDateToISO, maybeExcelSerialToDate, normalizeUom },
+};

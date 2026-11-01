@@ -3,8 +3,9 @@
  * Sets up React Router and applies the AuthContext to all routes.
  */
 
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { PATH_MODULE, canAccess } from './constants/modules'
 import Layout from './components/layout/Layout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
@@ -13,6 +14,7 @@ import InventoryTemplateGenerationPage from './pages/InventoryTemplateGeneration
 import MiscReceiptPage from './pages/MiscReceiptPage'
 import StandardReceiptPage from './pages/StandardReceiptPage'
 import ApplyReceiptPage from './pages/ApplyReceiptPage'
+import ApplyCreditMemoPage from './pages/ApplyCreditMemoPage'
 import ArInvoicePage from './pages/ArInvoicePage'
 import ArInvoiceDataPage from './pages/ArInvoiceDataPage'
 import ArInvoiceDetailPage from './pages/ArInvoiceDetailPage'
@@ -45,6 +47,19 @@ function AdminRoute({ children }) {
   return children
 }
 
+/**
+ * Layout gate – redirects to the dashboard when the current path belongs to a
+ * module the user cannot access. Paths not in PATH_MODULE (dashboard, reports,
+ * help, admin) are always allowed.
+ */
+function ModuleGate() {
+  const { user } = useAuth()
+  const { pathname } = useLocation()
+  const moduleKey = PATH_MODULE[pathname.split('/')[1] || '']
+  if (moduleKey && !canAccess(user, moduleKey)) return <Navigate to="/" replace />
+  return <Outlet />
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -62,12 +77,14 @@ export default function App() {
               </PrivateRoute>
             }
           >
+            <Route element={<ModuleGate />}>
             <Route index element={<DashboardPage />} />
             <Route path="inventory" element={<InventoryPage />} />
             <Route path="inventory-template" element={<InventoryTemplateGenerationPage />} />
             <Route path="misc-receipt" element={<MiscReceiptPage />} />
             <Route path="standard-receipt" element={<StandardReceiptPage />} />
             <Route path="apply-receipt" element={<ApplyReceiptPage />} />
+            <Route path="apply-credit-memo" element={<ApplyCreditMemoPage />} />
             <Route path="ar-invoice" element={<ArInvoicePage />} />
             <Route path="ar-invoice-data" element={<ArInvoiceDataPage />} />
             <Route path="ar-invoice/uploads/:uploadId" element={<ArInvoiceDetailPage />} />
@@ -91,6 +108,7 @@ export default function App() {
             <Route path="failures/:uploadId" element={<FailureDetailsPage />} />
             <Route path="receipt-upload/:type/:uploadId" element={<ReceiptUploadDetailPage />} />
             <Route path="help" element={<HelpPage />} />
+            </Route>
           </Route>
 
           {/* Fallback */}

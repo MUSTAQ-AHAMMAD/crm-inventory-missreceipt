@@ -141,6 +141,9 @@ export default function VendInvoicePage() {
             <p className="text-xs text-gray-600">
               Date: {payload.TransactionDate} | CrossRef: {payload.CrossReference} | Lines: {payload.receivablesInvoiceLines.length}
             </p>
+            <p className="text-xs text-gray-500">
+              Type: <span className="font-mono">{payload.TransactionType}</span> | Source: <span className="font-mono">{payload.TransactionSource}</span>
+            </p>
           </div>
           <button
             onClick={() => {
@@ -419,16 +422,26 @@ export default function VendInvoicePage() {
             </div>
           )}
 
-          {/* ── Negative Payloads ── */}
+          {/* ── Negative / Credit-Memo Payloads ── */}
           {result.negativePayloads?.length > 0 && (
             <div className="space-y-3">
-              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
-                <p className="font-semibold text-red-700">
-                  ⚠️ Negative Payloads ({result.negativePayloads.length}) — Cannot be processed in AR Invoice
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                <p className="font-semibold text-amber-800">
+                  ⚠️ Credit-Memo Payloads ({result.negativePayloads.length}) — pushed separately
                 </p>
-                <p className="text-xs text-red-600 mt-1">
-                  These invoices have a negative total amount. Review the sales lines data before processing.
+                <p className="text-xs text-amber-700 mt-1">
+                  These groups have a zero or negative net total, so they cannot go in as invoices
+                  (Oracle rejects a non-positive invoice total with AR-855286). They are stamped with
+                  the per-brand Credit Memo transaction type and kept separate for you to review and
+                  push explicitly.
                 </p>
+                {result.stats?.negativeMissingCreditMemoType > 0 && (
+                  <p className="text-xs font-medium text-red-600 mt-2">
+                    ⛔ {result.stats.negativeMissingCreditMemoType} of these have no Credit Memo type
+                    mapped in metadata — they still carry the invoice type and will be rejected if
+                    pushed. Add a Credit Memo type for the brand before pushing.
+                  </p>
+                )}
               </div>
               {result.negativePayloads.map((payload, index) => (
                 <PayloadCard key={index} payload={payload} index={index} isNegative={true} />

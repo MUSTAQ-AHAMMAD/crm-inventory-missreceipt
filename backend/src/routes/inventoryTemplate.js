@@ -6,7 +6,7 @@
 
 const express = require('express');
 const multer = require('multer');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireModule } = require('../middleware/auth');
 const { activityLogger } = require('../middleware/activityLogger');
 const { previewTemplate, downloadTemplate } = require('../controllers/inventoryTemplateController');
 
@@ -24,7 +24,7 @@ const upload = multer({
   },
 });
 
-router.use(authenticate, activityLogger);
+router.use(authenticate, requireModule('inventory'), activityLogger);
 
 router.post('/preview', upload.single('file'), previewTemplate);
 router.post('/download', upload.single('file'), downloadTemplate);

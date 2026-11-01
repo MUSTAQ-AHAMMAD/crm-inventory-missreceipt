@@ -23,6 +23,7 @@ const inventoryTemplateRoutes = require('./routes/inventoryTemplate');
 const miscReceiptRoutes = require('./routes/miscReceipt');
 const standardReceiptRoutes = require('./routes/standardReceipt');
 const applyReceiptRoutes = require('./routes/applyReceipt');
+const applyCreditMemoRoutes = require('./routes/applyCreditMemo');
 const arInvoiceRoutes = require('./routes/arInvoice');
 const arInvoiceDataRoutes = require('./routes/arInvoiceData');
 const vendInvoiceRoutes = require('./routes/vendInvoice');
@@ -41,10 +42,16 @@ const PORT = process.env.PORT || 4000;
 
 // ─── Global Middleware ────────────────────────────────────────────────────────
 
-// CORS – allow requests from the configured frontend origin
+// CORS – allow requests from the configured frontend origin(s).
+// FRONTEND_URL may list several origins separated by commas (e.g. when the dev
+// server port changes), each allowed.
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:3000')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: allowedOrigins,
     credentials: true,
   })
 );
@@ -91,6 +98,7 @@ app.use('/api/inventory-template', inventoryTemplateRoutes);
 app.use('/api/misc-receipt', miscReceiptRoutes);
 app.use('/api/standard-receipt', standardReceiptRoutes);
 app.use('/api/apply-receipt', applyReceiptRoutes);
+app.use('/api/apply-credit-memo', applyCreditMemoRoutes);
 app.use('/api/ar-invoice', arInvoiceRoutes);
 app.use('/api/ar-invoice-data', arInvoiceDataRoutes);
 app.use('/api/vend-invoice', vendInvoiceRoutes);

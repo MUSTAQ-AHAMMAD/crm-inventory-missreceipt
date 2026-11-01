@@ -11,7 +11,7 @@
 
 const express = require('express');
 const multer = require('multer');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, requireModule } = require('../middleware/auth');
 const { activityLogger } = require('../middleware/activityLogger');
 const {
   bulkUpload,
@@ -19,11 +19,13 @@ const {
   getFailures,
   retryUpload,
   downloadTemplate,
+  downloadOnlineTemplate,
   getUploadProgress,
   getUploadDetail,
   getSuccessRecords,
   getDebugLog,
   exportFailures,
+  cancelUpload,
 } = require('../controllers/inventoryController');
 
 const router = express.Router();
@@ -56,9 +58,24 @@ const upload = multer({
  */
 router.get('/template', downloadTemplate);
 
+/**
+ * @swagger
+ * /inventory/template/online:
+ *   get:
+ *     tags: [Inventory]
+ *     summary: Download the Oracle FBDI (.xlsm) template for Online uploads
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Excel macro-enabled template download
+ *       404:
+ *         description: Template file not present on the server
+ */
+router.get('/template/online', downloadOnlineTemplate);
+
 // ── Protected routes (JWT auth + activity logging) ──────────────────────
 
-router.use(authenticate, activityLogger);
+router.use(authenticate, requireModule('inventory'), activityLogger);
 
 /**
  * @swagger
@@ -126,6 +143,26 @@ router.get('/uploads', listUploads);
  *         description: Upload progress with totalRecords, successCount, failureCount, status
  */
 router.get('/uploads/:id/progress', getUploadProgress);
+
+/**
+ * @swagger
+ * /inventory/uploads/{id}/cancel:
+ *   post:
+ *     tags: [Inventory]
+ *     summary: Request cancellation of an in-progress upload
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Cancellation requested; processing will stop shortly
+ *       409:
+ *         description: Upload already finished and cannot be cancelled
+ */
+router.post('/uploads/:id/cancel', cancelUpload);
 
 /**
  * @swagger
